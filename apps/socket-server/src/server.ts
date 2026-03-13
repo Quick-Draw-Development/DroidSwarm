@@ -124,6 +124,7 @@ export class DroidSwarmSocketServer {
       openedAt: now,
       lastSeenAt: now,
       metadata: {},
+      roomId: undefined,
     });
 
     socket.on('message', (rawMessage) => {

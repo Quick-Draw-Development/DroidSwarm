@@ -118,7 +118,8 @@ class DroidSwarmSocketServer {
       authStatus: "pending",
       openedAt: now,
       lastSeenAt: now,
-      metadata: {}
+      metadata: {},
+      roomId: void 0
     });
     socket.on("message", (rawMessage) => {
       this.handleSocketMessage(socket, rawMessage.toString());

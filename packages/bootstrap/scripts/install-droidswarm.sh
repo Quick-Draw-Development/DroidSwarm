@@ -15,6 +15,36 @@ require_value() {
   fi
 }
 
+append_path_export() {
+  local shell_name="$1"
+  local bin_dir="$2"
+  local rc_file=""
+  local export_line="export PATH=\"$bin_dir:\$PATH\""
+
+  case "$shell_name" in
+    zsh)
+      rc_file="$HOME/.zshrc"
+      ;;
+    bash)
+      if [[ -f "$HOME/.bash_profile" ]]; then
+        rc_file="$HOME/.bash_profile"
+      else
+        rc_file="$HOME/.bashrc"
+      fi
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  touch "$rc_file"
+  if ! grep -Fqx "$export_line" "$rc_file"; then
+    printf '\n%s\n' "$export_line" >>"$rc_file"
+  fi
+
+  printf '%s\n' "$rc_file"
+}
+
 github_archive_url() {
   local repo_url="$1"
   local ref="${2:-}"
@@ -160,6 +190,13 @@ fi
 chmod +x "$INSTALL_ROOT/bin/DroidSwarm" "$INSTALL_ROOT/libexec/droidswarm-daemon.sh"
 ln -sf "$INSTALL_ROOT/bin/DroidSwarm" "$BIN_DIR/DroidSwarm"
 
+PATH_UPDATE_MESSAGE="Make sure $BIN_DIR is on your PATH."
+UPDATED_RC_FILE=""
+CURRENT_SHELL_NAME="$(basename "${SHELL:-}")"
+if UPDATED_RC_FILE="$(append_path_export "$CURRENT_SHELL_NAME" "$BIN_DIR" 2>/dev/null)"; then
+  PATH_UPDATE_MESSAGE="Added $BIN_DIR to PATH in $UPDATED_RC_FILE. Open a new shell or run: export PATH=\"$BIN_DIR:\$PATH\""
+fi
+
 cat <<EOF
 Installed DroidSwarm CLI.
 
@@ -167,7 +204,7 @@ Binary: $BIN_DIR/DroidSwarm
 Install root: $INSTALL_ROOT
 Source: $SOURCE_DIR
 
-Make sure $BIN_DIR is on your PATH.
+$PATH_UPDATE_MESSAGE
 
 Next steps:
   DroidSwarm help

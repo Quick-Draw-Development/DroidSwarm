@@ -6,6 +6,10 @@ err() {
   printf 'Error: %s\n' "$*" >&2
 }
 
+info() {
+  printf '%s\n' "$*"
+}
+
 require_value() {
   local flag="$1"
   local value="${2:-}"

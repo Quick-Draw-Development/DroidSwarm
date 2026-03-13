@@ -16,6 +16,7 @@ resolve_script_path() {
 SCRIPT_PATH="$(resolve_script_path)"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 # shellcheck source=../lib/droidswarm/common.sh
 source "$ROOT_DIR/lib/droidswarm/common.sh"
 

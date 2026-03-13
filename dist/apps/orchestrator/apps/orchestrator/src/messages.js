@@ -32,7 +32,7 @@ const buildActor = (name, actorType) => ({
   actor_id: name,
   actor_name: name
 });
-const buildAgentStatusUpdate = (config, taskId, roomId, agentName, phase, statusCode, content) => ({
+const buildAgentStatusUpdate = (config, taskId, roomId, agentName, phase, statusCode, content, compression) => ({
   message_id: (0, import_node_crypto.randomUUID)(),
   project_id: config.projectId,
   room_id: roomId,
@@ -44,7 +44,8 @@ const buildAgentStatusUpdate = (config, taskId, roomId, agentName, phase, status
     phase,
     status_code: statusCode,
     content
-  }
+  },
+  compression
 });
 const buildOrchestratorStatusUpdate = (config, roomId, phase, statusCode, content, taskId) => ({
   message_id: (0, import_node_crypto.randomUUID)(),

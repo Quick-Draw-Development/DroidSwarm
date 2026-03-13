@@ -2,7 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { ChildProcess, fork } from 'node:child_process';
 
 import { TaskRegistry } from './task-registry';
-import type { CodexAgentResult, OrchestratorConfig, RequestedAgent, SpawnedAgent, TaskRecord } from './types';
+import type {
+  CodexAgentResult,
+  OrchestratorConfig,
+  RequestedAgent,
+  SpawnedAgent,
+  TaskRecord,
+} from './types';
+import { formatAgentRequestContent } from './operator-notifications';
 
 interface AgentResultMessage {
   type: 'agent_result';
@@ -44,6 +51,10 @@ export class AgentSupervisor {
     private readonly config: OrchestratorConfig,
     private readonly registry: TaskRegistry,
     private readonly entryScript: string,
+    private readonly callbacks: {
+      onAgentsAssigned?: (taskId: string, agents: SpawnedAgent[]) => void;
+      onAgentCommunication?: (taskId: string, message: string) => void;
+    } = {},
   ) {}
 
   startInitialAgents(task: TaskRecord): SpawnedAgent[] {
@@ -102,6 +113,10 @@ export class AgentSupervisor {
       });
     }
 
+    if (spawned.length > 0) {
+      this.callbacks.onAgentsAssigned?.(task.taskId, spawned);
+    }
+
     return spawned;
   }
 
@@ -137,6 +152,10 @@ export class AgentSupervisor {
         message.result.requested_agents,
         message.result.summary,
         message.result.compression?.compressed_content,
+      );
+      this.callbacks.onAgentCommunication?.(
+        task.taskId,
+        formatAgentRequestContent(message.agentName, message.result.requested_agents),
       );
     }
   }

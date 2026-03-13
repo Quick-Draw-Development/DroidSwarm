@@ -38,10 +38,14 @@ var import_agent_prompt = require("./agent-prompt");
         priority: "high",
         createdAt: "2026-03-12T12:00:00.000Z",
         createdByUserId: "alice"
-      }
+      },
+      specDroidspeak: "droidspeak rules here",
+      parentDroidspeak: "blk api-spec; next plan"
     });
     import_strict.default.match(prompt, /Planner-01/);
     import_strict.default.match(prompt, /task_id: task-1/);
     import_strict.default.match(prompt, /Role: planner/);
+    import_strict.default.match(prompt, /droidspeak rules here/);
+    import_strict.default.match(prompt, /blk api-spec/);
   });
 });

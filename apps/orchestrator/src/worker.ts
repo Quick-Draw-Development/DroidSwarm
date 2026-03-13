@@ -178,7 +178,7 @@ const runWorker = async (): Promise<void> => {
       'execution',
       result.status === 'completed' ? 'agent_completed' : 'agent_blocked',
       result.summary,
-      result.compression,
+      result.compression as unknown as string,
     ),
   );
 

@@ -72,6 +72,21 @@ const codexAgentOutputSchema = {
     },
     reason_code: {
       type: "string"
+    },
+    compression: {
+      type: "object",
+      additionalProperties: false,
+      required: ["scheme", "compressed_content"],
+      properties: {
+        scheme: {
+          type: "string",
+          const: "droidspeak-v1"
+        },
+        compressed_content: {
+          type: "string",
+          minLength: 1
+        }
+      }
     }
   }
 };

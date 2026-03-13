@@ -97,8 +97,11 @@ const runWorker = async () => {
         role: options.role,
         agentName: options.agentName,
         parentSummary: options.parentSummary,
+        parentDroidspeak: options.parentDroidspeak,
         projectId: config.projectId,
-        projectName: config.projectName
+        projectName: config.projectName,
+        specRules: config.agentRules,
+        specDroidspeak: config.droidspeakRules
       })
     });
   } catch (error) {
@@ -161,7 +164,8 @@ const runWorker = async () => {
       options.agentName,
       "execution",
       result.status === "completed" ? "agent_completed" : "agent_blocked",
-      result.summary
+      result.summary,
+      result.compression
     )
   );
   if (process.send) {

@@ -39,6 +39,7 @@ var import_messages = require("./messages");
 var import_protocol = require("./protocol");
 var import_task_registry = require("./task-registry");
 var import_task_events = require("./task-events");
+var import_operator_notifications = require("./operator-notifications");
 class DroidSwarmOrchestratorClient {
   constructor(config = (0, import_config.loadConfig)()) {
     this.config = config;
@@ -47,7 +48,11 @@ class DroidSwarmOrchestratorClient {
     this.supervisor = new import_AgentSupervisor.AgentSupervisor(
       config,
       this.registry,
-      import_node_path.default.resolve(__dirname, "main.js")
+      import_node_path.default.resolve(__dirname, "main.js"),
+      {
+        onAgentsAssigned: (taskId, agents) => this.reportAgentAssignment(taskId, agents),
+        onAgentCommunication: (taskId, message) => this.reportAgentCommunication(taskId, message)
+      }
     );
   }
   start() {
@@ -97,6 +102,10 @@ class DroidSwarmOrchestratorClient {
     if (message.project_id !== this.config.projectId || message.from.actor_name === this.config.agentName) {
       return;
     }
+    if (message.type === "status_update" && message.room_id === "operator") {
+      this.handleOperatorStatusMessage(message);
+      return;
+    }
     if (message.type === "task_created") {
       const task = (0, import_task_events.resolveTaskFromMessage)(message);
       if (!task) {
@@ -138,18 +147,28 @@ class DroidSwarmOrchestratorClient {
         )
       );
       try {
+        const instructionSections = [
+          this.config.orchestratorRules ? `Orchestrator rules:
+${this.config.orchestratorRules}
+` : void 0,
+          this.config.droidspeakRules ? `Droidspeak reference (droidspeak-v1):
+${this.config.droidspeakRules}
+` : void 0
+        ].filter(Boolean);
+        const promptParts = [
+          ...instructionSections,
+          `You are ${this.config.agentName}, the DroidSwarm orchestrator for project ${this.config.projectName}.`,
+          "Respond to the human operator message succinctly.",
+          "If the message is an instruction, acknowledge it and state the next orchestration action.",
+          "Do not fabricate task state or claim work that has not happened.",
+          "Return a structured result with no spawned agents unless the operator explicitly asks for a new task workflow.",
+          "",
+          `Operator message: ${content}`
+        ];
         const result = await (0, import_codex_runner.runCodexPrompt)({
           config: this.config,
           projectRoot: this.config.projectRoot,
-          prompt: [
-            `You are ${this.config.agentName}, the DroidSwarm orchestrator for project ${this.config.projectName}.`,
-            "Respond to the human operator message succinctly.",
-            "If the message is an instruction, acknowledge it and state the next orchestration action.",
-            "Do not fabricate task state or claim work that has not happened.",
-            "Return a structured result with no spawned agents unless the operator explicitly asks for a new task workflow.",
-            "",
-            `Operator message: ${content}`
-          ].join("\n")
+          prompt: promptParts.join("\n")
         });
         this.sendRaw((0, import_messages.buildOperatorChatResponse)(this.config, result.summary));
       } catch (error) {
@@ -161,6 +180,35 @@ class DroidSwarmOrchestratorClient {
         );
       }
     }
+  }
+  handleOperatorStatusMessage(message) {
+    const metadata = typeof message.payload.metadata === "object" && message.payload.metadata !== null ? message.payload.metadata : void 0;
+    const taskId = message.task_id ?? (typeof metadata?.task_id === "string" ? metadata.task_id : void 0);
+    if (!taskId) {
+      return;
+    }
+    const status = typeof metadata?.status === "string" ? metadata.status : void 0;
+    if (status === "review") {
+      this.sendTaskChannelUpdate(
+        taskId,
+        "operator",
+        "operator_review",
+        (0, import_operator_notifications.buildReviewAnnouncement)(message.from.actor_name)
+      );
+    }
+  }
+  reportAgentAssignment(taskId, agents) {
+    if (!agents.length) {
+      return;
+    }
+    const details = agents.map((agent) => `${agent.agentName} (${agent.role})`).join(", ");
+    this.sendTaskChannelUpdate(taskId, "execution", "agent_assigned", `Assigned agents: ${details}.`);
+  }
+  reportAgentCommunication(taskId, content) {
+    this.sendTaskChannelUpdate(taskId, "execution", "agent_communication", content);
+  }
+  sendTaskChannelUpdate(taskId, phase, statusCode, content) {
+    this.sendRaw((0, import_messages.buildOrchestratorStatusUpdate)(this.config, taskId, phase, statusCode, content, taskId));
   }
   startHeartbeat() {
     this.clearHeartbeat();

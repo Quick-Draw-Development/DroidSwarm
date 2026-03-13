@@ -66,7 +66,11 @@ EOF
       codexBin: fakeCodexPath,
       codexSandboxMode: "workspace-write",
       maxAgentsPerTask: 4,
-      maxConcurrentAgents: 8
+      maxConcurrentAgents: 8,
+      specDir: process.cwd(),
+      orchestratorRules: "",
+      droidspeakRules: "",
+      agentRules: ""
     };
     try {
       const result = await (0, import_codex_runner.runCodexPrompt)({

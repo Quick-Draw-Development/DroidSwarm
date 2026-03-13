@@ -8,7 +8,8 @@ import { buildOperatorChatResponse, buildOrchestratorStatusUpdate } from './mess
 import { buildAuthMessage, buildHeartbeatMessage, buildTaskIntakeAccepted, parseEnvelope } from './protocol';
 import { TaskRegistry } from './task-registry';
 import { buildTaskCancellationAcknowledged, isCancellationMessage, resolveTaskFromMessage } from './task-events';
-import type { MessageEnvelope, OrchestratorConfig } from './types';
+import { buildReviewAnnouncement, formatAgentAssignmentContent } from './operator-notifications';
+import type { MessageEnvelope, OrchestratorConfig, SpawnedAgent } from './types';
 
 export class DroidSwarmOrchestratorClient {
   private socket?: WebSocket;
@@ -23,6 +24,10 @@ export class DroidSwarmOrchestratorClient {
       config,
       this.registry,
       path.resolve(__dirname, 'main.js'),
+        {
+          onAgentsAssigned: (taskId, agents) => this.reportAgentAssignment(taskId, agents),
+          onAgentCommunication: (taskId, message) => this.reportAgentCommunication(taskId, message),
+        },
     );
   }
 
@@ -79,6 +84,11 @@ export class DroidSwarmOrchestratorClient {
     }
 
     if (message.project_id !== this.config.projectId || message.from.actor_name === this.config.agentName) {
+      return;
+    }
+
+    if (message.type === 'status_update' && message.room_id === 'operator') {
+      this.handleOperatorStatusMessage(message);
       return;
     }
 
@@ -162,6 +172,48 @@ export class DroidSwarmOrchestratorClient {
         );
       }
     }
+  }
+
+  private handleOperatorStatusMessage(message: MessageEnvelope): void {
+    const metadata = typeof message.payload.metadata === 'object' && message.payload.metadata !== null
+      ? (message.payload.metadata as Record<string, unknown>)
+      : undefined;
+    const taskId = message.task_id ?? (typeof metadata?.task_id === 'string' ? metadata.task_id : undefined);
+    if (!taskId) {
+      return;
+    }
+
+    const status = typeof metadata?.status === 'string' ? metadata.status : undefined;
+    if (status === 'review') {
+      this.sendTaskChannelUpdate(
+        taskId,
+        'operator',
+        'operator_review',
+        buildReviewAnnouncement(message.from.actor_name),
+      );
+    }
+  }
+
+  private reportAgentAssignment(taskId: string, agents: SpawnedAgent[]): void {
+    if (!agents.length) {
+      return;
+    }
+
+    const details = agents.map((agent) => `${agent.agentName} (${agent.role})`).join(', ');
+    this.sendTaskChannelUpdate(taskId, 'execution', 'agent_assigned', `Assigned agents: ${details}.`);
+  }
+
+  private reportAgentCommunication(taskId: string, content: string): void {
+    this.sendTaskChannelUpdate(taskId, 'execution', 'agent_communication', content);
+  }
+
+  private sendTaskChannelUpdate(
+    taskId: string,
+    phase: string,
+    statusCode: string,
+    content: string,
+  ): void {
+    this.sendRaw(buildOrchestratorStatusUpdate(this.config, taskId, phase, statusCode, content, taskId));
   }
 
   private startHeartbeat(): void {

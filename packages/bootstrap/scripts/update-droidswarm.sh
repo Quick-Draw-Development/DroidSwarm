@@ -176,19 +176,21 @@ env DROIDSWARM_INSTALL_ROOT="$INSTALL_ROOT" \
     DROIDSWARM_DEFAULT_REPO_URL="$REPO_URL" \
     /bin/bash -c "$(curl -fsSL "$INSTALL_SCRIPT_URL")" install-droidswarm "${INSTALL_ARGS[@]}"
 
-for config in "${swarm_configs[@]}"; do
-  IFS='|' read -r swarm_id project_root dashboard_port ws_port agent_count main_branch production_branch repo_url project_mode <<<"$config"
-  [[ -z "$swarm_id" || -z "$project_root" ]] && continue
-  old_dir="$DROIDSWARM_HOME/swarms/$swarm_id"
-  rm -rf "$old_dir"
+if [[ ${#swarm_configs[@]} -gt 0 ]]; then
+  for config in "${swarm_configs[@]}"; do
+    IFS='|' read -r swarm_id project_root dashboard_port ws_port agent_count main_branch production_branch repo_url project_mode <<<"$config"
+    [[ -z "$swarm_id" || -z "$project_root" ]] && continue
+    old_dir="$DROIDSWARM_HOME/swarms/$swarm_id"
+    rm -rf "$old_dir"
 
-  restart_cmd=("$BIN_DIR/DroidSwarm" swarm --swarm-id "$swarm_id" --project-root "$project_root")
-  [[ -n "$dashboard_port" ]] && restart_cmd+=(--dashboard-port "$dashboard_port")
-  [[ -n "$ws_port" ]] && restart_cmd+=(--ws-port "$ws_port")
-  [[ -n "$agent_count" ]] && restart_cmd+=(--agent-count "$agent_count")
-  [[ -n "$main_branch" ]] && restart_cmd+=(--main-branch "$main_branch")
-  [[ -n "$production_branch" ]] && restart_cmd+=(--production-branch "$production_branch")
-  [[ -n "$repo_url" ]] && restart_cmd+=(--repo-url "$repo_url")
+    restart_cmd=("$BIN_DIR/DroidSwarm" swarm --swarm-id "$swarm_id" --project-root "$project_root")
+    [[ -n "$dashboard_port" ]] && restart_cmd+=(--dashboard-port "$dashboard_port")
+    [[ -n "$ws_port" ]] && restart_cmd+=(--ws-port "$ws_port")
+    [[ -n "$agent_count" ]] && restart_cmd+=(--agent-count "$agent_count")
+    [[ -n "$main_branch" ]] && restart_cmd+=(--main-branch "$main_branch")
+    [[ -n "$production_branch" ]] && restart_cmd+=(--production-branch "$production_branch")
+    [[ -n "$repo_url" ]] && restart_cmd+=(--repo-url "$repo_url")
 
-  DROIDSWARM_HOME="$DROIDSWARM_HOME" "${restart_cmd[@]}" >/dev/null 2>&1 || true
-done
+    DROIDSWARM_HOME="$DROIDSWARM_HOME" "${restart_cmd[@]}" >/dev/null 2>&1 || true
+  done
+fi

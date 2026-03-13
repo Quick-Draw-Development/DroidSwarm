@@ -22,6 +22,7 @@ __export(AgentSupervisor_exports, {
 module.exports = __toCommonJS(AgentSupervisor_exports);
 var import_node_crypto = require("node:crypto");
 var import_node_child_process = require("node:child_process");
+var import_operator_notifications = require("./operator-notifications");
 const defaultRoleInstructions = (task) => {
   const normalizedType = task.taskType.toLowerCase();
   if (normalizedType === "bug") {
@@ -38,10 +39,11 @@ const defaultRoleInstructions = (task) => {
   }];
 };
 class AgentSupervisor {
-  constructor(config, registry, entryScript) {
+  constructor(config, registry, entryScript, callbacks = {}) {
     this.config = config;
     this.registry = registry;
     this.entryScript = entryScript;
+    this.callbacks = callbacks;
     this.agents = /* @__PURE__ */ new Map();
     this.roleCounters = /* @__PURE__ */ new Map();
   }
@@ -52,7 +54,7 @@ class AgentSupervisor {
     }
     return this.spawnRequests(task, defaultRoleInstructions(task));
   }
-  spawnRequests(task, requests, parentSummary) {
+  spawnRequests(task, requests, parentSummary, parentDroidspeak) {
     const spawned = [];
     const taskState = this.registry.get(task.taskId);
     const activeCount = taskState?.activeAgents.length ?? 0;
@@ -65,7 +67,8 @@ class AgentSupervisor {
         task,
         role: request.role,
         agentName,
-        parentSummary: parentSummary ?? request.instructions
+        parentSummary: parentSummary ?? request.instructions,
+        parentDroidspeak
       })], {
         env: process.env,
         stdio: ["ignore", "pipe", "pipe", "ipc"]
@@ -87,6 +90,9 @@ class AgentSupervisor {
         this.registry.removeAgent(task.taskId, agentName);
         this.agents.delete(agentName);
       });
+    }
+    if (spawned.length > 0) {
+      this.callbacks.onAgentsAssigned?.(task.taskId, spawned);
     }
     return spawned;
   }
@@ -112,7 +118,16 @@ class AgentSupervisor {
       return;
     }
     if (message.result.requested_agents.length > 0) {
-      this.spawnRequests(task, message.result.requested_agents, message.result.summary);
+      this.spawnRequests(
+        task,
+        message.result.requested_agents,
+        message.result.summary,
+        message.result.compression?.compressed_content
+      );
+      this.callbacks.onAgentCommunication?.(
+        task.taskId,
+        (0, import_operator_notifications.formatAgentRequestContent)(message.agentName, message.result.requested_agents)
+      );
     }
   }
   nextAgentName(role) {

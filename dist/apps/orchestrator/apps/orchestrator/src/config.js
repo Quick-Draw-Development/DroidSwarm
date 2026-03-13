@@ -1,6 +1,8 @@
+var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __export = (target, all) => {
   for (var name in all)
@@ -14,12 +16,22 @@ var __copyProps = (to, from, except, desc) => {
   }
   return to;
 };
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 var config_exports = {};
 __export(config_exports, {
   loadConfig: () => loadConfig
 });
 module.exports = __toCommonJS(config_exports);
+var import_node_path = __toESM(require("node:path"));
+var import_specs = require("./specs");
 const toPositiveInt = (value, fallback) => {
   if (!value) {
     return fallback;
@@ -31,6 +43,8 @@ const loadConfig = () => {
   const environment = process.env.NODE_ENV ?? "development";
   const host = process.env.DROIDSWARM_SOCKET_HOST ?? "127.0.0.1";
   const port = toPositiveInt(process.env.DROIDSWARM_SOCKET_PORT, 8765);
+  const specDir = process.env.DROIDSWARM_SPECS_DIR ?? import_node_path.default.resolve(__dirname, "..", "..", "..", "packages", "bootstrap", "specs");
+  const specs = (0, import_specs.loadSpecCards)(specDir);
   return {
     environment,
     projectId: process.env.DROIDSWARM_PROJECT_ID ?? "droidswarm",
@@ -46,7 +60,11 @@ const loadConfig = () => {
     codexModel: process.env.DROIDSWARM_CODEX_MODEL,
     codexSandboxMode: process.env.DROIDSWARM_CODEX_SANDBOX_MODE ?? "workspace-write",
     maxAgentsPerTask: toPositiveInt(process.env.DROIDSWARM_MAX_AGENTS_PER_TASK, 4),
-    maxConcurrentAgents: toPositiveInt(process.env.DROIDSWARM_MAX_CONCURRENT_AGENTS, 12)
+    maxConcurrentAgents: toPositiveInt(process.env.DROIDSWARM_MAX_CONCURRENT_AGENTS, 12),
+    specDir,
+    orchestratorRules: specs.orchestrator,
+    droidspeakRules: specs.droidspeak,
+    agentRules: specs.agent
   };
 };
 // Annotate the CommonJS export names for ESM import in node:

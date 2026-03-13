@@ -71,11 +71,11 @@ export class SqlitePersistence implements PersistencePort {
       .prepare(`
         INSERT INTO connections (
           connection_id, project_id, channel_id, client_type, client_id, client_name,
-          auth_status, opened_at, last_seen_at, metadata_json
-        ) VALUES (
-          @connectionId, @projectId, @roomId, @clientType, @clientId, @clientName,
-          @authStatus, @openedAt, @lastSeenAt, @metadata
-        )
+        auth_status, opened_at, last_seen_at, metadata_json
+      ) VALUES (
+        @connectionId, @projectId, @roomId, @clientType, @clientId, @clientName,
+        @authStatus, @openedAt, @lastSeenAt, @metadata
+      )
       `)
       .run({
         ...record,

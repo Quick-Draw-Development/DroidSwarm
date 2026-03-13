@@ -157,7 +157,7 @@ if remote_url="$(raw_file_url "$REPO_URL" "${REF:-main}" "VERSION" 2>/dev/null)"
 fi
 
 if [[ -n "$local_version" && -n "$remote_version" && "$local_version" == "$remote_version" ]]; then
-  info "Already on version $local_version; skipping update."
+  info "Local version: $local_version; already on version $remote_version; skipping update."
   exit 0
 fi
 

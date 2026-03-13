@@ -15,6 +15,32 @@ require_value() {
   fi
 }
 
+github_archive_url() {
+  local repo_url="$1"
+  local ref="${2:-}"
+  local owner=""
+  local repo=""
+  local normalized="${repo_url%.git}"
+
+  if [[ "$normalized" =~ ^https://github\.com/([^/]+)/([^/]+)$ ]]; then
+    owner="${BASH_REMATCH[1]}"
+    repo="${BASH_REMATCH[2]}"
+  elif [[ "$normalized" =~ ^git@github\.com:([^/]+)/([^/]+)$ ]]; then
+    owner="${BASH_REMATCH[1]}"
+    repo="${BASH_REMATCH[2]}"
+  else
+    err "Unsupported repo URL for archive install: $repo_url"
+    err "Use a GitHub repo URL."
+    exit 1
+  fi
+
+  if [[ -n "$ref" ]]; then
+    printf 'https://codeload.github.com/%s/%s/tar.gz/%s\n' "$owner" "$repo" "$ref"
+  else
+    printf 'https://codeload.github.com/%s/%s/tar.gz/refs/heads/main\n' "$owner" "$repo"
+  fi
+}
+
 REPO_URL=""
 REF=""
 INSTALL_ROOT="${DROIDSWARM_INSTALL_ROOT:-$HOME/.droidswarm/install}"
@@ -29,8 +55,8 @@ Usage:
   install-droidswarm.sh [options]
 
 Options:
-  --repo-url URL       Clone or update DroidSwarm from this git repository
-  --ref REF            Checkout this ref after cloning/updating
+  --repo-url URL       Download DroidSwarm from this GitHub repository
+  --ref REF            Download this Git ref instead of the default branch
   --install-root DIR   Install files under this directory
   --bin-dir DIR        Place the DroidSwarm symlink in this directory
   --help
@@ -85,16 +111,13 @@ fi
 
 SOURCE_DIR="$INSTALL_ROOT/source/packages/bootstrap"
 WORKSPACE_SOURCE_ROOT="$INSTALL_ROOT/source"
-if [[ -d "$INSTALL_ROOT/source/.git" ]]; then
-  git -C "$INSTALL_ROOT/source" fetch --all --tags
-else
-  rm -rf "$INSTALL_ROOT/source"
-  git clone "$REPO_URL" "$INSTALL_ROOT/source"
-fi
-
-if [[ -n "$REF" ]]; then
-  git -C "$INSTALL_ROOT/source" checkout "$REF"
-fi
+ARCHIVE_URL="$(github_archive_url "$REPO_URL" "$REF")"
+TMP_ARCHIVE="$(mktemp "${TMPDIR:-/tmp}/droidswarm-install.XXXXXX.tar.gz")"
+rm -rf "$INSTALL_ROOT/source"
+mkdir -p "$INSTALL_ROOT/source"
+curl -fsSL "$ARCHIVE_URL" -o "$TMP_ARCHIVE"
+tar -xzf "$TMP_ARCHIVE" -C "$INSTALL_ROOT/source" --strip-components=1
+rm -f "$TMP_ARCHIVE"
 
 SOCKET_RUNTIME_SOURCE="$WORKSPACE_SOURCE_ROOT/dist/apps/socket-server"
 ORCHESTRATOR_RUNTIME_SOURCE="$WORKSPACE_SOURCE_ROOT/dist/apps/orchestrator"

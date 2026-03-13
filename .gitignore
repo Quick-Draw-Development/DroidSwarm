@@ -63,3 +63,22 @@ Thumbs.db
 # Next.js
 .next
 out
+
+# Keep installer runtime artifacts committed
+!dist/
+dist/*
+!dist/apps/
+dist/apps/*
+!dist/apps/socket-server/
+!dist/apps/socket-server/**
+!dist/apps/orchestrator/
+!dist/apps/orchestrator/**
+
+!.next/
+.next/*
+!apps/dashboard/.next/
+apps/dashboard/.next/*
+!apps/dashboard/.next/standalone/
+!apps/dashboard/.next/standalone/**
+!apps/dashboard/.next/static/
+!apps/dashboard/.next/static/**

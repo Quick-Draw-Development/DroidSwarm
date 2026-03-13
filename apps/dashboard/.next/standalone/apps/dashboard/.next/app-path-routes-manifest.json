@@ -1,0 +1,11 @@
+{
+  "/_global-error/page": "/_global-error",
+  "/_not-found/page": "/_not-found",
+  "/api/identity/route": "/api/identity",
+  "/api/operator/messages/route": "/api/operator/messages",
+  "/api/tasks/[taskId]/status/route": "/api/tasks/[taskId]/status",
+  "/api/tasks/route": "/api/tasks",
+  "/board/page": "/board",
+  "/channels/[taskId]/page": "/channels/[taskId]",
+  "/page": "/"
+}

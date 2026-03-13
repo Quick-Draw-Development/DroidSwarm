@@ -418,7 +418,7 @@ cmd_setup() {
     "$production_branch" \
     "$dashboard_port" \
     "$ws_port" \
-    "$db_path"
+    "$db_path" \
     "$DROIDSWARM_VERSION"
 
   ensure_gitignore_entry "$project_root" ".droidswarm/*"

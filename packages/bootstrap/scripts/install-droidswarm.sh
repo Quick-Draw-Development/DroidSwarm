@@ -2,18 +2,26 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-# shellcheck source=../lib/droidswarm/common.sh
-source "$ROOT_DIR/lib/droidswarm/common.sh"
+err() {
+  printf 'Error: %s\n' "$*" >&2
+}
+
+require_value() {
+  local flag="$1"
+  local value="${2:-}"
+  if [[ -z "$value" ]]; then
+    err "Missing value for $flag"
+    exit 1
+  fi
+}
 
 REPO_URL=""
 REF=""
 INSTALL_ROOT="${DROIDSWARM_INSTALL_ROOT:-$HOME/.droidswarm/install}"
 BIN_DIR="${DROIDSWARM_BIN_DIR:-$HOME/.local/bin}"
-SOURCE_DIR="$ROOT_DIR"
+SOURCE_DIR=""
 DEFAULT_REPO_URL="${DROIDSWARM_DEFAULT_REPO_URL:-https://github.com/Quick-Draw-Development/DroidSwarm}"
-WORKSPACE_SOURCE_ROOT="$(cd "$ROOT_DIR/../.." && pwd)"
+WORKSPACE_SOURCE_ROOT=""
 
 print_help() {
   cat <<'EOF'
@@ -64,38 +72,28 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-ensure_runtime_dirs
 mkdir -p "$INSTALL_ROOT" "$BIN_DIR"
-
-if [[ -n "$REPO_URL" ]]; then
-  SOURCE_DIR="$INSTALL_ROOT/source/packages/bootstrap"
-  WORKSPACE_SOURCE_ROOT="$INSTALL_ROOT/source"
-  if [[ -d "$INSTALL_ROOT/source/.git" ]]; then
-    git -C "$INSTALL_ROOT/source" fetch --all --tags
-  else
-    rm -rf "$INSTALL_ROOT/source"
-    git clone "$REPO_URL" "$INSTALL_ROOT/source"
-  fi
-
-  if [[ -n "$REF" ]]; then
-    git -C "$INSTALL_ROOT/source" checkout "$REF"
-  fi
-fi
 
 if [[ -z "$REPO_URL" && -n "$DEFAULT_REPO_URL" ]]; then
   REPO_URL="$DEFAULT_REPO_URL"
-  SOURCE_DIR="$INSTALL_ROOT/source/packages/bootstrap"
-  WORKSPACE_SOURCE_ROOT="$INSTALL_ROOT/source"
-  if [[ -d "$INSTALL_ROOT/source/.git" ]]; then
-    git -C "$INSTALL_ROOT/source" fetch --all --tags
-  else
-    rm -rf "$INSTALL_ROOT/source"
-    git clone "$REPO_URL" "$INSTALL_ROOT/source"
-  fi
+fi
 
-  if [[ -n "$REF" ]]; then
-    git -C "$INSTALL_ROOT/source" checkout "$REF"
-  fi
+if [[ -z "$REPO_URL" ]]; then
+  err "Missing repo URL and no default repo configured."
+  exit 1
+fi
+
+SOURCE_DIR="$INSTALL_ROOT/source/packages/bootstrap"
+WORKSPACE_SOURCE_ROOT="$INSTALL_ROOT/source"
+if [[ -d "$INSTALL_ROOT/source/.git" ]]; then
+  git -C "$INSTALL_ROOT/source" fetch --all --tags
+else
+  rm -rf "$INSTALL_ROOT/source"
+  git clone "$REPO_URL" "$INSTALL_ROOT/source"
+fi
+
+if [[ -n "$REF" ]]; then
+  git -C "$INSTALL_ROOT/source" checkout "$REF"
 fi
 
 SOCKET_RUNTIME_SOURCE="$WORKSPACE_SOURCE_ROOT/dist/apps/socket-server"

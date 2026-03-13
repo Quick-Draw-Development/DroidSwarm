@@ -13,6 +13,37 @@ resolve_script_path() {
   printf '%s\n' "$(cd -P "$(dirname "$source_path")" && pwd)/$(basename "$source_path")"
 }
 
+find_version_file() {
+  local candidate
+  for candidate in \
+    "$ROOT_DIR/VERSION" \
+    "$ROOT_DIR/../VERSION" \
+    "$ROOT_DIR/../../VERSION" \
+    "$ROOT_DIR/../../../VERSION"; do
+    if [[ -f "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+
+read_version_value() {
+  local version_file
+  if version_file="$(find_version_file)" && [[ -f "$version_file" ]]; then
+    local version
+    IFS= read -r version <"$version_file"
+    printf '%s\n' "${version:-0.0.0}"
+    return 0
+  fi
+
+  printf '0.0.0\n'
+  return 1
+}
+
+
 SCRIPT_PATH="$(resolve_script_path)"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -38,6 +69,7 @@ Commands:
   swarm       Start and register a managed DroidSwarm instance
   list        List tracked swarms running on this machine
   shutdown    Shut down one swarm or all swarms
+  version     Show the installed DroidSwarm version
   update      Refresh the installed runtime and restart swarms
   help        Show this help
 
@@ -108,6 +140,10 @@ Options:
 EOF
 }
 
+print_version() {
+  printf 'DroidSwarm %s\n' "${DROIDSWARM_VERSION:-0.0.0}"
+}
+
 resolve_runtime_value() {
   local env_value="$1"
   shift
@@ -148,34 +184,6 @@ resolve_runtime_dir_value() {
   return 1
 }
 
-find_version_file() {
-  local candidate
-  for candidate in \
-    "$ROOT_DIR/VERSION" \
-    "$ROOT_DIR/../VERSION" \
-    "$ROOT_DIR/../../VERSION" \
-    "$ROOT_DIR/../../../VERSION"; do
-    if [[ -f "$candidate" ]]; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-  done
-
-  return 1
-}
-
-read_version_value() {
-  local version_file
-  if version_file="$(find_version_file)" && [[ -f "$version_file" ]]; then
-    local version
-    IFS= read -r version <"$version_file"
-    printf '%s\n' "${version:-0.0.0}"
-    return 0
-  fi
-
-  printf '0.0.0\n'
-  return 1
-}
 
 write_project_metadata() {
   local project_root="$1"
@@ -946,6 +954,9 @@ case "$COMMAND" in
     ;;
   shutdown)
     cmd_shutdown "$@"
+    ;;
+  version)
+    print_version
     ;;
   help|-h|--help)
     print_help

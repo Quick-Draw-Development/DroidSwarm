@@ -12,7 +12,7 @@ REF=""
 INSTALL_ROOT="${DROIDSWARM_INSTALL_ROOT:-$HOME/.droidswarm/install}"
 BIN_DIR="${DROIDSWARM_BIN_DIR:-$HOME/.local/bin}"
 SOURCE_DIR="$ROOT_DIR"
-DEFAULT_REPO_URL="${DROIDSWARM_DEFAULT_REPO_URL:-}"
+DEFAULT_REPO_URL="${DROIDSWARM_DEFAULT_REPO_URL:-https://github.com/Quick-Draw-Development/DroidSwarm}"
 WORKSPACE_SOURCE_ROOT="$(cd "$ROOT_DIR/../.." && pwd)"
 
 print_help() {

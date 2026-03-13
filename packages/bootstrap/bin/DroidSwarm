@@ -34,6 +34,7 @@ Commands:
   swarm       Start and register a managed DroidSwarm instance
   list        List tracked swarms running on this machine
   shutdown    Shut down one swarm or all swarms
+  update      Refresh the installed runtime and restart swarms
   help        Show this help
 
 Examples:
@@ -85,6 +86,20 @@ Options:
   --config KEY=VALUE        Repeatable
   --foreground
   --dry-run
+  --help
+EOF
+}
+
+print_update_help() {
+  cat <<'EOF'
+Usage:
+  DroidSwarm update [options]
+
+Options:
+  --repo-url URL
+  --ref REF
+  --install-root DIR
+  --bin-dir DIR
   --help
 EOF
 }
@@ -752,6 +767,62 @@ EOF
   fi
 }
 
+cmd_update() {
+  ensure_runtime_dirs
+
+  local repo_url ref install_root bin_dir
+  repo_url=""
+  ref=""
+  install_root="${DROIDSWARM_INSTALL_ROOT:-$HOME/.droidswarm/install}"
+  bin_dir="${DROIDSWARM_BIN_DIR:-$HOME/.local/bin}"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --repo-url)
+        shift
+        require_value "--repo-url" "${1:-}"
+        repo_url="$1"
+        ;;
+      --ref)
+        shift
+        require_value "--ref" "${1:-}"
+        ref="$1"
+        ;;
+      --install-root)
+        shift
+        require_value "--install-root" "${1:-}"
+        install_root="$1"
+        ;;
+      --bin-dir)
+        shift
+        require_value "--bin-dir" "${1:-}"
+        bin_dir="$1"
+        ;;
+      --help|-h)
+        print_update_help
+        return 0
+        ;;
+      *)
+        err "Unknown update option: $1"
+        print_update_help
+        return 1
+        ;;
+    esac
+    shift
+  done
+
+  local script_path="$ROOT_DIR/scripts/update-droidswarm.sh"
+  if [[ ! -x "$script_path" ]]; then
+    err "Update script not found: $script_path"
+    return 1
+  fi
+
+  DROIDSWARM_INSTALL_ROOT="$install_root" \
+    DROIDSWARM_BIN_DIR="$bin_dir" \
+    DROIDSWARM_DEFAULT_REPO_URL="${repo_url:-https://github.com/Quick-Draw-Development/DroidSwarm}" \
+    /bin/bash "$script_path" ${repo_url:+--repo-url "$repo_url"} ${ref:+--ref "$ref"}
+}
+
 shutdown_one() {
   local swarm_id="$1"
   if ! swarm_exists "$swarm_id"; then
@@ -829,6 +900,9 @@ case "$COMMAND" in
     ;;
   swarm)
     cmd_swarm "$@"
+    ;;
+  update)
+    cmd_update "$@"
     ;;
   list)
     cmd_list "$@"

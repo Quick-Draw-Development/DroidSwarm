@@ -648,6 +648,8 @@ pre {
   border: 1px solid var(--line);
   background: rgba(255, 250, 244, 0.96);
   box-shadow: var(--shadow);
+  position: relative;
+  z-index: 70;
 }
 
 .operator-modal-header {

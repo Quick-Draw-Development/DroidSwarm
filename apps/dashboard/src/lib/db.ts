@@ -1,0 +1,562 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+
+import Database from 'better-sqlite3';
+import WebSocket from 'ws';
+
+import type { BoardStatus, MessageRecord, ProjectIdentity, TaskDetails, TaskRecord } from './types';
+
+const DEFAULT_PROJECT_ID = process.env.DROIDSWARM_PROJECT_ID ?? 'droidswarm';
+const DEFAULT_PROJECT_NAME = process.env.DROIDSWARM_PROJECT_NAME ?? 'DroidSwarm';
+const DEFAULT_DB_PATH = process.env.DROIDSWARM_DB_PATH ?? path.resolve(process.cwd(), 'data', 'droidswarm.db');
+const DEFAULT_SOCKET_URL = process.env.DROIDSWARM_SOCKET_URL ?? 'ws://127.0.0.1:8765';
+
+const demoTasks: TaskRecord[] = [
+  {
+    taskId: 'task-design-system',
+    projectId: DEFAULT_PROJECT_ID,
+    title: 'Shape task intake and operator flow',
+    description: 'Finalize task intake, operator ack, and human clarification loop.',
+    taskType: 'feature',
+    priority: 'high',
+    status: 'planning',
+    branchType: 'feature',
+    branchName: 'feature/task-design-system',
+    createdByUserId: 'alice_dev',
+    createdByDisplayName: 'alice_dev',
+    needsClarification: true,
+    updatedAt: new Date().toISOString(),
+    agentCount: 3,
+  },
+  {
+    taskId: 'task-socket-server',
+    projectId: DEFAULT_PROJECT_ID,
+    title: 'Implement WebSocket server scaffold',
+    description: 'Typed protocol validation, rooms, persistence, and tests.',
+    taskType: 'task',
+    priority: 'high',
+    status: 'in_progress',
+    branchType: 'feature',
+    branchName: 'feature/task-socket-server',
+    createdByUserId: 'alice_dev',
+    createdByDisplayName: 'alice_dev',
+    needsClarification: false,
+    updatedAt: new Date().toISOString(),
+    agentCount: 2,
+  },
+];
+
+const demoMessages: MessageRecord[] = [
+  {
+    messageId: 'msg-1',
+    projectId: DEFAULT_PROJECT_ID,
+    channelId: 'task-design-system',
+    taskId: 'task-design-system',
+    messageType: 'clarification_request',
+    senderType: 'orchestrator',
+    senderName: 'Orchestrator',
+    content: '@alice_dev Which branch policy should hotfixes use?',
+    payload: {
+      question_id: 'question-1',
+      target_user_id: 'alice_dev',
+      compression: {
+        scheme: 'droidspeak-v1',
+        compressed_content: 'need branch-policy hotfix production',
+      },
+    },
+    createdAt: new Date().toISOString(),
+    mentionTarget: 'alice_dev',
+  },
+  {
+    messageId: 'msg-2',
+    projectId: DEFAULT_PROJECT_ID,
+    channelId: 'task-design-system',
+    taskId: 'task-design-system',
+    messageType: 'status_update',
+    senderType: 'agent',
+    senderName: 'Planner-Alpha',
+    content: 'Planning complete. Ready for task breakdown.',
+    payload: {},
+    createdAt: new Date().toISOString(),
+  },
+];
+
+let databaseInstance: Database.Database | null = null;
+
+const getDatabase = (): Database.Database => {
+  if (databaseInstance) {
+    return databaseInstance;
+  }
+
+  fs.mkdirSync(path.dirname(DEFAULT_DB_PATH), { recursive: true });
+  databaseInstance = new Database(DEFAULT_DB_PATH);
+  ensureDashboardSchema(databaseInstance);
+  return databaseInstance;
+};
+
+const ensureDashboardSchema = (database: Database.Database): void => {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS tasks (
+      task_id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      task_type TEXT NOT NULL,
+      priority TEXT NOT NULL,
+      status TEXT NOT NULL,
+      branch_type TEXT,
+      branch_name TEXT,
+      created_by_user_id TEXT NOT NULL,
+      created_by_display_name TEXT NOT NULL,
+      needs_clarification INTEGER NOT NULL DEFAULT 0,
+      blocked_reason TEXT,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS messages (
+      message_id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      channel_id TEXT NOT NULL,
+      task_id TEXT,
+      message_type TEXT NOT NULL,
+      sender_type TEXT NOT NULL,
+      sender_name TEXT NOT NULL,
+      content TEXT,
+      payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS channels (
+      channel_id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      task_id TEXT,
+      channel_type TEXT NOT NULL,
+      name TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS task_events (
+      event_id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      task_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      actor_type TEXT NOT NULL,
+      actor_id TEXT NOT NULL,
+      payload_json TEXT,
+      created_at TEXT NOT NULL
+    );
+  `);
+};
+
+const mapTaskRecord = (row: Record<string, unknown>): TaskRecord => ({
+  taskId: String(row.task_id),
+  projectId: String(row.project_id),
+  title: String(row.title),
+  description: String(row.description),
+  taskType: row.task_type as TaskRecord['taskType'],
+  priority: row.priority as TaskRecord['priority'],
+  status: row.status as TaskRecord['status'],
+  branchType: typeof row.branch_type === 'string' ? row.branch_type : undefined,
+  branchName: typeof row.branch_name === 'string' ? row.branch_name : undefined,
+  createdByUserId: String(row.created_by_user_id),
+  createdByDisplayName: String(row.created_by_display_name),
+  needsClarification: Number(row.needs_clarification) === 1,
+  blockedReason: typeof row.blocked_reason === 'string' ? row.blocked_reason : undefined,
+  updatedAt: String(row.updated_at),
+  agentCount: 0,
+});
+
+const mapMessageRecord = (row: Record<string, unknown>): MessageRecord => ({
+  messageId: String(row.message_id),
+  projectId: String(row.project_id),
+  channelId: String(row.channel_id),
+  taskId: typeof row.task_id === 'string' ? row.task_id : undefined,
+  messageType: String(row.message_type),
+  senderType: String(row.sender_type),
+  senderName: String(row.sender_name),
+  content: typeof row.content === 'string' ? row.content : '',
+  payload: typeof row.payload_json === 'string' ? JSON.parse(row.payload_json) as Record<string, unknown> : {},
+  createdAt: String(row.created_at),
+});
+
+export const getProjectIdentity = (): ProjectIdentity => ({
+  projectId: DEFAULT_PROJECT_ID,
+  projectName: DEFAULT_PROJECT_NAME,
+});
+
+export const listOperatorMessages = (): MessageRecord[] => {
+  try {
+    const database = getDatabase();
+    const rows = database
+      .prepare('SELECT * FROM messages WHERE channel_id = ? AND project_id = ? ORDER BY created_at ASC LIMIT 200')
+      .all('operator', DEFAULT_PROJECT_ID) as Record<string, unknown>[];
+
+    return rows.map(mapMessageRecord);
+  } catch {
+    return [];
+  }
+};
+
+export const listTasks = (): TaskRecord[] => {
+  try {
+    const database = getDatabase();
+    const rows = database
+      .prepare('SELECT * FROM tasks WHERE project_id = ? ORDER BY updated_at DESC')
+      .all(DEFAULT_PROJECT_ID) as Record<string, unknown>[];
+
+    return rows.length > 0 ? rows.map(mapTaskRecord) : demoTasks;
+  } catch {
+    return demoTasks;
+  }
+};
+
+export const getTaskDetails = (taskId: string): TaskDetails | null => {
+  try {
+    const database = getDatabase();
+    const taskRow = database
+      .prepare('SELECT * FROM tasks WHERE task_id = ? AND project_id = ?')
+      .get(taskId, DEFAULT_PROJECT_ID) as Record<string, unknown> | undefined;
+
+    const task = taskRow ? mapTaskRecord(taskRow) : demoTasks.find((candidate) => candidate.taskId === taskId);
+    if (!task) {
+      return null;
+    }
+
+    const messages = (
+      database
+        .prepare('SELECT * FROM messages WHERE task_id = ? AND project_id = ? ORDER BY created_at ASC')
+        .all(taskId, DEFAULT_PROJECT_ID) as Record<string, unknown>[]
+    ).map(mapMessageRecord);
+
+    return {
+      task,
+      messages: messages.length > 0 ? messages : demoMessages.filter((message) => message.taskId === taskId),
+      activeAgents: task.status === 'cancelled'
+        ? []
+        : [
+            { name: 'Orchestrator', role: 'orchestrator', lastSeenAt: new Date().toISOString() },
+            { name: 'Planner-Alpha', role: 'planner', lastSeenAt: new Date().toISOString() },
+          ],
+      handoffs: ['Planner-Alpha -> Architect-Beta: planning summary attached'],
+      guardrails: task.status === 'cancelled'
+        ? ['Task cancelled. Orchestrator should stop and remove assigned agents.']
+        : task.needsClarification
+          ? ['Waiting on creator clarification before branch creation']
+          : ['Branch policy check passed'],
+      limits: ['Context pressure normal', 'No current rate-limit backoff'],
+    };
+  } catch {
+    const task = demoTasks.find((candidate) => candidate.taskId === taskId);
+    if (!task) {
+      return null;
+    }
+
+    return {
+      task,
+      messages: demoMessages.filter((message) => message.taskId === taskId),
+      activeAgents: [
+        { name: 'Orchestrator', role: 'orchestrator', lastSeenAt: new Date().toISOString() },
+      ],
+      handoffs: ['No persisted handoffs yet'],
+      guardrails: ['No persisted guardrails yet'],
+      limits: ['No persisted limits yet'],
+    };
+  }
+};
+
+type TaskDispatchStatus = 'accepted' | 'queued' | 'offline';
+
+const dispatchOperatorMessage = async (input: {
+  username: string;
+  messageType: 'chat' | 'status_update' | 'task_created';
+  taskId?: string;
+  payload: Record<string, unknown>;
+  expectedMessageType?: string;
+  expectedTaskId?: string;
+}): Promise<TaskDispatchStatus> => {
+  const operatorToken = process.env.DROIDSWARM_OPERATOR_TOKEN;
+
+  return await new Promise<TaskDispatchStatus>((resolve) => {
+    const socket = new WebSocket(DEFAULT_SOCKET_URL);
+    const connectionName = input.username;
+    const messageId = randomUUID();
+    let messageSent = false;
+    const timeout = setTimeout(() => {
+      socket.terminate();
+      resolve(messageSent ? 'queued' : 'offline');
+    }, 2_500);
+
+    socket.on('open', () => {
+      socket.send(JSON.stringify({
+        type: 'auth',
+        project_id: DEFAULT_PROJECT_ID,
+        timestamp: new Date().toISOString(),
+        payload: {
+          room_id: 'operator',
+          agent_name: connectionName,
+          agent_role: 'ui',
+          client_type: 'dashboard',
+          token: operatorToken,
+        },
+      }));
+    });
+
+    socket.on('message', (buffer) => {
+      let parsed: {
+        message_id?: string;
+        type?: string;
+        payload?: Record<string, unknown>;
+      };
+      try {
+        parsed = JSON.parse(buffer.toString()) as {
+          message_id?: string;
+          type?: string;
+          payload?: Record<string, unknown>;
+        };
+      } catch {
+        return;
+      }
+
+      if (parsed.type === 'status_update' && typeof parsed.payload?.content === 'string' && parsed.payload.content.includes('Authenticated')) {
+        messageSent = true;
+        socket.send(JSON.stringify({
+          message_id: messageId,
+          project_id: DEFAULT_PROJECT_ID,
+          room_id: 'operator',
+          task_id: input.taskId,
+          type: input.messageType,
+          from: {
+            actor_type: 'human',
+            actor_id: input.username,
+            actor_name: input.username,
+          },
+          timestamp: new Date().toISOString(),
+          payload: input.payload,
+        }));
+        return;
+      }
+
+      if (input.expectedMessageType && parsed.type === input.expectedMessageType) {
+        if (!input.expectedTaskId || parsed.payload?.task_id === input.expectedTaskId) {
+          clearTimeout(timeout);
+          socket.close();
+          resolve('accepted');
+          return;
+        }
+      }
+
+      if (parsed.message_id === messageId) {
+        clearTimeout(timeout);
+        socket.close();
+        resolve('accepted');
+      }
+    });
+
+    socket.on('error', () => {
+      clearTimeout(timeout);
+      resolve(messageSent ? 'queued' : 'offline');
+    });
+  });
+};
+
+const publishOperatorStatusChange = async (input: {
+  taskId: string;
+  status: BoardStatus;
+  username: string;
+}): Promise<TaskDispatchStatus> => {
+  return dispatchOperatorMessage({
+    username: input.username,
+    taskId: input.taskId,
+    messageType: 'status_update',
+    payload: {
+      status_code: input.status === 'cancelled' ? 'task_cancelled' : 'task_status_changed',
+      phase: 'board',
+      content: `Task moved to ${input.status}`,
+      metadata: {
+        task_id: input.taskId,
+        status: input.status,
+      },
+    },
+  });
+};
+
+const publishTaskCreated = async (task: TaskRecord): Promise<TaskDispatchStatus> => {
+  return dispatchOperatorMessage({
+    username: task.createdByUserId,
+    taskId: task.taskId,
+    messageType: 'task_created',
+    expectedMessageType: 'task_intake_accepted',
+    expectedTaskId: task.taskId,
+    payload: {
+      task_id: task.taskId,
+      title: task.title,
+      description: task.description,
+      task_type: task.taskType,
+      priority: task.priority,
+      created_by: task.createdByUserId,
+    },
+  });
+};
+
+export const sendOperatorInstruction = async (input: {
+  username: string;
+  content: string;
+}): Promise<TaskDispatchStatus> => dispatchOperatorMessage({
+  username: input.username,
+  messageType: 'chat',
+  payload: {
+    content: input.content,
+    audience: 'orchestrator',
+  },
+});
+
+export const createTask = async (input: {
+  title: string;
+  description: string;
+  taskType: TaskRecord['taskType'];
+  priority: TaskRecord['priority'];
+  username: string;
+}): Promise<TaskRecord> => {
+  const database = getDatabase();
+  const now = new Date().toISOString();
+  const task: TaskRecord = {
+    taskId: randomUUID(),
+    projectId: DEFAULT_PROJECT_ID,
+    title: input.title,
+    description: input.description,
+    taskType: input.taskType,
+    priority: input.priority,
+    status: 'todo',
+    createdByUserId: input.username,
+    createdByDisplayName: input.username,
+    needsClarification: false,
+    updatedAt: now,
+    agentCount: 0,
+  };
+
+  database
+    .prepare(`
+      INSERT INTO tasks (
+        task_id, project_id, title, description, task_type, priority, status,
+        created_by_user_id, created_by_display_name, needs_clarification, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    .run(
+      task.taskId,
+      task.projectId,
+      task.title,
+      task.description,
+      task.taskType,
+      task.priority,
+      task.status,
+      task.createdByUserId,
+      task.createdByDisplayName,
+      0,
+      task.updatedAt,
+    );
+
+  database
+    .prepare(`
+      INSERT OR REPLACE INTO channels (
+        channel_id, project_id, task_id, channel_type, name, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    .run(task.taskId, task.projectId, task.taskId, 'task', task.taskId, 'active', now, now);
+
+  database
+    .prepare(`
+      INSERT INTO task_events (
+        event_id, project_id, task_id, event_type, actor_type, actor_id, payload_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    .run(
+      randomUUID(),
+      task.projectId,
+      task.taskId,
+      'task_created_local',
+      'human',
+      task.createdByUserId,
+      JSON.stringify({
+        title: task.title,
+        description: task.description,
+        task_type: task.taskType,
+        priority: task.priority,
+      }),
+      now,
+    );
+
+  const dispatchStatus = await publishTaskCreated(task);
+  database
+    .prepare(`
+      INSERT INTO task_events (
+        event_id, project_id, task_id, event_type, actor_type, actor_id, payload_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    .run(
+      randomUUID(),
+      task.projectId,
+      task.taskId,
+      dispatchStatus === 'accepted' ? 'task_dispatch_accepted' : dispatchStatus === 'queued' ? 'task_dispatch_queued' : 'task_dispatch_offline',
+      'system',
+      'dashboard',
+      JSON.stringify({ dispatch_status: dispatchStatus }),
+      new Date().toISOString(),
+    );
+
+  return task;
+};
+
+export const updateTaskStatus = async (input: {
+  taskId: string;
+  status: BoardStatus;
+  username: string;
+}): Promise<void> => {
+  const database = getDatabase();
+  const now = new Date().toISOString();
+
+  database
+    .prepare(`
+      UPDATE tasks
+      SET status = ?, updated_at = ?, blocked_reason = CASE WHEN ? = 'cancelled' THEN 'Cancelled from board' ELSE NULL END
+      WHERE task_id = ? AND project_id = ?
+    `)
+    .run(input.status, now, input.status, input.taskId, DEFAULT_PROJECT_ID);
+
+  database
+    .prepare(`
+      INSERT INTO task_events (
+        event_id, project_id, task_id, event_type, actor_type, actor_id, payload_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    .run(
+      randomUUID(),
+      DEFAULT_PROJECT_ID,
+      input.taskId,
+      input.status === 'cancelled' ? 'task_cancelled_local' : 'task_status_changed_local',
+      'human',
+      input.username,
+      JSON.stringify({ status: input.status }),
+      now,
+    );
+
+  const dispatchStatus = await publishOperatorStatusChange(input);
+  database
+    .prepare(`
+      INSERT INTO task_events (
+        event_id, project_id, task_id, event_type, actor_type, actor_id, payload_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    .run(
+      randomUUID(),
+      DEFAULT_PROJECT_ID,
+      input.taskId,
+      dispatchStatus === 'offline' ? 'task_status_dispatch_offline' : 'task_status_dispatch_queued',
+      'system',
+      'dashboard',
+      JSON.stringify({ status: input.status, dispatch_status: dispatchStatus }),
+      new Date().toISOString(),
+    );
+};

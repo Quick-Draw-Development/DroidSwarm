@@ -1,0 +1,58 @@
+{
+  "name": "droidswarm",
+  "version": "1.0.0",
+  "description": "This repository currently contains the DroidSwarm design docs plus an initial bash-based installer and CLI scaffold.",
+  "main": "index.js",
+  "directories": {
+    "lib": "lib"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@bitbucket.org/quickdrawdevelopment/droidswarm.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://bitbucket.org/quickdrawdevelopment/droidswarm/issues"
+  },
+  "homepage": "https://bitbucket.org/quickdrawdevelopment/droidswarm#readme",
+  "devDependencies": {
+    "@nx/esbuild": "22.5.4",
+    "@nx/js": "^22.5.4",
+    "@nx/next": "^22.5.4",
+    "@nx/node": "^22.5.4",
+    "@swc-node/register": "~1.11.1",
+    "@swc/cli": "~0.8.0",
+    "@swc/core": "~1.15.5",
+    "@swc/helpers": "~0.5.18",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "20.19.9",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/ws": "^8.18.1",
+    "esbuild": "^0.19.2",
+    "nx": "^22.5.4",
+    "prettier": "^3.8.1",
+    "tslib": "^2.3.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.2"
+  },
+  "engines": {
+    "node": "25.8.0"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.6.2",
+    "next": "~16.0.1",
+    "pino": "^10.3.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "uuid": "^13.0.0",
+    "ws": "^8.19.0",
+    "zod": "^4.3.6"
+  }
+}

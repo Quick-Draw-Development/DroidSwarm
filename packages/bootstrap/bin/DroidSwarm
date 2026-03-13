@@ -1,0 +1,847 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+resolve_script_path() {
+  local source_path="${BASH_SOURCE[0]}"
+  while [[ -L "$source_path" ]]; do
+    local source_dir
+    source_dir="$(cd -P "$(dirname "$source_path")" && pwd)"
+    source_path="$(readlink "$source_path")"
+    [[ "$source_path" != /* ]] && source_path="$source_dir/$source_path"
+  done
+  printf '%s\n' "$(cd -P "$(dirname "$source_path")" && pwd)/$(basename "$source_path")"
+}
+
+SCRIPT_PATH="$(resolve_script_path)"
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=../lib/droidswarm/common.sh
+source "$ROOT_DIR/lib/droidswarm/common.sh"
+
+COMMAND="${1:-help}"
+if [[ $# -gt 0 ]]; then
+  shift
+fi
+
+print_help() {
+  cat <<'EOF'
+Usage:
+  DroidSwarm <command> [options]
+
+Commands:
+  setup       Initialize a project for DroidSwarm
+  swarm       Start and register a managed DroidSwarm instance
+  list        List tracked swarms running on this machine
+  shutdown    Shut down one swarm or all swarms
+  help        Show this help
+
+Examples:
+  DroidSwarm setup --project-root "$PWD" --project-mode greenfield
+  DroidSwarm swarm --project-root "$PWD" --env OPENAI_API_KEY=example --config mode=dev
+  DroidSwarm list
+  DroidSwarm shutdown --swarm-id <id>
+  DroidSwarm shutdown --all
+EOF
+}
+
+print_setup_help() {
+  cat <<'EOF'
+Usage:
+  DroidSwarm setup [options]
+
+Options:
+  --project-root PATH
+  --project-mode MODE        Required: greenfield | existing
+  --project-name NAME
+  --project-id ID
+  --main-branch NAME
+  --production-branch NAME
+  --dashboard-port PORT
+  --ws-port PORT
+  --db-path PATH
+  --force
+  --help
+EOF
+}
+
+print_swarm_help() {
+  cat <<'EOF'
+Usage:
+  DroidSwarm swarm [options]
+
+Options:
+  --swarm-id ID
+  --project-root PATH
+  --project-name NAME
+  --project-id ID
+  --dashboard-port PORT
+  --ws-port PORT
+  --agent-count N
+  --main-branch NAME
+  --production-branch NAME
+  --repo-url URL
+  --env KEY=VALUE           Repeatable
+  --config KEY=VALUE        Repeatable
+  --foreground
+  --dry-run
+  --help
+EOF
+}
+
+resolve_runtime_value() {
+  local env_value="$1"
+  shift
+
+  if [[ -n "$env_value" ]]; then
+    printf '%s\n' "$env_value"
+    return 0
+  fi
+
+  local candidate
+  for candidate in "$@"; do
+    if [[ -n "$candidate" && -f "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+resolve_runtime_dir_value() {
+  local env_value="$1"
+  shift
+
+  if [[ -n "$env_value" ]]; then
+    printf '%s\n' "$env_value"
+    return 0
+  fi
+
+  local candidate
+  for candidate in "$@"; do
+    if [[ -n "$candidate" && -d "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+write_project_metadata() {
+  local project_root="$1"
+  local project_name="$2"
+  local project_id="$3"
+  local project_mode="$4"
+  local main_branch="$5"
+  local production_branch="$6"
+  local dashboard_port="$7"
+  local ws_port="$8"
+  local db_path="$9"
+
+  local meta_dir meta_file
+  meta_dir="$(project_meta_dir "$project_root")"
+  meta_file="$(project_meta_file "$project_root")"
+
+  mkdir -p "$meta_dir"
+
+  cat >"$meta_file" <<EOF
+{
+  "project_name": "$(json_escape "$project_name")",
+  "project_id": "$(json_escape "$project_id")",
+  "project_mode": "$(json_escape "$project_mode")",
+  "main_branch": "$(json_escape "$main_branch")",
+  "production_branch": "$(json_escape "$production_branch")",
+  "db_path": "$(json_escape "$db_path")",
+  "dashboard_port": $dashboard_port,
+  "ws_port": $ws_port
+}
+EOF
+}
+
+write_project_setup_state() {
+  local project_root="$1"
+  local project_name="$2"
+  local project_id="$3"
+  local project_mode="$4"
+  local main_branch="$5"
+  local production_branch="$6"
+  local dashboard_port="$7"
+  local ws_port="$8"
+  local db_path="$9"
+
+  cat >"$(project_setup_file "$project_root")" <<EOF
+DROIDSWARM_PROJECT_ROOT=$(printf '%q' "$project_root")
+DROIDSWARM_PROJECT_NAME=$(printf '%q' "$project_name")
+DROIDSWARM_PROJECT_ID=$(printf '%q' "$project_id")
+DROIDSWARM_PROJECT_MODE=$(printf '%q' "$project_mode")
+DROIDSWARM_MAIN_BRANCH=$(printf '%q' "$main_branch")
+DROIDSWARM_PRODUCTION_BRANCH=$(printf '%q' "$production_branch")
+DROIDSWARM_DASHBOARD_PORT=$(printf '%q' "$dashboard_port")
+DROIDSWARM_WS_PORT=$(printf '%q' "$ws_port")
+DROIDSWARM_DB_PATH=$(printf '%q' "$db_path")
+DROIDSWARM_SETUP_COMPLETED_AT=$(printf '%q' "$(now_utc)")
+EOF
+}
+
+load_project_setup() {
+  local project_root="$1"
+  local setup_file
+  setup_file="$(project_setup_file "$project_root")"
+  if [[ ! -f "$setup_file" ]]; then
+    return 1
+  fi
+
+  # shellcheck disable=SC1090
+  source "$setup_file"
+}
+
+cmd_setup() {
+  ensure_runtime_dirs
+
+  local project_root project_name project_id project_mode main_branch production_branch
+  local dashboard_port ws_port db_path force
+  project_root="$(pwd)"
+  project_name=""
+  project_id=""
+  project_mode=""
+  main_branch=""
+  production_branch="production"
+  dashboard_port=""
+  ws_port=""
+  db_path=""
+  force="0"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-root)
+        shift
+        require_value "--project-root" "${1:-}"
+        project_root="$1"
+        ;;
+      --project-mode)
+        shift
+        require_value "--project-mode" "${1:-}"
+        project_mode="$1"
+        ;;
+      --project-name)
+        shift
+        require_value "--project-name" "${1:-}"
+        project_name="$1"
+        ;;
+      --project-id)
+        shift
+        require_value "--project-id" "${1:-}"
+        project_id="$1"
+        ;;
+      --main-branch)
+        shift
+        require_value "--main-branch" "${1:-}"
+        main_branch="$1"
+        ;;
+      --production-branch)
+        shift
+        require_value "--production-branch" "${1:-}"
+        production_branch="$1"
+        ;;
+      --dashboard-port)
+        shift
+        require_value "--dashboard-port" "${1:-}"
+        dashboard_port="$1"
+        ;;
+      --ws-port)
+        shift
+        require_value "--ws-port" "${1:-}"
+        ws_port="$1"
+        ;;
+      --db-path)
+        shift
+        require_value "--db-path" "${1:-}"
+        db_path="$1"
+        ;;
+      --force)
+        force="1"
+        ;;
+      --help|-h)
+        print_setup_help
+        return 0
+        ;;
+      *)
+        err "Unknown setup option: $1"
+        print_setup_help
+        return 1
+        ;;
+    esac
+    shift
+  done
+
+  mkdir -p "$project_root"
+  project_root="$(cd "$project_root" && pwd)"
+
+  if [[ "$force" != "1" ]] && project_is_setup "$project_root"; then
+    err "Project is already set up: $project_root"
+    err "Use --force to regenerate setup metadata."
+    return 1
+  fi
+
+  if [[ -z "$project_mode" ]]; then
+    err "Missing required option: --project-mode"
+    err "Allowed values: greenfield | existing"
+    return 1
+  fi
+
+  case "$project_mode" in
+    greenfield|existing)
+      ;;
+    *)
+      err "Invalid --project-mode: $project_mode"
+      err "Allowed values: greenfield | existing"
+      return 1
+      ;;
+  esac
+
+  if [[ -z "$project_name" ]]; then
+    project_name="$(read_package_name "$project_root" || true)"
+  fi
+
+  if [[ -z "$project_name" ]]; then
+    project_name="$(git_repo_name "$project_root" || true)"
+  fi
+
+  if [[ -z "$project_name" ]]; then
+    project_name="$(basename "$project_root")"
+  fi
+
+  if [[ -z "$project_id" ]]; then
+    project_id="$(slugify "$project_name")"
+  fi
+
+  if [[ -z "$main_branch" ]]; then
+    main_branch="$(detect_main_branch "$project_root")"
+  fi
+
+  if [[ -z "$dashboard_port" ]]; then
+    dashboard_port="$(next_available_port 3000)"
+  fi
+
+  if [[ -z "$ws_port" ]]; then
+    ws_port="$(next_available_port 8765)"
+    if [[ "$ws_port" == "$dashboard_port" ]]; then
+      ws_port=$((ws_port + 1))
+    fi
+  fi
+
+  if [[ -z "$db_path" ]]; then
+    db_path="$(project_db_file "$project_root")"
+  fi
+
+  mkdir -p "$(dirname "$db_path")"
+  touch "$db_path"
+  mkdir -p "$(project_meta_dir "$project_root")"
+
+  write_project_metadata \
+    "$project_root" \
+    "$project_name" \
+    "$project_id" \
+    "$project_mode" \
+    "$main_branch" \
+    "$production_branch" \
+    "$dashboard_port" \
+    "$ws_port" \
+    "$db_path"
+
+  write_project_setup_state \
+    "$project_root" \
+    "$project_name" \
+    "$project_id" \
+    "$project_mode" \
+    "$main_branch" \
+    "$production_branch" \
+    "$dashboard_port" \
+    "$ws_port" \
+    "$db_path"
+
+  ensure_gitignore_entry "$project_root" ".droidswarm/*"
+  ensure_gitignore_entry "$project_root" "!.droidswarm/.gitkeep"
+  touch "$(project_meta_dir "$project_root")/.gitkeep"
+
+  info "Initialized DroidSwarm project setup."
+  info "Project root: $project_root"
+  info "Project: $project_name ($project_id)"
+  info "Project mode: $project_mode"
+  info "Main branch: $main_branch"
+  info "Production branch: $production_branch"
+  info "Metadata: $(project_meta_file "$project_root")"
+  info "Database: $db_path"
+}
+
+cmd_swarm() {
+  ensure_runtime_dirs
+
+  local project_root project_name project_id project_mode swarm_id dashboard_port ws_port db_path
+  local agent_count main_branch production_branch repo_url foreground dry_run
+  local node_bin operator_token socket_server_entry orchestrator_entry dashboard_server_entry
+  local dashboard_static_dir dashboard_public_dir dashboard_workdir
+  project_root="$(pwd)"
+  project_name=""
+  project_id=""
+  project_mode=""
+  swarm_id=""
+  dashboard_port=""
+  ws_port=""
+  db_path=""
+  agent_count="0"
+  main_branch="main"
+  production_branch="production"
+  repo_url=""
+  foreground="0"
+  dry_run="0"
+  node_bin="${DROIDSWARM_NODE_BIN:-$(command -v node || true)}"
+  operator_token="${DROIDSWARM_OPERATOR_TOKEN:-}"
+  socket_server_entry=""
+  orchestrator_entry=""
+  dashboard_server_entry=""
+  dashboard_static_dir=""
+  dashboard_public_dir=""
+  dashboard_workdir=""
+
+  local -a env_pairs=()
+  local -a config_pairs=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --swarm-id)
+        shift
+        require_value "--swarm-id" "${1:-}"
+        swarm_id="$1"
+        ;;
+      --project-root)
+        shift
+        require_value "--project-root" "${1:-}"
+        project_root="$1"
+        ;;
+      --project-name)
+        shift
+        require_value "--project-name" "${1:-}"
+        project_name="$1"
+        ;;
+      --project-id)
+        shift
+        require_value "--project-id" "${1:-}"
+        project_id="$1"
+        ;;
+      --dashboard-port)
+        shift
+        require_value "--dashboard-port" "${1:-}"
+        dashboard_port="$1"
+        ;;
+      --ws-port)
+        shift
+        require_value "--ws-port" "${1:-}"
+        ws_port="$1"
+        ;;
+      --agent-count)
+        shift
+        require_value "--agent-count" "${1:-}"
+        agent_count="$1"
+        ;;
+      --main-branch)
+        shift
+        require_value "--main-branch" "${1:-}"
+        main_branch="$1"
+        ;;
+      --production-branch)
+        shift
+        require_value "--production-branch" "${1:-}"
+        production_branch="$1"
+        ;;
+      --repo-url)
+        shift
+        require_value "--repo-url" "${1:-}"
+        repo_url="$1"
+        ;;
+      --env)
+        shift
+        require_value "--env" "${1:-}"
+        env_pairs+=("$1")
+        ;;
+      --config)
+        shift
+        require_value "--config" "${1:-}"
+        config_pairs+=("$1")
+        ;;
+      --foreground)
+        foreground="1"
+        ;;
+      --dry-run)
+        dry_run="1"
+        ;;
+      --help|-h)
+        print_swarm_help
+        return 0
+        ;;
+      *)
+        err "Unknown swarm option: $1"
+        print_swarm_help
+        return 1
+        ;;
+    esac
+    shift
+  done
+
+  mkdir -p "$project_root"
+  project_root="$(cd "$project_root" && pwd)"
+
+  if ! project_is_setup "$project_root"; then
+    err "Project is not set up: $project_root"
+    err "Run: DroidSwarm setup --project-root \"$project_root\" --project-mode <greenfield|existing>"
+    return 1
+  fi
+
+  load_project_setup "$project_root"
+
+  if [[ -z "$project_name" ]]; then
+    project_name="${DROIDSWARM_PROJECT_NAME:-}"
+  fi
+
+  if [[ -z "$project_id" ]]; then
+    project_id="${DROIDSWARM_PROJECT_ID:-}"
+  fi
+
+  project_mode="${DROIDSWARM_PROJECT_MODE:-}"
+
+  if [[ -z "$main_branch" ]]; then
+    main_branch="${DROIDSWARM_MAIN_BRANCH:-main}"
+  fi
+
+  if [[ -z "$production_branch" ]]; then
+    production_branch="${DROIDSWARM_PRODUCTION_BRANCH:-production}"
+  fi
+
+  db_path="${DROIDSWARM_DB_PATH:-}"
+
+  if [[ -z "$swarm_id" ]]; then
+    swarm_id="${project_id}-$(date +%s)"
+  fi
+
+  if swarm_exists "$swarm_id"; then
+    err "Swarm already exists: $swarm_id"
+    return 1
+  fi
+
+  if [[ -z "$dashboard_port" ]]; then
+    dashboard_port="${DROIDSWARM_DASHBOARD_PORT:-}"
+  fi
+
+  if [[ -z "$dashboard_port" ]]; then
+    dashboard_port="$(next_available_port 3000)"
+  fi
+
+  if [[ -z "$ws_port" ]]; then
+    ws_port="${DROIDSWARM_WS_PORT:-}"
+  fi
+
+  if [[ -z "$ws_port" ]]; then
+    ws_port="$(next_available_port 8765)"
+    if [[ "$ws_port" == "$dashboard_port" ]]; then
+      ws_port=$((ws_port + 1))
+    fi
+  fi
+
+  local state_dir log_file
+  state_dir="$(swarm_dir "$swarm_id")"
+  log_file="$(swarm_log_file "$swarm_id")"
+  local workspace_root install_runtime_root
+  workspace_root="$(cd "$ROOT_DIR/../.." 2>/dev/null && pwd || true)"
+  install_runtime_root="$ROOT_DIR/runtime"
+
+  if [[ -z "$node_bin" || ! -x "$node_bin" ]]; then
+    err "Node.js is required to start a swarm."
+    return 1
+  fi
+
+  socket_server_entry="$(resolve_runtime_value "${DROIDSWARM_SOCKET_SERVER_ENTRY:-}" \
+    "$install_runtime_root/socket-server/main.js" \
+    "$workspace_root/dist/apps/socket-server/main.js" || true)"
+  orchestrator_entry="$(resolve_runtime_value "${DROIDSWARM_ORCHESTRATOR_ENTRY:-}" \
+    "$install_runtime_root/orchestrator/main.js" \
+    "$workspace_root/dist/apps/orchestrator/main.js" || true)"
+  dashboard_server_entry="$(resolve_runtime_value "${DROIDSWARM_DASHBOARD_SERVER_ENTRY:-}" \
+    "$install_runtime_root/dashboard/server.js" \
+    "$install_runtime_root/dashboard/apps/dashboard/server.js" \
+    "$workspace_root/apps/dashboard/.next/standalone/server.js" \
+    "$workspace_root/apps/dashboard/.next/standalone/apps/dashboard/server.js" || true)"
+  dashboard_static_dir="$(resolve_runtime_dir_value "${DROIDSWARM_DASHBOARD_STATIC_DIR:-}" \
+    "$install_runtime_root/dashboard/.next/static" \
+    "$install_runtime_root/dashboard/apps/dashboard/.next/static" \
+    "$workspace_root/apps/dashboard/.next/static" || true)"
+  dashboard_public_dir="$(resolve_runtime_dir_value "${DROIDSWARM_DASHBOARD_PUBLIC_DIR:-}" \
+    "$install_runtime_root/dashboard/public" \
+    "$install_runtime_root/dashboard/apps/dashboard/public" \
+    "$workspace_root/apps/dashboard/public" || true)"
+
+  if [[ -z "$socket_server_entry" ]]; then
+    err "Missing socket-server build artifact."
+    err "Expected dist/apps/socket-server/main.js or installed runtime copy."
+    err "Run: nx build socket-server"
+    return 1
+  fi
+
+  if [[ -z "$orchestrator_entry" ]]; then
+    err "Missing orchestrator build artifact."
+    err "Expected dist/apps/orchestrator/main.js or installed runtime copy."
+    err "Run: nx build orchestrator"
+    return 1
+  fi
+
+  if [[ -z "$dashboard_server_entry" ]]; then
+    err "Missing dashboard standalone server artifact."
+    err "Expected apps/dashboard/.next/standalone/.../server.js or installed runtime copy."
+    err "Run: nx build dashboard"
+    return 1
+  fi
+
+  dashboard_workdir="$(cd "$(dirname "$dashboard_server_entry")" && pwd)"
+
+  if [[ -z "$operator_token" ]]; then
+    operator_token="$(uuid)"
+  fi
+
+  info "Swarm ID: $swarm_id"
+  info "Project: $project_name ($project_id)"
+  info "Project root: $project_root"
+  info "Dashboard port: $dashboard_port"
+  info "WebSocket port: $ws_port"
+
+  if [[ "$dry_run" == "1" ]]; then
+    return 0
+  fi
+
+  mkdir -p "$state_dir"
+  printf 'starting\n' >"$(swarm_status_file "$swarm_id")"
+
+  cat >"$(swarm_env_file "$swarm_id")" <<EOF
+DROIDSWARM_SWARM_ID=$(printf '%q' "$swarm_id")
+DROIDSWARM_PROJECT_ROOT=$(printf '%q' "$project_root")
+DROIDSWARM_PROJECT_NAME=$(printf '%q' "$project_name")
+DROIDSWARM_PROJECT_ID=$(printf '%q' "$project_id")
+DROIDSWARM_PROJECT_MODE=$(printf '%q' "$project_mode")
+DROIDSWARM_DASHBOARD_PORT=$(printf '%q' "$dashboard_port")
+DROIDSWARM_WS_PORT=$(printf '%q' "$ws_port")
+DROIDSWARM_AGENT_COUNT=$(printf '%q' "$agent_count")
+DROIDSWARM_MAIN_BRANCH=$(printf '%q' "$main_branch")
+DROIDSWARM_PRODUCTION_BRANCH=$(printf '%q' "$production_branch")
+DROIDSWARM_REPO_URL=$(printf '%q' "$repo_url")
+DROIDSWARM_CREATED_AT=$(printf '%q' "$(now_utc)")
+DROIDSWARM_CREATED_EPOCH=$(printf '%q' "$(date +%s)")
+DROIDSWARM_NODE_BIN=$(printf '%q' "$node_bin")
+DROIDSWARM_OPERATOR_TOKEN=$(printf '%q' "$operator_token")
+DROIDSWARM_SOCKET_SERVER_ENTRY=$(printf '%q' "$socket_server_entry")
+DROIDSWARM_ORCHESTRATOR_ENTRY=$(printf '%q' "$orchestrator_entry")
+DROIDSWARM_DASHBOARD_SERVER_ENTRY=$(printf '%q' "$dashboard_server_entry")
+DROIDSWARM_DASHBOARD_STATIC_DIR=$(printf '%q' "$dashboard_static_dir")
+DROIDSWARM_DASHBOARD_PUBLIC_DIR=$(printf '%q' "$dashboard_public_dir")
+DROIDSWARM_DASHBOARD_WORKDIR=$(printf '%q' "$dashboard_workdir")
+EOF
+
+  write_env_assignment_file "$state_dir/env.list" "${env_pairs[@]-}"
+  write_env_assignment_file "$state_dir/config.list" "${config_pairs[@]-}"
+  write_project_metadata \
+    "$project_root" \
+    "$project_name" \
+    "$project_id" \
+    "$project_mode" \
+    "$main_branch" \
+    "$production_branch" \
+    "$dashboard_port" \
+    "$ws_port" \
+    "$db_path"
+
+  if [[ "$foreground" == "1" ]]; then
+    "$ROOT_DIR/libexec/droidswarm-daemon.sh" "$swarm_id" "$state_dir"
+  else
+    nohup "$ROOT_DIR/libexec/droidswarm-daemon.sh" "$swarm_id" "$state_dir" >>"$log_file" 2>&1 &
+    local pid="$!"
+    printf '%s\n' "$pid" >"$(swarm_pid_file "$swarm_id")"
+    info "Started DroidSwarm '$swarm_id' (pid $pid)"
+  fi
+}
+
+cmd_list() {
+  ensure_runtime_dirs
+
+  local show_all="0"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --all)
+        show_all="1"
+        ;;
+      --help|-h)
+        cat <<'EOF'
+Usage:
+  DroidSwarm list [--all]
+EOF
+        return 0
+        ;;
+      *)
+        err "Unknown list option: $1"
+        return 1
+        ;;
+    esac
+    shift
+  done
+
+  printf '%-28s %-18s %-10s %-8s %-8s %-8s %-12s %-12s %-12s\n' \
+    "SWARM_ID" "PROJECT_ID" "STATUS" "PID" "DASH" "WS" "UPTIME" "SOCKET" "ORCH"
+
+  local swarm_id pid status uptime
+  local found="0"
+  for swarm_id in $(active_swarm_ids); do
+    if ! load_swarm_env "$swarm_id"; then
+      continue
+    fi
+
+    pid="-"
+    status="stopped"
+    uptime="-"
+
+    if [[ -f "$(swarm_status_file "$swarm_id")" ]]; then
+      status="$(<"$(swarm_status_file "$swarm_id")")"
+    fi
+
+    if [[ -f "$(swarm_pid_file "$swarm_id")" ]]; then
+      pid="$(<"$(swarm_pid_file "$swarm_id")")"
+      if is_pid_running "$pid"; then
+        [[ "$status" == "stopped" ]] && status="running"
+        uptime="$(format_duration "${DROIDSWARM_CREATED_EPOCH:-0}")"
+      else
+        [[ "$status" == "running" ]] && status="degraded"
+      fi
+    fi
+
+    if [[ "$show_all" != "1" && "$status" != "running" ]]; then
+      continue
+    fi
+
+    local socket_component_status orch_component_status
+    socket_component_status="-"
+    orch_component_status="-"
+    if [[ -f "$(component_status_file "socket-server" "$(swarm_dir "$swarm_id")")" ]]; then
+      socket_component_status="$(<"$(component_status_file "socket-server" "$(swarm_dir "$swarm_id")")")"
+    fi
+    if [[ -f "$(component_status_file "orchestrator" "$(swarm_dir "$swarm_id")")" ]]; then
+      orch_component_status="$(<"$(component_status_file "orchestrator" "$(swarm_dir "$swarm_id")")")"
+    fi
+
+    found="1"
+    printf '%-28s %-18s %-10s %-8s %-8s %-8s %-12s %-12s %-12s\n' \
+      "$swarm_id" \
+      "${DROIDSWARM_PROJECT_ID:-unknown}" \
+      "$status" \
+      "$pid" \
+      "${DROIDSWARM_DASHBOARD_PORT:-"-"}" \
+      "${DROIDSWARM_WS_PORT:-"-"}" \
+      "$uptime" \
+      "$socket_component_status" \
+      "$orch_component_status"
+  done
+
+  if [[ "$found" != "1" ]]; then
+    info "No matching DroidSwarm instances found."
+  fi
+}
+
+shutdown_one() {
+  local swarm_id="$1"
+  if ! swarm_exists "$swarm_id"; then
+    err "Unknown swarm: $swarm_id"
+    return 1
+  fi
+
+  local pid=""
+  if [[ -f "$(swarm_pid_file "$swarm_id")" ]]; then
+    pid="$(<"$(swarm_pid_file "$swarm_id")")"
+  fi
+
+  if [[ -n "$pid" && "$pid" != "-" ]] && is_pid_running "$pid"; then
+    kill "$pid"
+    sleep 1
+    if is_pid_running "$pid"; then
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+  fi
+
+  printf 'stopped\n' >"$(swarm_status_file "$swarm_id")"
+  info "Stopped DroidSwarm '$swarm_id'"
+}
+
+cmd_shutdown() {
+  ensure_runtime_dirs
+
+  local swarm_id=""
+  local all="0"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --swarm-id)
+        shift
+        require_value "--swarm-id" "${1:-}"
+        swarm_id="$1"
+        ;;
+      --all)
+        all="1"
+        ;;
+      --help|-h)
+        cat <<'EOF'
+Usage:
+  DroidSwarm shutdown --swarm-id <id>
+  DroidSwarm shutdown --all
+EOF
+        return 0
+        ;;
+      *)
+        err "Unknown shutdown option: $1"
+        return 1
+        ;;
+    esac
+    shift
+  done
+
+  if [[ "$all" != "1" && -z "$swarm_id" ]]; then
+    err "Provide --swarm-id or --all"
+    return 1
+  fi
+
+  if [[ "$all" == "1" ]]; then
+    local id
+    for id in $(active_swarm_ids); do
+      shutdown_one "$id" || true
+    done
+  else
+    shutdown_one "$swarm_id"
+  fi
+}
+
+case "$COMMAND" in
+  setup)
+    cmd_setup "$@"
+    ;;
+  swarm)
+    cmd_swarm "$@"
+    ;;
+  list)
+    cmd_list "$@"
+    ;;
+  shutdown)
+    cmd_shutdown "$@"
+    ;;
+  help|-h|--help)
+    print_help
+    ;;
+  *)
+    err "Unknown command: $COMMAND"
+    print_help
+    exit 1
+    ;;
+esac

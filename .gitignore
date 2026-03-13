@@ -1,3 +1,6 @@
+.droidswarm/*
+!.droidswarm/.gitkeep
+
 # These are some examples of commonly ignored file patterns.
 # You should customize this list as applicable to your project.
 # Learn more about .gitignore:
@@ -6,6 +9,10 @@
 # Node artifact files
 node_modules/
 dist/
+
+.nx
+
+.vscode
 
 # Compiled Java class files
 *.class
@@ -48,3 +55,11 @@ Thumbs.db
 *.mov
 *.wmv
 
+
+.nx/installation
+.nx/cache
+.nx/workspace-data
+
+# Next.js
+.next
+out

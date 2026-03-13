@@ -301,7 +301,8 @@ class DroidSwarmSocketServer {
     let authMessage;
     try {
       authMessage = (0, import_validate.parseAuthMessage)(rawMessage);
-    } catch {
+    } catch (error) {
+      this.logger.warn({ error: error instanceof Error ? error.message : "parse error", rawMessage }, "Failed to parse auth message");
       this.sendRawError(socket, "First message must be a valid auth message", "invalid_auth_message");
       socket.close(AUTH_CLOSE_CODE, "Invalid auth message");
       this.persistence.recordConnectionAuth({
@@ -320,6 +321,14 @@ class DroidSwarmSocketServer {
       this.finishAuthentication(socket, state, authResult);
     } catch (error) {
       const authError = error instanceof import_authenticate.AuthenticationError ? error : new import_authenticate.AuthenticationError("Authentication failed", "auth_failed");
+      this.logger.warn(
+        {
+          reason: authError.reasonCode,
+          message: authError.message,
+          payload: authMessage.payload
+        },
+        "Authentication failure"
+      );
       this.sendRawError(socket, authError.message, authError.reasonCode, authMessage.payload.room_id);
       socket.close(AUTH_CLOSE_CODE, authError.message);
       this.persistence.recordConnectionAuth({

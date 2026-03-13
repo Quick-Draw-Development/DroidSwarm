@@ -444,6 +444,7 @@ cmd_swarm() {
 
   local project_root project_name project_id project_mode swarm_id dashboard_port ws_port db_path
   local agent_count main_branch production_branch repo_url foreground dry_run
+  local dashboard_port_explicit ws_port_explicit
   local node_bin operator_token socket_server_entry orchestrator_entry dashboard_server_entry
   local dashboard_static_dir dashboard_public_dir dashboard_workdir
   local specs_dir
@@ -461,6 +462,8 @@ cmd_swarm() {
   repo_url=""
   foreground="0"
   dry_run="0"
+  dashboard_port_explicit="0"
+  ws_port_explicit="0"
   node_bin="${DROIDSWARM_NODE_BIN:-$(command -v node || true)}"
   operator_token="${DROIDSWARM_OPERATOR_TOKEN:-}"
   socket_server_entry=""
@@ -499,11 +502,13 @@ cmd_swarm() {
         shift
         require_value "--dashboard-port" "${1:-}"
         dashboard_port="$1"
+        dashboard_port_explicit="1"
         ;;
       --ws-port)
         shift
         require_value "--ws-port" "${1:-}"
         ws_port="$1"
+        ws_port_explicit="1"
         ;;
       --agent-count)
         shift
@@ -600,6 +605,12 @@ cmd_swarm() {
 
   if [[ -z "$dashboard_port" ]]; then
     dashboard_port="$(next_available_port 3000)"
+  elif ! port_is_free "$dashboard_port"; then
+    if [[ "$dashboard_port_explicit" == "1" ]]; then
+      err "Dashboard port is already in use: $dashboard_port"
+      return 1
+    fi
+    dashboard_port="$(next_available_port 3000)"
   fi
 
   if [[ -z "$ws_port" ]]; then
@@ -608,10 +619,21 @@ cmd_swarm() {
 
   if [[ -z "$ws_port" ]]; then
     ws_port="$(next_available_port 8765)"
-    if [[ "$ws_port" == "$dashboard_port" ]]; then
-      ws_port=$((ws_port + 1))
+  elif [[ "$ws_port" == "$dashboard_port" ]] || ! port_is_free "$ws_port"; then
+    if [[ "$ws_port_explicit" == "1" ]]; then
+      if [[ "$ws_port" == "$dashboard_port" ]]; then
+        err "WebSocket port must be different from dashboard port: $ws_port"
+      else
+        err "WebSocket port is already in use: $ws_port"
+      fi
+      return 1
     fi
+    ws_port="$(next_available_port 8765)"
   fi
+
+  while [[ "$ws_port" == "$dashboard_port" ]] || ! port_is_free "$ws_port"; do
+    ws_port=$((ws_port + 1))
+  done
 
   local state_dir log_file
   state_dir="$(swarm_dir "$swarm_id")"
@@ -724,6 +746,18 @@ EOF
     "$dashboard_port" \
     "$ws_port" \
     "$db_path"
+  write_project_setup_state \
+    "$project_root" \
+    "$project_name" \
+    "$project_id" \
+    "$project_mode" \
+    "$main_branch" \
+    "$production_branch" \
+    "$dashboard_port" \
+    "$ws_port" \
+    "$db_path" \
+    "$DROIDSWARM_VERSION" \
+    "$specs_dir"
 
   if [[ "$foreground" == "1" ]]; then
     "$ROOT_DIR/libexec/droidswarm-daemon.sh" "$swarm_id" "$state_dir"

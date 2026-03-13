@@ -69,6 +69,12 @@
       "namedRegex": "^/api/operator/messages(?:/)?$"
     },
     {
+      "page": "/api/socket-url",
+      "regex": "^/api/socket\\-url(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/socket\\-url(?:/)?$"
+    },
+    {
       "page": "/api/tasks",
       "regex": "^/api/tasks(?:/)?$",
       "routeKeys": {},

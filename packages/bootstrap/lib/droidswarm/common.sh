@@ -254,10 +254,17 @@ next_available_port() {
   local base="$1"
   local candidate="$base"
   local used_ports=""
-  local swarm_id
+  local swarm_id pid_file pid
 
   for swarm_id in $(active_swarm_ids); do
-    if load_swarm_env "$swarm_id"; then
+    pid_file="$(swarm_pid_file "$swarm_id")"
+    pid=""
+
+    if [[ -f "$pid_file" ]]; then
+      pid="$(<"$pid_file")"
+    fi
+
+    if [[ -n "$pid" ]] && is_pid_running "$pid" && load_swarm_env "$swarm_id"; then
       used_ports="${used_ports} ${DROIDSWARM_DASHBOARD_PORT:-} ${DROIDSWARM_WS_PORT:-}"
     fi
   done

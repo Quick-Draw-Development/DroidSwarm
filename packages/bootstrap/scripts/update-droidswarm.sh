@@ -174,7 +174,7 @@ fi
 env DROIDSWARM_INSTALL_ROOT="$INSTALL_ROOT" \
     DROIDSWARM_BIN_DIR="$BIN_DIR" \
     DROIDSWARM_DEFAULT_REPO_URL="$REPO_URL" \
-    /bin/bash -c "$(curl -fsSL "$INSTALL_SCRIPT_URL")" "${INSTALL_ARGS[@]}"
+    /bin/bash -c "$(curl -fsSL "$INSTALL_SCRIPT_URL")" install-droidswarm "${INSTALL_ARGS[@]}"
 
 for config in "${swarm_configs[@]}"; do
   IFS='|' read -r swarm_id project_root dashboard_port ws_port agent_count main_branch production_branch repo_url project_mode <<<"$config"

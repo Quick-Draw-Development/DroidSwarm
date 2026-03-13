@@ -9,11 +9,13 @@ export function BoardShell({
   tasks,
   projectName,
   operatorMessages,
+  appVersion,
 }: {
   username: string;
   tasks: TaskRecord[];
   projectName: string;
   operatorMessages: MessageRecord[];
+  appVersion?: string;
 }) {
   return (
     <main className="dashboard-shell">
@@ -22,6 +24,7 @@ export function BoardShell({
           <p className="eyebrow">Project Command</p>
           <h1>{projectName}</h1>
           <p className="subcopy">One swarm, one project, durable task memory.</p>
+          {appVersion && <p className="version-pill">Version {appVersion}</p>}
         </div>
         <div className="header-pills">
           <ProvideInstructionsModal username={username} initialMessages={operatorMessages} />

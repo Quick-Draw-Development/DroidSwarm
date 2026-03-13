@@ -77,6 +77,20 @@ pre {
   color: var(--muted);
 }
 
+.version-pill {
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  padding: 0.35rem 0.9rem;
+  margin-top: 6px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  background: var(--surface-strong);
+  font-family: var(--mono);
+  color: var(--ink);
+}
+
 .dashboard-shell,
 .channel-shell {
   width: min(1380px, calc(100% - 32px));

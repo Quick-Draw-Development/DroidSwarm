@@ -19,6 +19,9 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # shellcheck source=../lib/droidswarm/common.sh
 source "$ROOT_DIR/lib/droidswarm/common.sh"
 
+DROIDSWARM_VERSION="$(read_version_value)"
+export DROIDSWARM_VERSION
+
 COMMAND="${1:-help}"
 if [[ $# -gt 0 ]]; then
   shift
@@ -144,6 +147,35 @@ resolve_runtime_dir_value() {
   return 1
 }
 
+find_version_file() {
+  local candidate
+  for candidate in \
+    "$ROOT_DIR/VERSION" \
+    "$ROOT_DIR/../VERSION" \
+    "$ROOT_DIR/../../VERSION" \
+    "$ROOT_DIR/../../../VERSION"; do
+    if [[ -f "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+read_version_value() {
+  local version_file
+  if version_file="$(find_version_file)" && [[ -f "$version_file" ]]; then
+    local version
+    IFS= read -r version <"$version_file"
+    printf '%s\n' "${version:-0.0.0}"
+    return 0
+  fi
+
+  printf '0.0.0\n'
+  return 1
+}
+
 write_project_metadata() {
   local project_root="$1"
   local project_name="$2"
@@ -185,6 +217,7 @@ write_project_setup_state() {
   local dashboard_port="$7"
   local ws_port="$8"
   local db_path="$9"
+  local version="${10:-${DROIDSWARM_VERSION:-}}"
 
   cat >"$(project_setup_file "$project_root")" <<EOF
 DROIDSWARM_PROJECT_ROOT=$(printf '%q' "$project_root")
@@ -196,6 +229,7 @@ DROIDSWARM_PRODUCTION_BRANCH=$(printf '%q' "$production_branch")
 DROIDSWARM_DASHBOARD_PORT=$(printf '%q' "$dashboard_port")
 DROIDSWARM_WS_PORT=$(printf '%q' "$ws_port")
 DROIDSWARM_DB_PATH=$(printf '%q' "$db_path")
+DROIDSWARM_VERSION=$(printf '%q' "$version")
 DROIDSWARM_SETUP_COMPLETED_AT=$(printf '%q' "$(now_utc)")
 EOF
 }
@@ -376,6 +410,7 @@ cmd_setup() {
     "$dashboard_port" \
     "$ws_port" \
     "$db_path"
+    "$DROIDSWARM_VERSION"
 
   ensure_gitignore_entry "$project_root" ".droidswarm/*"
   ensure_gitignore_entry "$project_root" "!.droidswarm/.gitkeep"
@@ -658,6 +693,7 @@ DROIDSWARM_DASHBOARD_SERVER_ENTRY=$(printf '%q' "$dashboard_server_entry")
 DROIDSWARM_DASHBOARD_STATIC_DIR=$(printf '%q' "$dashboard_static_dir")
 DROIDSWARM_DASHBOARD_PUBLIC_DIR=$(printf '%q' "$dashboard_public_dir")
 DROIDSWARM_DASHBOARD_WORKDIR=$(printf '%q' "$dashboard_workdir")
+DROIDSWARM_VERSION=$(printf '%q' "$DROIDSWARM_VERSION")
 EOF
 
   write_env_assignment_file "$state_dir/env.list" "${env_pairs[@]-}"

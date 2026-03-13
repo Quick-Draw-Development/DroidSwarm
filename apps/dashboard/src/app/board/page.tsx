@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { BoardShell } from '../../components/BoardShell';
 import { UsernameGate } from '../../components/UsernameGate';
 import { USERNAME_COOKIE } from '../../lib/identity';
+import { getAppVersion } from '../../lib/version';
 import { getProjectIdentity, listOperatorMessages, listTasks } from '../../lib/db';
 
 export default async function BoardPage() {
@@ -16,6 +17,7 @@ export default async function BoardPage() {
   const project = getProjectIdentity();
   const tasks = listTasks();
   const operatorMessages = listOperatorMessages();
+  const appVersion = getAppVersion();
 
   return (
     <BoardShell
@@ -23,6 +25,7 @@ export default async function BoardPage() {
       tasks={tasks}
       projectName={project.projectName}
       operatorMessages={operatorMessages}
+      appVersion={appVersion}
     />
   );
 }

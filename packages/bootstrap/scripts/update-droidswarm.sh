@@ -36,6 +36,46 @@ Options:
 EOF
 }
 
+parse_github_repo() {
+  local repo_url="$1"
+  local normalized="${repo_url%.git}"
+  local owner=""
+  local repo=""
+
+  if [[ "$normalized" =~ ^https://github\.com/([^/]+)/([^/]+)$ ]]; then
+    owner="${BASH_REMATCH[1]}"
+    repo="${BASH_REMATCH[2]}"
+  elif [[ "$normalized" =~ ^git@github\.com:([^/]+)/([^/]+)$ ]]; then
+    owner="${BASH_REMATCH[1]}"
+    repo="${BASH_REMATCH[2]}"
+  else
+    return 1
+  fi
+
+  printf '%s|%s\n' "$owner" "$repo"
+}
+
+raw_file_url() {
+  local repo_url="$1"
+  local ref="${2:-main}"
+  local path="$3"
+  local owner_repo
+
+  owner_repo="$(parse_github_repo "$repo_url")" || return 1
+  local owner="${owner_repo%%|*}"
+  local repo="${owner_repo##*|}"
+
+  printf 'https://raw.githubusercontent.com/%s/%s/%s/%s\n' "$owner" "$repo" "$ref" "$path"
+}
+
+read_local_version() {
+  if [[ -f "$INSTALL_ROOT/VERSION" ]]; then
+    local version_line
+    IFS= read -r version_line <"$INSTALL_ROOT/VERSION"
+    printf '%s\n' "${version_line%%$'\\r'}"
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo-url)
@@ -103,6 +143,21 @@ done
 
 rm -rf "$DROIDSWARM_HOME/swarms" "$DROIDSWARM_HOME/run" "$DROIDSWARM_HOME/logs"
 mkdir -p "$DROIDSWARM_HOME/{swarms,run,logs}"
+
+local_version="$(read_local_version || true)"
+remote_version=""
+if remote_url="$(raw_file_url "$REPO_URL" "${REF:-main}" "VERSION" 2>/dev/null)"; then
+  remote_version="$(curl -fsSL "$remote_url" 2>/dev/null || true)"
+  remote_version="${remote_version%%$'\r'}"
+  remote_version="${remote_version%%$'\n'}"
+fi
+
+if [[ -n "$local_version" && -n "$remote_version" && "$local_version" == "$remote_version" ]]; then
+  info "Already on version $local_version; skipping update."
+  exit 0
+fi
+
+info "Local version: ${local_version:-unknown}; remote version: ${remote_version:-unknown}"
 
 INSTALL_ARGS=()
 if [[ -n "$REPO_URL" ]]; then

@@ -178,6 +178,9 @@ cp "$SOURCE_DIR/libexec/droidswarm-daemon.sh" "$INSTALL_ROOT/libexec/droidswarm-
 mkdir -p "$INSTALL_ROOT/scripts"
 cp "$SOURCE_DIR/scripts/update-droidswarm.sh" "$INSTALL_ROOT/bin/update-droidswarm"
 cp "$SOURCE_DIR/scripts/update-droidswarm.sh" "$INSTALL_ROOT/scripts/update-droidswarm.sh"
+if [[ -f "$WORKSPACE_SOURCE_ROOT/VERSION" ]]; then
+  cp "$WORKSPACE_SOURCE_ROOT/VERSION" "$INSTALL_ROOT/VERSION"
+fi
 rm -rf "$INSTALL_ROOT/runtime/socket-server" "$INSTALL_ROOT/runtime/orchestrator" "$INSTALL_ROOT/runtime/dashboard"
 mkdir -p "$INSTALL_ROOT/runtime/socket-server" "$INSTALL_ROOT/runtime/orchestrator" "$INSTALL_ROOT/runtime/dashboard/.next"
 cp -R "$SOCKET_RUNTIME_SOURCE/." "$INSTALL_ROOT/runtime/socket-server/"

@@ -208,6 +208,48 @@ active_swarm_ids() {
   done
 }
 
+port_is_free() {
+  local port="$1"
+  if [[ -z "$port" ]]; then
+    return 1
+  fi
+
+  if command -v node >/dev/null 2>&1; then
+    node - "$port" <<'NODE' >/dev/null 2>&1
+const net = require('net');
+const port = Number(process.argv[2]);
+const host = '127.0.0.1';
+const server = net.createServer();
+server.unref();
+server.once('error', () => process.exit(1));
+server.once('listening', () => {
+  server.close(() => process.exit(0));
+});
+server.listen(port, host);
+NODE
+    return $?
+  fi
+
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$port" <<'PY' >/dev/null 2>&1
+import socket
+import sys
+
+port = int(sys.argv[1])
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+try:
+    sock.bind(('127.0.0.1', port))
+except OSError:
+    sys.exit(1)
+finally:
+    sock.close()
+PY
+    return $?
+  fi
+
+  return 0
+}
+
 next_available_port() {
   local base="$1"
   local candidate="$base"
@@ -220,8 +262,18 @@ next_available_port() {
     fi
   done
 
-  while [[ " $used_ports " == *" $candidate "* ]]; do
-    candidate=$((candidate + 1))
+  while true; do
+    if [[ " $used_ports " == *" $candidate "* ]]; then
+      candidate=$((candidate + 1))
+      continue
+    fi
+
+    if ! port_is_free "$candidate"; then
+      candidate=$((candidate + 1))
+      continue
+    fi
+
+    break
   done
 
   printf '%s\n' "$candidate"

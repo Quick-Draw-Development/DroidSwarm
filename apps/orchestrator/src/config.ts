@@ -1,3 +1,6 @@
+import path from 'node:path';
+
+import { loadSpecCards } from './specs';
 import type { OrchestratorConfig } from './types';
 
 const toPositiveInt = (value: string | undefined, fallback: number): number => {
@@ -13,6 +16,10 @@ export const loadConfig = (): OrchestratorConfig => {
   const environment = (process.env.NODE_ENV ?? 'development') as OrchestratorConfig['environment'];
   const host = process.env.DROIDSWARM_SOCKET_HOST ?? '127.0.0.1';
   const port = toPositiveInt(process.env.DROIDSWARM_SOCKET_PORT, 8765);
+  const specDir =
+    process.env.DROIDSWARM_SPECS_DIR ??
+    path.resolve(__dirname, '..', '..', '..', 'packages', 'bootstrap', 'specs');
+  const specs = loadSpecCards(specDir);
 
   return {
     environment,
@@ -32,5 +39,9 @@ export const loadConfig = (): OrchestratorConfig => {
     ) as OrchestratorConfig['codexSandboxMode'],
     maxAgentsPerTask: toPositiveInt(process.env.DROIDSWARM_MAX_AGENTS_PER_TASK, 4),
     maxConcurrentAgents: toPositiveInt(process.env.DROIDSWARM_MAX_CONCURRENT_AGENTS, 12),
+    specDir,
+    orchestratorRules: specs.orchestrator,
+    droidspeakRules: specs.droidspeak,
+    agentRules: specs.agent,
   };
 };

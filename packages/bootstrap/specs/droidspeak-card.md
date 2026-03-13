@@ -131,7 +131,37 @@ Examples:
 - Prefer references like `ctx_ref`, `task_id`, `artifact_id`, and `session_id` in structured fields
 - If an identifier must appear in shorthand, use a short stable alias already present in structured payload metadata
 
-## 9. Translation Rules
+## 9. Clause Templates
+- `state clause`: `st <subject> <description>` (e.g., `st ui flow reviewed`)
+- `blocked clause`: `blk <subject>; need <role> <rationale>; dep <ref>` (e.g., `blk api-spec; need be impl path+schema; dep ui-auth`)
+- `needs clause`: `need <role> <deliverable> <context>` (e.g., `need qa test coverage`, `need fe review spec`)
+- `next clause`: `next <action> <target>` (e.g., `next pr-prep`, `next merge production`)
+- `done clause`: `done <activity> <result>` (e.g., `done design review`, `done tests pass`)
+- `risk clause`: `risk <area> <severity>; ask hum validate` (e.g., `risk release timing; ask hum verify`)
+
+Keep `compressed_content` to 2-4 clauses per summary and avoid newline characters. Clause order should follow the story arc: state → action → dependency/next.
+
+## 10. Translation Helpers
+- Template (`blk` clause): `Blocked on {subject}; needs {role} to {action}; depends on {ref}.`
+- Template (`need` clause): `{Role} needs to {action} {target}.`
+- Template (`next` clause): `Next step: {action} {target}.`
+- Template (`done` clause): `{Activity} done ({result}).`
+- Template (`risk` clause): `Risk: {area} ({severity}). Prompting {audience} for verification.`
+
+Unknown tokens must render verbatim and be tagged as “untranslated” in the UI.
+
+## 11. Agent Responsibilities
+- Every Codex agent must set `compression.scheme = droidspeak-v1` when emitting summaries, status updates, handoffs, or help requests.
+- Mirror the compressed text in telemetry usage records so analytics can audit token savings and errors.
+- Droidspeak must augment, not replace, structured fields such as `reason_code`, `clarification_question`, `doc_updates`, or `branch_actions`.
+- When requesting another agent, provide the latest clause as `parentDroidspeak` so successors continue the narrative.
+
+## 12. Orchestrator Conventions
+- The orchestrator validates each Droidspeak string for dictionary compliance and clause limits before routing the summary downstream.
+- Operator instructions remain plain language; once acted on, the orchestrator emits a Droidspeak summary of the resulting decision.
+- The dashboard UI should render both raw `compressed_content` and its deterministic translation so humans can toggle between them.
+
+## 13. Translation Rules
 - The frontend translator should map each known token to readable English
 - The frontend translator should use a small set of deterministic grammar templates layered on top of the token dictionary
 - Unknown tokens should be rendered verbatim and flagged as untranslated
@@ -140,7 +170,7 @@ Examples:
   - translated view
   - raw `droidspeak-v1` view
 
-### 9.1 Translation Strategy
+### 13.1 Translation Strategy
 - Step 1: tokenize the shorthand string by clauses and tokens
 - Step 2: map known tokens through the `droidspeak-v1` dictionary
 - Step 3: apply a small template set based on clause starters such as `blk`, `need`, `dep`, `next`, `done`, and `risk`
@@ -160,21 +190,21 @@ becomes:
 Blocked on API specification; backend implementation needs path and schema; depends on UI auth.
 ```
 
-## 10. Authoring Rules for Agents
+## 14. Authoring Rules for Agents
 - Keep summaries short
 - Use at most 2–4 clauses for MVP
 - Use defined tokens only
 - Do not omit critical structured fields assuming shorthand will carry them
 - If shorthand becomes awkward, use normal optional `content` instead
 
-## 11. Validation Rules
+## 15. Validation Rules
 - `compression.scheme` must equal `droidspeak-v1`
 - `compressed_content` must be lowercase ASCII
 - Reject shorthand strings that exceed a conservative length limit in MVP
 - Reject unsupported punctuation patterns
 - Optionally lint tokens against the known vocabulary list
 
-## 12. MVP Notes
+## 16. MVP Notes
 - Start with a small vocabulary and expand only when repeated patterns justify it
 - Log both translated and raw forms only if translation is deterministic; otherwise log raw plus renderer version
 - Treat `droidspeak-v1` as a token-saving aid, not as a hidden internal language

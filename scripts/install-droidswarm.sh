@@ -178,6 +178,9 @@ cp "$SOURCE_DIR/libexec/droidswarm-daemon.sh" "$INSTALL_ROOT/libexec/droidswarm-
 mkdir -p "$INSTALL_ROOT/scripts"
 cp "$SOURCE_DIR/scripts/update-droidswarm.sh" "$INSTALL_ROOT/bin/update-droidswarm"
 cp "$SOURCE_DIR/scripts/update-droidswarm.sh" "$INSTALL_ROOT/scripts/update-droidswarm.sh"
+rm -rf "$INSTALL_ROOT/specs"
+mkdir -p "$INSTALL_ROOT/specs"
+cp -R "$SOURCE_DIR/specs/." "$INSTALL_ROOT/specs/"
 if [[ -f "$WORKSPACE_SOURCE_ROOT/VERSION" ]]; then
   cp "$WORKSPACE_SOURCE_ROOT/VERSION" "$INSTALL_ROOT/VERSION"
 fi

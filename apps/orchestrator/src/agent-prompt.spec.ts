@@ -19,10 +19,14 @@ describe('buildAgentPrompt', () => {
         createdAt: '2026-03-12T12:00:00.000Z',
         createdByUserId: 'alice',
       },
+      specDroidspeak: 'droidspeak rules here',
+      parentDroidspeak: 'blk api-spec; next plan',
     });
 
     assert.match(prompt, /Planner-01/);
     assert.match(prompt, /task_id: task-1/);
     assert.match(prompt, /Role: planner/);
+    assert.match(prompt, /droidspeak rules here/);
+    assert.match(prompt, /blk api-spec/);
   });
 });

@@ -55,7 +55,12 @@ export class AgentSupervisor {
     return this.spawnRequests(task, defaultRoleInstructions(task));
   }
 
-  spawnRequests(task: TaskRecord, requests: RequestedAgent[], parentSummary?: string): SpawnedAgent[] {
+  spawnRequests(
+    task: TaskRecord,
+    requests: RequestedAgent[],
+    parentSummary?: string,
+    parentDroidspeak?: string,
+  ): SpawnedAgent[] {
     const spawned: SpawnedAgent[] = [];
     const taskState = this.registry.get(task.taskId);
     const activeCount = taskState?.activeAgents.length ?? 0;
@@ -70,6 +75,7 @@ export class AgentSupervisor {
         role: request.role,
         agentName,
         parentSummary: parentSummary ?? request.instructions,
+        parentDroidspeak,
       })], {
         env: process.env,
         stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
@@ -126,7 +132,12 @@ export class AgentSupervisor {
     }
 
     if (message.result.requested_agents.length > 0) {
-      this.spawnRequests(task, message.result.requested_agents, message.result.summary);
+      this.spawnRequests(
+        task,
+        message.result.requested_agents,
+        message.result.summary,
+        message.result.compression?.compressed_content,
+      );
     }
   }
 

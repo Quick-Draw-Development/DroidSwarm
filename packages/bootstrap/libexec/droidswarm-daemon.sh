@@ -109,6 +109,7 @@ fail_daemon() {
 
 run_socket_server() {
   export NODE_ENV=production
+  export DROIDSWARM_SPECS_DIR="${DROIDSWARM_SPECS_DIR:-$ROOT_DIR/specs}"
   export DROIDSWARM_VERSION
   export DROIDSWARM_SOCKET_HOST="127.0.0.1"
   export DROIDSWARM_SOCKET_PORT="$DROIDSWARM_WS_PORT"
@@ -122,6 +123,9 @@ run_socket_server() {
 
 run_dashboard() {
   export NODE_ENV=production
+  export DROIDSWARM_SPECS_DIR="${DROIDSWARM_SPECS_DIR:-$ROOT_DIR/specs}"
+  export NEXT_PUBLIC_DROIDSWARM_SOCKET_URL="ws://127.0.0.1:$DROIDSWARM_WS_PORT"
+  export NEXT_PUBLIC_DROIDSWARM_PROJECT_ID="${DROIDSWARM_PROJECT_ID:-}"
   export DROIDSWARM_VERSION
   export PORT="$DROIDSWARM_DASHBOARD_PORT"
   export HOSTNAME="127.0.0.1"
@@ -150,6 +154,7 @@ run_dashboard() {
 
 run_orchestrator() {
   export NODE_ENV=production
+  export DROIDSWARM_SPECS_DIR="${DROIDSWARM_SPECS_DIR:-$ROOT_DIR/specs}"
   export DROIDSWARM_VERSION
   export DROIDSWARM_SOCKET_HOST="127.0.0.1"
   export DROIDSWARM_SOCKET_PORT="$DROIDSWARM_WS_PORT"

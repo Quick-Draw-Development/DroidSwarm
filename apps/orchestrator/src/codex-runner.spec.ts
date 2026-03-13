@@ -51,6 +51,10 @@ describe('runCodexPrompt', () => {
       codexSandboxMode: 'workspace-write',
       maxAgentsPerTask: 4,
       maxConcurrentAgents: 8,
+      specDir: process.cwd(),
+      orchestratorRules: '',
+      droidspeakRules: '',
+      agentRules: '',
     };
 
     try {

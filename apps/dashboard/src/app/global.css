@@ -388,6 +388,22 @@ pre {
   padding: 12px;
 }
 
+.translation-copy {
+  margin: 0;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.translation-warning {
+  margin: 0;
+  font-size: 0.72rem;
+  font-family: var(--mono);
+  color: var(--warning);
+  background: rgba(148, 98, 0, 0.08);
+  padding: 4px 6px;
+  border-radius: 8px;
+}
+
 .mention-highlight {
   color: var(--danger);
 }
@@ -649,6 +665,7 @@ pre {
   padding: 24px;
   background: rgba(31, 26, 23, 0.38);
   backdrop-filter: blur(10px);
+  z-index: 100;
 }
 
 .operator-modal {
@@ -663,7 +680,7 @@ pre {
   background: rgba(255, 250, 244, 0.96);
   box-shadow: var(--shadow);
   position: relative;
-  z-index: 70;
+  z-index: 700;
 }
 
 .operator-modal-header {

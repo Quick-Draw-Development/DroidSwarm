@@ -26,6 +26,7 @@ export interface MessageEnvelope<TPayload = Record<string, unknown>> {
   from: ActorRef;
   timestamp: string;
   payload: TPayload;
+  compression?: string;
 }
 
 export interface AuthMessage {
@@ -57,6 +58,10 @@ export interface OrchestratorConfig {
   codexSandboxMode: 'read-only' | 'workspace-write' | 'danger-full-access';
   maxAgentsPerTask: number;
   maxConcurrentAgents: number;
+  specDir: string;
+  orchestratorRules: string;
+  droidspeakRules: string;
+  agentRules: string;
 }
 
 export interface TaskRecord {
@@ -96,6 +101,10 @@ export interface CodexAgentResult {
   branch_actions: string[];
   clarification_question?: string;
   reason_code?: string;
+  compression?: {
+    scheme: 'droidspeak-v1';
+    compressed_content: string;
+  };
 }
 
 export interface SpawnedAgent {

@@ -73,9 +73,11 @@ class DroidSwarmOrchestratorClient {
   connect() {
     const socket = new import_ws.default(this.config.socketUrl);
     this.socket = socket;
+    console.log("Connecting to socket server at", this.config.socketUrl);
     socket.on("open", () => {
       this.sendRaw((0, import_protocol.buildAuthMessage)(this.config));
       this.startHeartbeat();
+      console.log("Orchestrator connection established.");
     });
     socket.on("message", (raw) => {
       void this.handleMessage(raw.toString());

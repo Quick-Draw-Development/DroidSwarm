@@ -51,10 +51,12 @@ export class DroidSwarmOrchestratorClient {
   private connect(): void {
     const socket = new WebSocket(this.config.socketUrl);
     this.socket = socket;
+    console.log('Connecting to socket server at', this.config.socketUrl);
 
     socket.on('open', () => {
       this.sendRaw(buildAuthMessage(this.config));
       this.startHeartbeat();
+      console.log('Orchestrator connection established.');
     });
 
     socket.on('message', (raw) => {

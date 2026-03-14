@@ -24,6 +24,7 @@ REPO_URL=""
 REF=""
 INSTALL_ROOT="${DROIDSWARM_INSTALL_ROOT:-$HOME/.droidswarm/install}"
 BIN_DIR="${DROIDSWARM_BIN_DIR:-$HOME/.local/bin}"
+FORCE_UPDATE="0"
 DROIDSWARM_HOME="${DROIDSWARM_HOME:-$HOME/.droidswarm}"
 
 print_help() {
@@ -36,6 +37,7 @@ Options:
   --ref REF            Download this Git ref instead of the default branch
   --install-root DIR   Installer root to update (default: ~/.droidswarm/install)
   --bin-dir DIR        Existing DroidSwarm bin directory
+  --force              Reinstall regardless of version parity
   --help
 EOF
 }
@@ -102,6 +104,9 @@ while [[ $# -gt 0 ]]; do
       require_value "--bin-dir" "${1:-}"
       BIN_DIR="$1"
       ;;
+    --force)
+      FORCE_UPDATE="1"
+      ;;
     --help|-h)
       print_help
       exit 0
@@ -156,7 +161,7 @@ if remote_url="$(raw_file_url "$REPO_URL" "${REF:-main}" "VERSION" 2>/dev/null)"
   remote_version="${remote_version%%$'\n'}"
 fi
 
-if [[ -n "$local_version" && -n "$remote_version" && "$local_version" == "$remote_version" ]]; then
+if [[ "$FORCE_UPDATE" != "1" && -n "$local_version" && -n "$remote_version" && "$local_version" == "$remote_version" ]]; then
   info "Local version: $local_version; already on version $remote_version; skipping update."
   exit 0
 fi
@@ -169,6 +174,9 @@ if [[ -n "$REPO_URL" ]]; then
 fi
 if [[ -n "$REF" ]]; then
   INSTALL_ARGS+=(--ref "$REF")
+fi
+if [[ "$FORCE_UPDATE" == "1" ]]; then
+  INSTALL_ARGS+=(--force)
 fi
 
 env DROIDSWARM_INSTALL_ROOT="$INSTALL_ROOT" \

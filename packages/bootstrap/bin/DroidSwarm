@@ -136,6 +136,7 @@ Options:
   --ref REF
   --install-root DIR
   --bin-dir DIR
+  --force
   --help
 EOF
 }
@@ -857,8 +858,10 @@ cmd_update() {
   ensure_runtime_dirs
 
   local repo_url ref install_root bin_dir
+  local force
   repo_url=""
   ref=""
+  force="0"
   install_root="${DROIDSWARM_INSTALL_ROOT:-$HOME/.droidswarm/install}"
   bin_dir="${DROIDSWARM_BIN_DIR:-$HOME/.local/bin}"
 
@@ -884,6 +887,9 @@ cmd_update() {
         require_value "--bin-dir" "${1:-}"
         bin_dir="$1"
         ;;
+      --force)
+        force="1"
+        ;;
       --help|-h)
         print_update_help
         return 0
@@ -906,7 +912,10 @@ cmd_update() {
   DROIDSWARM_INSTALL_ROOT="$install_root" \
     DROIDSWARM_BIN_DIR="$bin_dir" \
     DROIDSWARM_DEFAULT_REPO_URL="${repo_url:-https://github.com/Quick-Draw-Development/DroidSwarm}" \
-    /bin/bash "$script_path" ${repo_url:+--repo-url "$repo_url"} ${ref:+--ref "$ref"}
+    /bin/bash "$script_path" \
+    ${repo_url:+--repo-url "$repo_url"} \
+    ${ref:+--ref "$ref"} \
+    $([[ "$force" == "1" ]] && printf -- '--force')
 }
 
 shutdown_one() {

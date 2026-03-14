@@ -132,7 +132,7 @@ declare -a swarm_configs=()
 config_file="$DROIDSWARM_HOME/swarms/*/swarm.env"
 for env_path in $config_file; do
   [[ -f "$env_path" ]] || continue
-  (
+  line=$(
     set -a
     source "$env_path"
     printf '%s|%s|%s|%s|%s|%s|%s|%s|%s\n' \
@@ -145,8 +145,8 @@ for env_path in $config_file; do
       "${DROIDSWARM_PRODUCTION_BRANCH:-production}" \
       "${DROIDSWARM_REPO_URL:-}" \
       "${DROIDSWARM_PROJECT_MODE:-}"
+    set +a
   )
-done | while IFS= read -r line; do
   swarm_configs+=("$line")
 done
 

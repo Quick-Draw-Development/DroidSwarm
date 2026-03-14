@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { cookies } from 'next/headers';
 
-import { ChannelThread } from '../../../components/ChannelThread';
+import { ChannelRoom } from '../../../components/ChannelRoom';
 import { LiveConnectionStatus } from '../../../components/LiveConnectionStatus';
 import { TaskStatusAction } from '../../../components/TaskStatusAction';
 import { USERNAME_COOKIE } from '../../../lib/identity';
@@ -82,11 +82,11 @@ export default async function ChannelPage({
         </aside>
 
         <section className="channel-main">
-          <ChannelThread messages={details.messages} username={username ?? ''} />
-          <div className="reply-box">
-            <p className="section-title">Human Reply</p>
-            <p className="subcopy">Reply submission and clarification threading will plug into the real task/channel semantics next.</p>
-          </div>
+          <ChannelRoom
+            taskId={details.task.taskId}
+            initialMessages={details.messages}
+            username={username ?? undefined}
+          />
         </section>
       </section>
     </main>

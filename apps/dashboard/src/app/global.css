@@ -414,6 +414,48 @@ pre {
   background: rgba(255, 247, 236, 0.66);
 }
 
+.reply-form {
+  display: grid;
+  gap: 12px;
+}
+
+.reply-input {
+  width: 100%;
+  min-height: 100px;
+  border: 1px solid rgba(43, 23, 10, 0.15);
+  border-radius: 18px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.9);
+  font-family: inherit;
+  resize: vertical;
+}
+
+.reply-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+}
+
+.reply-submit {
+  border: none;
+  border-radius: 999px;
+  padding: 0.8rem 1.8rem;
+  background: var(--accent);
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.reply-feedback {
+  margin-top: 10px;
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-family: var(--mono);
+}
+
 .channel-actions {
   margin-top: 14px;
   display: flex;
@@ -658,14 +700,19 @@ pre {
 
 .modal-backdrop {
   position: fixed;
+  width: 100vw;
+  height: 100vh;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
   inset: 0;
-  z-index: 60;
+  z-index: 1000;
   display: grid;
   place-items: center;
   padding: 24px;
   background: rgba(31, 26, 23, 0.38);
   backdrop-filter: blur(10px);
-  z-index: 100;
 }
 
 .operator-modal {
@@ -680,7 +727,7 @@ pre {
   background: rgba(255, 250, 244, 0.96);
   box-shadow: var(--shadow);
   position: relative;
-  z-index: 700;
+  z-index: 1001;
 }
 
 .operator-modal-header {

@@ -21,6 +21,14 @@
   },
   "dynamicRoutes": [
     {
+      "page": "/api/channels/[taskId]/messages",
+      "regex": "^/api/channels/([^/]+?)/messages(?:/)?$",
+      "routeKeys": {
+        "nxtPtaskId": "nxtPtaskId"
+      },
+      "namedRegex": "^/api/channels/(?<nxtPtaskId>[^/]+?)/messages(?:/)?$"
+    },
+    {
       "page": "/api/tasks/[taskId]/status",
       "regex": "^/api/tasks/([^/]+?)/status(?:/)?$",
       "routeKeys": {

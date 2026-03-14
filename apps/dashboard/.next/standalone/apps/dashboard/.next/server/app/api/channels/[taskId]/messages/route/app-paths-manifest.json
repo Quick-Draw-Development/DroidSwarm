@@ -1,0 +1,3 @@
+{
+  "/api/channels/[taskId]/messages/route": "app/api/channels/[taskId]/messages/route.js"
+}

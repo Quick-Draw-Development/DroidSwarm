@@ -78,6 +78,7 @@ BIN_DIR="${DROIDSWARM_BIN_DIR:-$HOME/.local/bin}"
 SOURCE_DIR=""
 DEFAULT_REPO_URL="${DROIDSWARM_DEFAULT_REPO_URL:-https://github.com/Quick-Draw-Development/DroidSwarm}"
 WORKSPACE_SOURCE_ROOT=""
+FORCE_INSTALL="0"
 
 print_help() {
   cat <<'EOF'
@@ -89,6 +90,7 @@ Options:
   --ref REF            Download this Git ref instead of the default branch
   --install-root DIR   Install files under this directory
   --bin-dir DIR        Place the DroidSwarm symlink in this directory
+  --force              Reinstall even if files already exist
   --help
 EOF
 }
@@ -114,6 +116,9 @@ while [[ $# -gt 0 ]]; do
       shift
       require_value "--bin-dir" "${1:-}"
       BIN_DIR="$1"
+      ;;
+    --force)
+      FORCE_INSTALL="1"
       ;;
     --help|-h)
       print_help

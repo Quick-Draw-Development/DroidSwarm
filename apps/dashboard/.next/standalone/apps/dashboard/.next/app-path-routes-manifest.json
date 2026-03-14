@@ -1,6 +1,7 @@
 {
   "/_global-error/page": "/_global-error",
   "/_not-found/page": "/_not-found",
+  "/api/channels/[taskId]/messages/route": "/api/channels/[taskId]/messages",
   "/api/identity/route": "/api/identity",
   "/api/operator/messages/route": "/api/operator/messages",
   "/api/socket-url/route": "/api/socket-url",

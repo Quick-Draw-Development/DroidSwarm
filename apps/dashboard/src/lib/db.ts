@@ -84,6 +84,13 @@ const demoMessages: MessageRecord[] = [
 
 let databaseInstance: Database.Database | null = null;
 
+export const resetDatabaseInstance = (): void => {
+  if (databaseInstance) {
+    databaseInstance.close();
+    databaseInstance = null;
+  }
+};
+
 const getDatabase = (): Database.Database => {
   if (databaseInstance) {
     return databaseInstance;
@@ -267,22 +274,28 @@ export const getTaskDetails = (taskId: string): TaskDetails | null => {
   }
 };
 
-type TaskDispatchStatus = 'accepted' | 'queued' | 'offline';
+export type TaskDispatchStatus = 'accepted' | 'queued' | 'offline';
 
-const dispatchOperatorMessage = async (input: {
+type DispatchInput = {
   username: string;
+  roomId?: string;
   messageType: 'chat' | 'status_update' | 'task_created';
   taskId?: string;
   payload: Record<string, unknown>;
   expectedMessageType?: string;
   expectedTaskId?: string;
-}): Promise<TaskDispatchStatus> => {
-  const operatorToken = process.env.DROIDSWARM_OPERATOR_TOKEN;
+};
 
+type OperatorDispatcher = (input: DispatchInput) => Promise<TaskDispatchStatus>;
+
+const defaultOperatorDispatcher: OperatorDispatcher = async (input) => {
+  const operatorToken = process.env.DROIDSWARM_OPERATOR_TOKEN;
+  console.log('Dispatching operator message with input:', input);
   return await new Promise<TaskDispatchStatus>((resolve) => {
     const socket = new WebSocket(DEFAULT_SOCKET_URL);
     const connectionName = input.username;
     const messageId = randomUUID();
+    const roomId = input.roomId ?? 'operator';
     let messageSent = false;
     const timeout = setTimeout(() => {
       socket.terminate();
@@ -325,7 +338,7 @@ const dispatchOperatorMessage = async (input: {
         socket.send(JSON.stringify({
           message_id: messageId,
           project_id: DEFAULT_PROJECT_ID,
-          room_id: 'operator',
+          room_id: roomId,
           task_id: input.taskId,
           type: input.messageType,
           from: {
@@ -362,6 +375,19 @@ const dispatchOperatorMessage = async (input: {
   });
 };
 
+let operatorDispatcher: OperatorDispatcher = defaultOperatorDispatcher;
+
+export const setOperatorDispatcher = (override: OperatorDispatcher): void => {
+  operatorDispatcher = override;
+};
+
+export const resetOperatorDispatcher = (): void => {
+  operatorDispatcher = defaultOperatorDispatcher;
+};
+
+export const dispatchOperatorMessage = (input: DispatchInput): Promise<TaskDispatchStatus> =>
+  operatorDispatcher(input);
+
 const publishOperatorStatusChange = async (input: {
   taskId: string;
   status: BoardStatus;
@@ -369,6 +395,7 @@ const publishOperatorStatusChange = async (input: {
 }): Promise<TaskDispatchStatus> => {
   return dispatchOperatorMessage({
     username: input.username,
+    roomId: 'operator',
     taskId: input.taskId,
     messageType: 'status_update',
     payload: {
@@ -386,6 +413,7 @@ const publishOperatorStatusChange = async (input: {
 const publishTaskCreated = async (task: TaskRecord): Promise<TaskDispatchStatus> => {
   return dispatchOperatorMessage({
     username: task.createdByUserId,
+    roomId: 'operator',
     taskId: task.taskId,
     messageType: 'task_created',
     expectedMessageType: 'task_intake_accepted',
@@ -406,12 +434,75 @@ export const sendOperatorInstruction = async (input: {
   content: string;
 }): Promise<TaskDispatchStatus> => dispatchOperatorMessage({
   username: input.username,
+  roomId: 'operator',
   messageType: 'chat',
   payload: {
     content: input.content,
     audience: 'orchestrator',
   },
 });
+
+export type ChannelMessageResult = {
+  dispatchStatus: TaskDispatchStatus;
+  message: MessageRecord;
+};
+
+export const sendChannelMessage = async (input: {
+  taskId: string;
+  username: string;
+  content: string;
+}): Promise<ChannelMessageResult> => {
+  const dispatchStatus = await dispatchOperatorMessage({
+    username: input.username,
+    roomId: input.taskId,
+    taskId: input.taskId,
+    messageType: 'chat',
+    payload: {
+      content: input.content,
+      audience: 'task',
+    },
+  });
+
+  const database = getDatabase();
+  const createdAt = new Date().toISOString();
+  const message: MessageRecord = {
+    messageId: randomUUID(),
+    projectId: DEFAULT_PROJECT_ID,
+    channelId: input.taskId,
+    taskId: input.taskId,
+    messageType: 'chat',
+    senderType: 'human',
+    senderName: input.username,
+    content: input.content,
+    payload: {
+      content: input.content,
+      dispatch_status: dispatchStatus,
+    },
+    createdAt,
+  };
+
+  database
+    .prepare(`
+      INSERT INTO messages (
+        message_id, project_id, channel_id, task_id, message_type, sender_type,
+        sender_name, content, payload_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    .run(
+      message.messageId,
+      message.projectId,
+      message.channelId,
+      message.taskId,
+      message.messageType,
+      message.senderType,
+      message.senderName,
+      message.content,
+      JSON.stringify(message.payload),
+      message.createdAt,
+    );
+
+  return { dispatchStatus, message };
+};
 
 export const createTask = async (input: {
   title: string;

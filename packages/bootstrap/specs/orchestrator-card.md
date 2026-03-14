@@ -129,10 +129,10 @@ Central controller (super admin / conductor) for the multi-agent system. Manages
   Surface documentation conflicts or missing context to humans when agent resolution is insufficient
   Surface limit-related blocked states, retry storms, and degraded execution to humans when they affect task progress
   Honor human task cancellation from the board, treating cancellation as an auditable workflow transition rather than a hard delete
-  Broadcast operator handoffs and agent assignments into the task channel:
-    - When the operator takes ownership for review (status `review`), post into the task channel so watchers know the human is actively reviewing.
-    - Announce orchestrator-assigned agents (name + role) into the same channel as soon as they spawn so the team can see who is working on the task.
-    - Mirror agent-to-agent coordination (help requests, handoffs, clarifications) back into the task channel to keep the human operator aware of multi-agent conversations.
+  Channel transparency: record every human/operator interaction in the task room.
+    - When a task is created and the operator stages it for review (status `review`), broadcast `X is reviewing this task` so watchers know a human is now overseeing the work.
+    - Immediately announce orchestrator-assigned agents (name + role) in the task channel so every participant can see who is working on the task.
+    - Relay every agent-to-agent coordination (help requests, handoffs, clarifications, or context swaps) back into the same channel so the human operator can follow the multi-agent dialogue.
 
 ## 4. Operational Rules
 - **Scaling & Limits**  

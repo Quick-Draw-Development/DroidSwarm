@@ -16,7 +16,11 @@ import {
 import { TaskRegistry } from './task-registry';
 import { buildTaskCancellationAcknowledged, isCancellationMessage, resolveTaskFromMessage } from './task-events';
 import { buildReviewAnnouncement } from './operator-notifications';
-import type { MessageEnvelope, OrchestratorConfig, SpawnedAgent } from './types';
+import { openPersistenceDatabase } from './persistence/database';
+import { PersistenceClient } from './persistence/repositories';
+import { OrchestratorPersistenceService } from './persistence/service';
+import type { Database } from 'better-sqlite3';
+import type { MessageEnvelope, OrchestratorConfig, PersistedTask, RunRecord, SpawnedAgent } from './types';
 
 export class DroidSwarmOrchestratorClient {
   private socket?: WebSocket;
@@ -29,8 +33,14 @@ export class DroidSwarmOrchestratorClient {
   private readonly channelSockets = new Map<string, WebSocket>();
   private readonly channelHeartbeats = new Map<string, NodeJS.Timeout>();
   private readonly channelReconnects = new Map<string, NodeJS.Timeout>();
+  private readonly database: Database;
+  private readonly persistence: PersistenceClient;
+  private currentRun?: RunRecord;
+  private persistenceService?: OrchestratorPersistenceService;
 
   constructor(private readonly config: OrchestratorConfig = loadConfig()) {
+    this.database = openPersistenceDatabase(this.config.dbPath);
+    this.persistence = PersistenceClient.fromDatabase(this.database);
     this.supervisor = new AgentSupervisor(
       config,
       this.registry,
@@ -44,6 +54,9 @@ export class DroidSwarmOrchestratorClient {
 
   start(): void {
     this.log('starting orchestrator');
+    this.currentRun = this.persistence.createRun(this.config.projectId);
+    this.persistenceService = new OrchestratorPersistenceService(this.persistence, this.currentRun);
+    this.log('created run', this.currentRun.runId);
     this.connect();
   }
 
@@ -54,6 +67,18 @@ export class DroidSwarmOrchestratorClient {
   private summarizeMessage(message: MessageEnvelope): string {
     const actor = message.from?.actor_name ?? 'unknown_actor';
     return `${message.type}@${message.room_id ?? 'unknown'} task=${message.task_id ?? 'unknown'} from=${actor}`;
+  }
+
+  private normalizePriority(value?: string): PersistedTask['priority'] {
+    if (!value) {
+      return 'medium';
+    }
+
+    if (['low', 'medium', 'high', 'urgent'].includes(value)) {
+      return value as PersistedTask['priority'];
+    }
+
+    return 'medium';
   }
 
   stop(): void {
@@ -76,6 +101,7 @@ export class DroidSwarmOrchestratorClient {
     }
     this.channelSockets.clear();
     this.socket?.close();
+    this.database.close();
   }
 
   private connect(): void {
@@ -213,6 +239,16 @@ export class DroidSwarmOrchestratorClient {
 
       this.registry.register(task);
       this.watchTaskChannel(task.taskId);
+      this.persistenceService?.createTask({
+        taskId: task.taskId,
+        name: task.title ?? task.taskId,
+        priority: this.normalizePriority(task.priority),
+        metadata: {
+          description: task.description,
+          task_type: task.taskType,
+          created_by: task.createdByUserId,
+        },
+      });
       this.sendRaw(buildTaskIntakeAccepted(this.config, task.taskId));
       this.log('registered task and accepted intake', task.taskId, task.title ?? 'untitled');
       this.supervisor.startInitialAgents(task);
@@ -228,6 +264,7 @@ export class DroidSwarmOrchestratorClient {
       }
 
       const removedAgents = this.supervisor.cancelTask(task.taskId);
+      this.persistenceService?.setTaskStatus(task.taskId, 'cancelled');
       this.sendRaw(
         buildTaskCancellationAcknowledged(
           this.config.projectId,
@@ -325,6 +362,9 @@ export class DroidSwarmOrchestratorClient {
       `Assigned agents: ${details}.`,
       { assigned_agents: agents.map((agent) => ({ agent_name: agent.agentName, agent_role: agent.role })) },
     );
+    agents.forEach((agent) => {
+      this.persistenceService?.recordAssignment(agent.agentName);
+    });
   }
 
   private reportAgentCommunication(taskId: string, content: string): void {

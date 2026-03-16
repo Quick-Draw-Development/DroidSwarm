@@ -62,6 +62,7 @@ export interface OrchestratorConfig {
   orchestratorRules: string;
   droidspeakRules: string;
   agentRules: string;
+  dbPath: string;
 }
 
 export interface TaskRecord {
@@ -111,4 +112,83 @@ export interface SpawnedAgent {
   agentName: string;
   taskId: string;
   role: string;
+}
+
+export interface RunRecord {
+  runId: string;
+  projectId: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  createdAt: string;
+  updatedAt: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface PersistedTask {
+  taskId: string;
+  runId: string;
+  parentTaskId?: string;
+  name: string;
+  status:
+    | 'queued'
+    | 'planning'
+    | 'running'
+    | 'waiting_on_dependency'
+    | 'waiting_on_human'
+    | 'in_review'
+    | 'verified'
+    | 'completed'
+    | 'failed'
+    | 'cancelled';
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  createdAt: string;
+  updatedAt: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface TaskAttemptRecord {
+  attemptId: string;
+  taskId: string;
+  runId: string;
+  agentName: string;
+  status: 'running' | 'completed' | 'failed' | 'blocked';
+  createdAt: string;
+  updatedAt: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ArtifactRecord {
+  artifactId: string;
+  attemptId: string;
+  taskId: string;
+  runId: string;
+  kind: string;
+  summary: string;
+  content: string;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface AgentAssignmentRecord {
+  assignmentId: string;
+  attemptId: string;
+  agentName: string;
+  assignedAt: string;
+}
+
+export interface CheckpointRecord {
+  checkpointId: string;
+  taskId: string;
+  runId: string;
+  attemptId?: string;
+  payloadJson: string;
+  createdAt: string;
+}
+
+export interface BudgetEventRecord {
+  eventId: string;
+  runId: string;
+  taskId?: string;
+  detail: string;
+  consumed: number;
+  createdAt: string;
 }

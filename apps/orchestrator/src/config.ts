@@ -43,5 +43,6 @@ export const loadConfig = (): OrchestratorConfig => {
     orchestratorRules: specs.orchestrator,
     droidspeakRules: specs.droidspeak,
     agentRules: specs.agent,
+    dbPath: process.env.DROIDSWARM_DB_PATH ?? path.resolve(process.cwd(), 'data', 'droidswarm.db'),
   };
 };

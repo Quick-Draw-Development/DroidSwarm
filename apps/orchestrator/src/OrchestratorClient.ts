@@ -52,6 +52,12 @@ export class DroidSwarmOrchestratorClient {
       registry: this.registry,
     });
 
+    this.scheduler.setEvents({
+      onPlanProposed: this.engine.handlePlanProposed,
+      onCheckpointCreated: this.engine.handleCheckpointCreated,
+      onVerificationRequested: this.engine.handleVerificationRequested,
+    });
+
     this.supervisor.setCallbacks({
       onAgentsAssigned: this.engine.handleAgentAssignment.bind(this.engine),
       onAgentCommunication: this.engine.handleAgentCommunication.bind(this.engine),

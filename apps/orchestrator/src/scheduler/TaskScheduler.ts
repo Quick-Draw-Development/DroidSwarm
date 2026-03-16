@@ -23,15 +23,42 @@ const buildTaskRecord = (task: PersistedTask): TaskRecord => ({
 
 const dependencySatisfiedStatuses: PersistedTask['status'][] = ['completed', 'verified', 'failed', 'cancelled'];
 
+export interface TaskSchedulerEvents {
+  onPlanProposed?: (
+    taskId: string,
+    planId: string,
+    summary: string,
+    plan?: string,
+    dependencies?: string[],
+  ) => void;
+  onCheckpointCreated?: (
+    taskId: string,
+    checkpointId: string,
+    summary: string,
+    metadata?: Record<string, unknown>,
+  ) => void;
+  onVerificationRequested?: (
+    taskId: string,
+    verificationType: string,
+    requestedBy: string,
+    detail?: string,
+  ) => void;
+}
+
 export class TaskScheduler {
   private readonly readyQueue = new Set<string>();
   private readonly retryTimers = new Map<string, NodeJS.Timeout>();
+  private events?: TaskSchedulerEvents;
 
   constructor(
     private readonly persistenceService: OrchestratorPersistenceService,
     private readonly supervisor: AgentSupervisor,
     private readonly config: OrchestratorConfig,
   ) {}
+
+  setEvents(events: TaskSchedulerEvents): void {
+    this.events = events;
+  }
 
   handleNewTask(taskId: string): void {
     this.readyQueue.add(taskId);
@@ -69,9 +96,34 @@ export class TaskScheduler {
       }
     } else if (result.status === 'completed') {
       this.persistenceService.setTaskStatus(taskId, 'completed');
+      this.events?.onVerificationRequested?.(
+        taskId,
+        role,
+        this.config.agentName,
+        result.summary,
+      );
     } else {
       this.persistenceService.setTaskStatus(taskId, 'waiting_on_human');
       this.scheduleRetry(task.taskId);
+    }
+
+    if (result.compression?.compressed_content) {
+      const checkpointId = this.persistenceService.recordCheckpoint(
+        taskId,
+        attemptId,
+        {
+          compression: result.compression,
+          summary: result.summary,
+        },
+      );
+      this.events?.onCheckpointCreated?.(
+        taskId,
+        checkpointId,
+        result.summary,
+        {
+          compression: result.compression,
+        },
+      );
     }
 
     this.resolveParentIfReady(task);
@@ -192,6 +244,7 @@ export class TaskScheduler {
     parentDroidspeak?: string,
   ): void {
     const taskDepth = this.getTaskDepth(task.taskId);
+    const childIds: string[] = [];
     if (taskDepth + 1 > this.config.schedulerMaxTaskDepth) {
       this.log(`max depth ${this.config.schedulerMaxTaskDepth} reached for ${task.taskId}; waiting on human`);
       this.persistenceService.setTaskStatus(task.taskId, 'waiting_on_human');
@@ -219,6 +272,17 @@ export class TaskScheduler {
       });
       this.persistenceService.addDependency(task.taskId, childId);
       this.readyQueue.add(childId);
+      childIds.push(childId);
+    }
+    const planSummary = requests.map((request) => `${request.role}: ${request.reason}`).join(' | ') || task.name;
+    if (childIds.length > 0) {
+      this.events?.onPlanProposed?.(
+        task.taskId,
+        randomUUID(),
+        planSummary,
+        parentSummary,
+        childIds,
+      );
     }
   }
 

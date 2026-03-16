@@ -1,6 +1,13 @@
 import { randomUUID } from 'node:crypto';
 
-import { buildOperatorChatResponse, buildOrchestratorStatusUpdate, buildTaskAssignedMessage } from '../messages';
+import {
+  buildCheckpointCreatedMessage,
+  buildOperatorChatResponse,
+  buildOrchestratorStatusUpdate,
+  buildPlanProposedMessage,
+  buildTaskAssignedMessage,
+  buildVerificationRequestedMessage,
+} from '../messages';
 import { buildTaskIntakeAccepted } from '../protocol';
 import { isCancellationMessage, resolveTaskFromMessage } from '../task-events';
 import type { MessageEnvelope, OrchestratorConfig, PersistedTask, SpawnedAgent } from '../types';
@@ -11,6 +18,7 @@ import { SocketGateway, MessageSource } from '../socket/SocketGateway';
 import { TaskScheduler } from '../scheduler/TaskScheduler';
 import { AgentSupervisor } from '../AgentSupervisor';
 import { OperatorCommandHandler } from '../operator/OperatorCommandHandler';
+import type { TaskSchedulerEvents } from '../scheduler/TaskScheduler';
 
 export interface OrchestratorEngineOptions {
   config: OrchestratorConfig;
@@ -22,7 +30,7 @@ export interface OrchestratorEngineOptions {
   registry: TaskRegistry;
 }
 
-export class OrchestratorEngine {
+export class OrchestratorEngine implements TaskSchedulerEvents {
   private readonly prefix = '[OrchestratorEngine]';
 
   constructor(
@@ -225,4 +233,66 @@ export class OrchestratorEngine {
   private log(...items: unknown[]): void {
     console.log(this.prefix, ...items);
   }
+
+  handlePlanProposed = (
+    taskId: string,
+    planId: string,
+    summary: string,
+    plan?: string,
+    dependencies?: string[],
+  ): void => {
+    this.options.gateway.send(
+      buildPlanProposedMessage(
+        this.options.config,
+        taskId,
+        planId,
+        summary,
+        plan,
+        dependencies,
+      ),
+    );
+  };
+
+  handleCheckpointCreated = (
+    taskId: string,
+    checkpointId: string,
+    summary: string,
+    metadata?: Record<string, unknown>,
+  ): void => {
+    this.options.gateway.send(
+      buildCheckpointCreatedMessage(
+        this.options.config,
+        taskId,
+        taskId,
+        checkpointId,
+        summary,
+        metadata,
+      ),
+    );
+  };
+
+  handleVerificationRequested = (
+    taskId: string,
+    verificationType: string,
+    requestedBy: string,
+    detail?: string,
+  ): void => {
+    this.options.gateway.send(
+      buildVerificationRequestedMessage(
+        this.options.config,
+        taskId,
+        verificationType,
+        requestedBy,
+        detail,
+      ),
+    );
+    this.sendStatusUpdate(
+      'operator',
+      taskId,
+      'operator_review',
+      'verification_requested',
+      'Verification requested for task.',
+      { verification_type: verificationType, detail },
+    );
+  };
 }

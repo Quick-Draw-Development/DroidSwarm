@@ -171,3 +171,72 @@ export const buildOperatorChatResponse = (
     content,
   },
 });
+
+export const buildPlanProposedMessage = (
+  config: OrchestratorConfig,
+  taskId: string,
+  planId: string,
+  summary: string,
+  plan?: string,
+  dependencies?: string[],
+): MessageEnvelope => ({
+  message_id: randomUUID(),
+  project_id: config.projectId,
+  room_id: 'operator',
+  task_id: taskId,
+  type: 'plan_proposed',
+  from: buildActor(config.agentName, 'orchestrator'),
+  timestamp: nowIso(),
+  payload: {
+    task_id: taskId,
+    plan_id: planId,
+    summary,
+    plan,
+    dependencies,
+  },
+});
+
+export const buildVerificationRequestedMessage = (
+  config: OrchestratorConfig,
+  taskId: string,
+  verificationType: string,
+  requestedBy: string,
+  detail?: string,
+): MessageEnvelope => ({
+  message_id: randomUUID(),
+  project_id: config.projectId,
+  room_id: 'operator',
+  task_id: taskId,
+  type: 'verification_requested',
+  from: buildActor(config.agentName, 'orchestrator'),
+  timestamp: nowIso(),
+  payload: {
+    task_id: taskId,
+    verification_type: verificationType,
+    requested_by: requestedBy,
+    detail,
+  },
+});
+
+export const buildCheckpointCreatedMessage = (
+  config: OrchestratorConfig,
+  taskId: string,
+  roomId: string,
+  checkpointId: string,
+  summary: string,
+  metadata?: Record<string, unknown>,
+): MessageEnvelope => ({
+  message_id: randomUUID(),
+  project_id: config.projectId,
+  room_id: roomId,
+  task_id: taskId,
+  type: 'checkpoint_created',
+  from: buildActor(config.agentName, 'orchestrator'),
+  timestamp: nowIso(),
+  payload: {
+    checkpoint_id: checkpointId,
+    task_id: taskId,
+    summary,
+    metadata,
+  },
+});

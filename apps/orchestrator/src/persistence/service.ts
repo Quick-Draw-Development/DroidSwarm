@@ -126,4 +126,17 @@ export class OrchestratorPersistenceService {
         updatedAt: row.updated_at,
       }));
   }
+
+  recordCheckpoint(taskId: string, attemptId: string | undefined, payload: Record<string, unknown>): string {
+    const checkpointId = randomUUID();
+    this.persistence.checkpoints.create({
+      checkpointId,
+      taskId,
+      runId: this.run.runId,
+      attemptId: attemptId ?? undefined,
+      payloadJson: JSON.stringify(payload),
+      createdAt: nowIso(),
+    });
+    return checkpointId;
+  }
 }

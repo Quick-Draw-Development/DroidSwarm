@@ -16,6 +16,12 @@ From another source checkout or remote repo:
 ./scripts/install-droidswarm.sh --repo-url <git-url> --ref main
 ```
 
+From anywhere (no repo checkout required), you can bootstrap the runtime by curling the installer and running it directly:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/Quick-Draw-Development/DroidSwarm/main/scripts/install-droidswarm.sh)"
+```
+
 The installer wrapper delegates to the bootstrap package under `packages/bootstrap`. It places runtime state under `~/.droidswarm` by default and installs a `DroidSwarm` command into `~/.local/bin` unless overridden.
 
 If you set `DROIDSWARM_DEFAULT_REPO_URL`, the installer can use that repo as the default source without passing `--repo-url` each time.

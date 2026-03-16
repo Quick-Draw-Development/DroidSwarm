@@ -45,6 +45,7 @@ class DroidSwarmOrchestratorClient {
     this.config = config;
     this.stopped = false;
     this.registry = new import_task_registry.TaskRegistry();
+    this.prefix = "[OrchestratorClient]";
     this.supervisor = new import_AgentSupervisor.AgentSupervisor(
       config,
       this.registry,
@@ -56,7 +57,15 @@ class DroidSwarmOrchestratorClient {
     );
   }
   start() {
+    this.log("starting orchestrator");
     this.connect();
+  }
+  log(...args) {
+    console.log(this.prefix, ...args);
+  }
+  summarizeMessage(message) {
+    const actor = message.from?.actor_name ?? "unknown_actor";
+    return `${message.type}@${message.room_id ?? "unknown"} task=${message.task_id ?? "unknown"} from=${actor}`;
   }
   stop() {
     this.stopped = true;
@@ -101,9 +110,15 @@ class DroidSwarmOrchestratorClient {
     } catch {
       return;
     }
-    if (message.project_id !== this.config.projectId || message.from.actor_name === this.config.agentName) {
+    if (message.project_id !== this.config.projectId) {
+      this.log("ignoring message from other project", this.summarizeMessage(message));
       return;
     }
+    if (message.from.actor_name === this.config.agentName) {
+      this.log("ignoring self-generated message", this.summarizeMessage(message));
+      return;
+    }
+    this.log("received message", this.summarizeMessage(message));
     if (message.type === "status_update" && message.room_id === "operator") {
       this.handleOperatorStatusMessage(message);
       return;
@@ -111,16 +126,20 @@ class DroidSwarmOrchestratorClient {
     if (message.type === "task_created") {
       const task = (0, import_task_events.resolveTaskFromMessage)(message);
       if (!task) {
+        this.log("failed to resolve task from task_created event", this.summarizeMessage(message));
         return;
       }
       this.registry.register(task);
       this.sendRaw((0, import_protocol.buildTaskIntakeAccepted)(this.config, task.taskId));
+      this.log("registered task and accepted intake", task.taskId, task.title ?? "untitled");
       this.supervisor.startInitialAgents(task);
+      this.log("started initial agents for task", task.taskId);
       return;
     }
     if ((0, import_task_events.isCancellationMessage)(message)) {
       const task = (0, import_task_events.resolveTaskFromMessage)(message);
       if (!task) {
+        this.log("failed to resolve task from cancellation event", this.summarizeMessage(message));
         return;
       }
       const removedAgents = this.supervisor.cancelTask(task.taskId);
@@ -137,6 +156,7 @@ class DroidSwarmOrchestratorClient {
     if (message.type === "chat" && message.room_id === "operator") {
       const content = typeof message.payload.content === "string" ? message.payload.content : "";
       if (!content) {
+        this.log("received empty operator chat message", this.summarizeMessage(message));
         return;
       }
       this.sendRaw(

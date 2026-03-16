@@ -8,7 +8,7 @@ import { buildOperatorChatResponse, buildOrchestratorStatusUpdate } from './mess
 import { buildAuthMessage, buildHeartbeatMessage, buildTaskIntakeAccepted, parseEnvelope } from './protocol';
 import { TaskRegistry } from './task-registry';
 import { buildTaskCancellationAcknowledged, isCancellationMessage, resolveTaskFromMessage } from './task-events';
-import { buildReviewAnnouncement, formatAgentAssignmentContent } from './operator-notifications';
+import { buildReviewAnnouncement } from './operator-notifications';
 import type { MessageEnvelope, OrchestratorConfig, SpawnedAgent } from './types';
 
 export class DroidSwarmOrchestratorClient {
@@ -18,6 +18,7 @@ export class DroidSwarmOrchestratorClient {
   private stopped = false;
   private readonly registry = new TaskRegistry();
   private readonly supervisor: AgentSupervisor;
+  private readonly prefix = '[OrchestratorClient]';
 
   constructor(private readonly config: OrchestratorConfig = loadConfig()) {
     this.supervisor = new AgentSupervisor(
@@ -32,7 +33,17 @@ export class DroidSwarmOrchestratorClient {
   }
 
   start(): void {
+    this.log('starting orchestrator');
     this.connect();
+  }
+
+  private log(...args: unknown[]): void {
+    console.log(this.prefix, ...args);
+  }
+
+  private summarizeMessage(message: MessageEnvelope): string {
+    const actor = message.from?.actor_name ?? 'unknown_actor';
+    return `${message.type}@${message.room_id ?? 'unknown'} task=${message.task_id ?? 'unknown'} from=${actor}`;
   }
 
   stop(): void {
@@ -85,9 +96,17 @@ export class DroidSwarmOrchestratorClient {
       return;
     }
 
-    if (message.project_id !== this.config.projectId || message.from.actor_name === this.config.agentName) {
+    if (message.project_id !== this.config.projectId) {
+      this.log('ignoring message from other project', this.summarizeMessage(message));
       return;
     }
+
+    if (message.from.actor_name === this.config.agentName) {
+      this.log('ignoring self-generated message', this.summarizeMessage(message));
+      return;
+    }
+
+    this.log('received message', this.summarizeMessage(message));
 
     if (message.type === 'status_update' && message.room_id === 'operator') {
       this.handleOperatorStatusMessage(message);
@@ -97,18 +116,22 @@ export class DroidSwarmOrchestratorClient {
     if (message.type === 'task_created') {
       const task = resolveTaskFromMessage(message);
       if (!task) {
+        this.log('failed to resolve task from task_created event', this.summarizeMessage(message));
         return;
       }
 
       this.registry.register(task);
       this.sendRaw(buildTaskIntakeAccepted(this.config, task.taskId));
+      this.log('registered task and accepted intake', task.taskId, task.title ?? 'untitled');
       this.supervisor.startInitialAgents(task);
+      this.log('started initial agents for task', task.taskId);
       return;
     }
 
     if (isCancellationMessage(message)) {
       const task = resolveTaskFromMessage(message);
       if (!task) {
+        this.log('failed to resolve task from cancellation event', this.summarizeMessage(message));
         return;
       }
 
@@ -127,6 +150,7 @@ export class DroidSwarmOrchestratorClient {
     if (message.type === 'chat' && message.room_id === 'operator') {
       const content = typeof message.payload.content === 'string' ? message.payload.content : '';
       if (!content) {
+        this.log('received empty operator chat message', this.summarizeMessage(message));
         return;
       }
 

@@ -20,6 +20,7 @@ import { openPersistenceDatabase } from './persistence/database';
 import { PersistenceClient } from './persistence/repositories';
 import { OrchestratorPersistenceService } from './persistence/service';
 import type { Database } from 'better-sqlite3';
+import { TaskScheduler } from './scheduler/TaskScheduler';
 import type { MessageEnvelope, OrchestratorConfig, PersistedTask, RunRecord, SpawnedAgent } from './types';
 
 export class DroidSwarmOrchestratorClient {
@@ -35,6 +36,7 @@ export class DroidSwarmOrchestratorClient {
   private readonly channelReconnects = new Map<string, NodeJS.Timeout>();
   private readonly database: Database;
   private readonly persistence: PersistenceClient;
+  private scheduler?: TaskScheduler;
   private currentRun?: RunRecord;
   private persistenceService?: OrchestratorPersistenceService;
 
@@ -56,6 +58,10 @@ export class DroidSwarmOrchestratorClient {
     this.log('starting orchestrator');
     this.currentRun = this.persistence.createRun(this.config.projectId);
     this.persistenceService = new OrchestratorPersistenceService(this.persistence, this.currentRun);
+    this.scheduler = new TaskScheduler(this.persistenceService, this.supervisor, this.config);
+    this.supervisor.setCallbacks({
+      onAgentResult: this.scheduler.handleAgentResult.bind(this.scheduler),
+    });
     this.log('created run', this.currentRun.runId);
     this.connect();
   }
@@ -251,8 +257,7 @@ export class DroidSwarmOrchestratorClient {
       });
       this.sendRaw(buildTaskIntakeAccepted(this.config, task.taskId));
       this.log('registered task and accepted intake', task.taskId, task.title ?? 'untitled');
-      this.supervisor.startInitialAgents(task);
-      this.log('started initial agents for task', task.taskId);
+      this.scheduler?.handleNewTask(task.taskId);
       return;
     }
 
@@ -360,11 +365,12 @@ export class DroidSwarmOrchestratorClient {
       'execution',
       'agent_assigned',
       `Assigned agents: ${details}.`,
-      { assigned_agents: agents.map((agent) => ({ agent_name: agent.agentName, agent_role: agent.role })) },
+      { assigned_agents: agents.map((agent) => ({
+        agent_name: agent.agentName,
+        agent_role: agent.role,
+        attempt_id: agent.attemptId,
+      })) },
     );
-    agents.forEach((agent) => {
-      this.persistenceService?.recordAssignment(agent.agentName);
-    });
   }
 
   private reportAgentCommunication(taskId: string, content: string): void {

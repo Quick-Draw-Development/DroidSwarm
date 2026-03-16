@@ -10,6 +10,7 @@ import {
   PersistedTask,
   RunRecord,
   TaskAttemptRecord,
+  TaskDependencyRecord,
 } from '../types';
 
 const nowIso = (): string => new Date().toISOString();
@@ -122,6 +123,27 @@ export class TaskRepository {
         updatedAt: row.updated_at,
       }));
   }
+
+  get(taskId: string): PersistedTask | null {
+    const row = this.database
+      .prepare('SELECT * FROM tasks WHERE task_id = ?')
+      .get(taskId) as PersistedTask & { metadata_json?: string } | undefined;
+    if (!row) {
+      return null;
+    }
+
+    return {
+      taskId: row.task_id,
+      runId: row.run_id,
+      parentTaskId: row.parent_task_id ?? undefined,
+      name: row.name,
+      status: row.status as PersistedTask['status'],
+      priority: row.priority as PersistedTask['priority'],
+      metadata: parseJson<Record<string, unknown>>(row.metadata_json),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
 }
 
 export class TaskAttemptRepository {
@@ -145,6 +167,25 @@ export class TaskAttemptRepository {
         metadataJson: attempt.metadata ? JSON.stringify(attempt.metadata) : null,
         createdAt: attempt.createdAt,
         updatedAt: attempt.updatedAt,
+      });
+  }
+
+  updateStatus(
+    attemptId: string,
+    status: TaskAttemptRecord['status'],
+    metadata?: Record<string, unknown>,
+  ): void {
+    this.database
+      .prepare(`
+        UPDATE task_attempts
+        SET status = @status, metadata_json = @metadataJson, updated_at = @updatedAt
+        WHERE attempt_id = @attemptId
+      `)
+      .run({
+        attemptId,
+        status,
+        metadataJson: metadata ? JSON.stringify(metadata) : null,
+        updatedAt: nowIso(),
       });
   }
 }
@@ -259,6 +300,51 @@ export class BudgetEventRepository {
   }
 }
 
+export class TaskDependencyRepository {
+  constructor(private readonly database: Database.Database) {}
+
+  add(dependency: TaskDependencyRecord): void {
+    this.database
+      .prepare(`
+        INSERT OR REPLACE INTO task_dependencies (
+          dependency_id, task_id, depends_on_task_id, created_at
+        ) VALUES (
+          @dependencyId, @taskId, @dependsOnTaskId, @createdAt
+        )
+      `)
+      .run({
+        dependencyId: dependency.dependencyId,
+        taskId: dependency.taskId,
+        dependsOnTaskId: dependency.dependsOnTaskId,
+        createdAt: dependency.createdAt,
+      });
+  }
+
+  listDependencies(taskId: string): TaskDependencyRecord[] {
+    return this.database
+      .prepare('SELECT * FROM task_dependencies WHERE task_id = ? ORDER BY created_at ASC')
+      .all(taskId)
+      .map((row: TaskDependencyRecord & { created_at?: string }) => ({
+        dependencyId: row.dependency_id,
+        taskId: row.task_id,
+        dependsOnTaskId: row.depends_on_task_id,
+        createdAt: row.created_at ?? '',
+      }));
+  }
+
+  listDependents(taskId: string): TaskDependencyRecord[] {
+    return this.database
+      .prepare('SELECT * FROM task_dependencies WHERE depends_on_task_id = ? ORDER BY created_at ASC')
+      .all(taskId)
+      .map((row: TaskDependencyRecord & { created_at?: string }) => ({
+        dependencyId: row.dependency_id,
+        taskId: row.task_id,
+        dependsOnTaskId: row.depends_on_task_id,
+        createdAt: row.created_at ?? '',
+      }));
+  }
+}
+
 export class PersistenceClient {
   constructor(
     public readonly database: Database.Database,
@@ -269,6 +355,7 @@ export class PersistenceClient {
     public readonly artifacts: ArtifactRepository,
     public readonly checkpoints: CheckpointRepository,
     public readonly budgets: BudgetEventRepository,
+    public readonly dependencies: TaskDependencyRepository,
   ) {}
 
   static fromDatabase(database: Database.Database): PersistenceClient {
@@ -281,6 +368,7 @@ export class PersistenceClient {
       new ArtifactRepository(database),
       new CheckpointRepository(database),
       new BudgetEventRepository(database),
+      new TaskDependencyRepository(database),
     );
   }
 

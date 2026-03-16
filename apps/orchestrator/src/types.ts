@@ -63,6 +63,9 @@ export interface OrchestratorConfig {
   droidspeakRules: string;
   agentRules: string;
   dbPath: string;
+  schedulerMaxTaskDepth: number;
+  schedulerMaxFanOut: number;
+  schedulerRetryIntervalMs: number;
 }
 
 export interface TaskRecord {
@@ -112,6 +115,7 @@ export interface SpawnedAgent {
   agentName: string;
   taskId: string;
   role: string;
+  attemptId: string;
 }
 
 export interface RunRecord {
@@ -190,5 +194,12 @@ export interface BudgetEventRecord {
   taskId?: string;
   detail: string;
   consumed: number;
+  createdAt: string;
+}
+
+export interface TaskDependencyRecord {
+  dependencyId: string;
+  taskId: string;
+  dependsOnTaskId: string;
   createdAt: string;
 }

@@ -19,14 +19,27 @@ interface AgentResultMessage {
   result: CodexAgentResult;
 }
 
+interface AgentSupervisorCallbacks {
+  onAgentsAssigned?: (taskId: string, agents: SpawnedAgent[]) => void;
+  onAgentCommunication?: (taskId: string, message: string) => void;
+  onAgentResult?: (
+    taskId: string,
+    attemptId: string,
+    agentName: string,
+    role: string,
+    result: CodexAgentResult,
+  ) => void;
+}
+
 interface ActiveAgent {
   child: ChildProcess;
   taskId: string;
   agentName: string;
   role: string;
+  attemptId: string;
 }
 
-const defaultRoleInstructions = (task: TaskRecord): RequestedAgent[] => {
+export const defaultRoleInstructions = (task: TaskRecord): RequestedAgent[] => {
   const normalizedType = task.taskType.toLowerCase();
   if (normalizedType === 'bug') {
     return [{
@@ -46,101 +59,95 @@ const defaultRoleInstructions = (task: TaskRecord): RequestedAgent[] => {
 export class AgentSupervisor {
   private readonly agents = new Map<string, ActiveAgent>();
   private readonly roleCounters = new Map<string, number>();
+  private callbacks: AgentSupervisorCallbacks;
 
   constructor(
     private readonly config: OrchestratorConfig,
     private readonly registry: TaskRegistry,
     private readonly entryScript: string,
-    private readonly callbacks: {
-      onAgentsAssigned?: (taskId: string, agents: SpawnedAgent[]) => void;
-      onAgentCommunication?: (taskId: string, message: string) => void;
-    } = {},
-  ) {}
-
-  startInitialAgents(task: TaskRecord): SpawnedAgent[] {
-    const existing = this.registry.get(task.taskId);
-    if (existing?.activeAgents.length) {
-      return [];
-    }
-
-    return this.spawnRequests(task, defaultRoleInstructions(task));
+    callbacks: AgentSupervisorCallbacks = {},
+  ) {
+    this.callbacks = callbacks;
   }
 
-  spawnRequests(
+  setCallbacks(callbacks: Partial<AgentSupervisorCallbacks>): void {
+    this.callbacks = { ...this.callbacks, ...callbacks };
+  }
+
+  startAgentForTask(
     task: TaskRecord,
-    requests: RequestedAgent[],
+    role: string,
+    attemptId: string,
     parentSummary?: string,
     parentDroidspeak?: string,
-  ): SpawnedAgent[] {
-    const spawned: SpawnedAgent[] = [];
-    const taskState = this.registry.get(task.taskId);
-    const activeCount = taskState?.activeAgents.length ?? 0;
-    const availableTaskSlots = Math.max(0, this.config.maxAgentsPerTask - activeCount);
-    const availableGlobalSlots = Math.max(0, this.config.maxConcurrentAgents - this.agents.size);
-    const maxSpawn = Math.min(availableTaskSlots, availableGlobalSlots);
-
-    for (const request of requests.slice(0, maxSpawn)) {
-      const agentName = this.nextAgentName(request.role);
-      const child = fork(this.entryScript, ['worker', JSON.stringify({
-        task,
-        role: request.role,
-        agentName,
-        parentSummary: parentSummary ?? request.instructions,
-        parentDroidspeak,
-      })], {
-        env: process.env,
-        stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-      });
-
-      child.stdout?.setEncoding('utf8');
-      child.stdout?.on('data', (chunk) => {
-        const text = chunk.toString();
-        text
-          .split(/\r?\n/)
-          .map((line) => line.trim())
-          .filter(Boolean)
-          .forEach((line) => {
-            console.log('[AgentSupervisor]', agentName, 'stdout:', line);
-          });
-      });
-
-      child.stderr?.setEncoding('utf8');
-      child.stderr?.on('data', (chunk) => {
-        const text = chunk.toString();
-        text
-          .split(/\r?\n/)
-          .map((line) => line.trim())
-          .filter(Boolean)
-          .forEach((line) => {
-            console.error('[AgentSupervisor]', agentName, 'stderr:', line);
-          });
-      });
-
-      const agent: ActiveAgent = {
-        child,
-        taskId: task.taskId,
-        agentName,
-        role: request.role,
-      };
-      this.agents.set(agentName, agent);
-      const currentNames = this.registry.get(task.taskId)?.activeAgents ?? [];
-      this.registry.assignAgents(task.taskId, [...currentNames, agentName]);
-      spawned.push({ agentName, taskId: task.taskId, role: request.role });
-
-      child.on('message', (message) => {
-        this.handleAgentMessage(task, message as AgentResultMessage);
-      });
-
-      child.on('exit', () => {
-        this.registry.removeAgent(task.taskId, agentName);
-        this.agents.delete(agentName);
-      });
+  ): SpawnedAgent | null {
+    if (!this.canSpawn(task)) {
+      return null;
     }
 
-    if (spawned.length > 0) {
-      this.callbacks.onAgentsAssigned?.(task.taskId, spawned);
-    }
+    const agentName = this.nextAgentName(role);
+    const child = fork(this.entryScript, ['worker', JSON.stringify({
+      task,
+      role,
+      agentName,
+      parentSummary,
+      parentDroidspeak,
+    })], {
+      env: process.env,
+      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    });
 
+    child.stdout?.setEncoding('utf8');
+    child.stdout?.on('data', (chunk) => {
+      const text = chunk.toString();
+      text
+        .split(/\\r?\\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .forEach((line) => {
+          console.log('[AgentSupervisor]', agentName, 'stdout:', line);
+        });
+    });
+
+    child.stderr?.setEncoding('utf8');
+    child.stderr?.on('data', (chunk) => {
+      const text = chunk.toString();
+      text
+        .split(/\\r?\\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .forEach((line) => {
+          console.error('[AgentSupervisor]', agentName, 'stderr:', line);
+        });
+    });
+
+    const agent: ActiveAgent = {
+      child,
+      taskId: task.taskId,
+      agentName,
+      role,
+      attemptId,
+    };
+    this.agents.set(agentName, agent);
+    const currentNames = this.registry.get(task.taskId)?.activeAgents ?? [];
+    this.registry.assignAgents(task.taskId, [...currentNames, agentName]);
+
+    child.on('message', (message) => {
+      this.handleAgentMessage(task, message as AgentResultMessage);
+    });
+
+    child.on('exit', () => {
+      this.registry.removeAgent(task.taskId, agentName);
+      this.agents.delete(agentName);
+    });
+
+    const spawned: SpawnedAgent = {
+      agentName,
+      taskId: task.taskId,
+      role,
+      attemptId,
+    };
+    this.callbacks.onAgentsAssigned?.(task.taskId, [spawned]);
     return spawned;
   }
 
@@ -160,6 +167,10 @@ export class AgentSupervisor {
     return removedAgents;
   }
 
+  getActiveAgentCount(): number {
+    return this.agents.size;
+  }
+
   private handleAgentMessage(task: TaskRecord, message: AgentResultMessage): void {
     if (message.type !== 'agent_result' || message.taskId !== task.taskId) {
       return;
@@ -170,18 +181,31 @@ export class AgentSupervisor {
       return;
     }
 
+    const agent = this.agents.get(message.agentName);
+    const attemptId = agent?.attemptId ?? '';
+
     if (message.result.requested_agents.length > 0) {
-      this.spawnRequests(
-        task,
-        message.result.requested_agents,
-        message.result.summary,
-        message.result.compression?.compressed_content,
-      );
       this.callbacks.onAgentCommunication?.(
         task.taskId,
         formatAgentRequestContent(message.agentName, message.result.requested_agents),
       );
     }
+
+    this.callbacks.onAgentResult?.(
+      task.taskId,
+      attemptId,
+      message.agentName,
+      message.role,
+      message.result,
+    );
+  }
+
+  private canSpawn(task: TaskRecord): boolean {
+    const taskState = this.registry.get(task.taskId);
+    const activeCount = taskState?.activeAgents.length ?? 0;
+    const availableTaskSlots = Math.max(0, this.config.maxAgentsPerTask - activeCount);
+    const availableGlobalSlots = Math.max(0, this.config.maxConcurrentAgents - this.agents.size);
+    return availableTaskSlots > 0 && availableGlobalSlots > 0;
   }
 
   private nextAgentName(role: string): string {

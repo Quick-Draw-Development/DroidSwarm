@@ -44,5 +44,8 @@ export const loadConfig = (): OrchestratorConfig => {
     droidspeakRules: specs.droidspeak,
     agentRules: specs.agent,
     dbPath: process.env.DROIDSWARM_DB_PATH ?? path.resolve(process.cwd(), 'data', 'droidswarm.db'),
+    schedulerMaxTaskDepth: toPositiveInt(process.env.DROIDSWARM_SCHEDULER_MAX_TASK_DEPTH, 4),
+    schedulerMaxFanOut: toPositiveInt(process.env.DROIDSWARM_SCHEDULER_MAX_FAN_OUT, 3),
+    schedulerRetryIntervalMs: toPositiveInt(process.env.DROIDSWARM_SCHEDULER_RETRY_INTERVAL_MS, 30_000),
   };
 };

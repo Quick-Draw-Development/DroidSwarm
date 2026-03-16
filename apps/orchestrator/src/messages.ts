@@ -42,6 +42,7 @@ export const buildOrchestratorStatusUpdate = (
   statusCode: string,
   content: string,
   taskId?: string,
+  extraPayload?: Record<string, unknown>,
 ): MessageEnvelope => ({
   message_id: randomUUID(),
   project_id: config.projectId,
@@ -54,6 +55,7 @@ export const buildOrchestratorStatusUpdate = (
     phase,
     status_code: statusCode,
     content,
+    ...extraPayload,
   },
 });
 

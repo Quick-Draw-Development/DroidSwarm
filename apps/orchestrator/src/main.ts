@@ -1,7 +1,7 @@
 import { DroidSwarmOrchestratorClient } from './OrchestratorClient';
 
 if (process.argv[2] === 'worker') {
-  void import('./worker');
+  require('./worker');
 } else {
   const orchestrator = new DroidSwarmOrchestratorClient();
 

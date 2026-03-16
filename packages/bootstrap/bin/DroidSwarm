@@ -930,13 +930,37 @@ shutdown_one() {
     pid="$(<"$(swarm_pid_file "$swarm_id")")"
   fi
 
+  local state_dir
+  state_dir="$(swarm_dir "$swarm_id")"
+
   if [[ -n "$pid" && "$pid" != "-" ]] && is_pid_running "$pid"; then
     kill "$pid"
-    sleep 1
+    local waited=0
+    while is_pid_running "$pid" && [[ "$waited" -lt 10 ]]; do
+      sleep 1
+      waited=$((waited + 1))
+    done
     if is_pid_running "$pid"; then
       kill -9 "$pid" 2>/dev/null || true
     fi
   fi
+
+  for component in orchestrator dashboard socket-server; do
+    local component_pid_path
+    component_pid_path="$(component_pid_file "$component" "$state_dir")"
+    if [[ ! -f "$component_pid_path" ]]; then
+      continue
+    fi
+    local component_pid
+    component_pid="$(<"$component_pid_path")"
+    if [[ -n "$component_pid" && "$component_pid" != "-" ]] && is_pid_running "$component_pid"; then
+      kill "$component_pid" 2>/dev/null || true
+      sleep 1
+      if is_pid_running "$component_pid"; then
+        kill -9 "$component_pid" 2>/dev/null || true
+      fi
+    fi
+  done
 
   printf 'stopped\n' >"$(swarm_status_file "$swarm_id")"
   info "Stopped DroidSwarm '$swarm_id'"

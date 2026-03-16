@@ -120,69 +120,78 @@ const mapMessageRecord = (row: Record<string, unknown>): MessageRecord => ({
   createdAt: String(row.created_at),
 });
 
+const parsePayload = (payloadJson: string): Record<string, unknown> | null => {
+  try {
+    const parsed = JSON.parse(payloadJson);
+    return typeof parsed === 'object' && parsed !== null && 'payload' in parsed
+      ? (parsed.payload as Record<string, unknown>)
+      : parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+};
+
 const buildActiveAgents = (database: Database.Database, taskId: string): TaskDetails['activeAgents'] => {
   const now = new Date().toISOString();
   const rows = database
     .prepare(`
-      SELECT client_name, client_type, last_seen_at
-      FROM connections
+      SELECT payload_json, created_at
+      FROM messages
       WHERE project_id = ?
-        AND channel_id = ?
-        AND auth_status = 'success'
-        AND closed_at IS NULL
-      ORDER BY last_seen_at DESC
+        AND task_id = ?
+        AND message_type = 'status_update'
+      ORDER BY created_at DESC
+      LIMIT 20
     `)
-    .all(DEFAULT_PROJECT_ID, taskId) as Array<{
-      client_name: string | null;
-      client_type: string | null;
-      last_seen_at: string | null;
-    }>;
+    .all(DEFAULT_PROJECT_ID, taskId) as Array<{ payload_json: string }>;
 
-  const agents = new Map<string, TaskDetails['activeAgents'][number]>();
   for (const row of rows) {
-    const name = typeof row.client_name === 'string' ? row.client_name.trim() : '';
-    if (!name || agents.has(name)) {
+    const payload = parsePayload(row.payload_json);
+    if (!payload) {
       continue;
     }
 
-    const role = row.client_type === 'dashboard' ? 'operator' : (row.client_type ?? 'agent');
-    agents.set(name, {
-      name,
-      role,
-      lastSeenAt: row.last_seen_at ?? now,
+    if (payload.status_code !== 'agent_assigned') {
+      continue;
+    }
+
+    const assigned = payload.assigned_agents;
+    if (!Array.isArray(assigned)) {
+      continue;
+    }
+
+    const agents = assigned.flatMap((entry) => {
+      if (
+        typeof entry === 'object' &&
+        entry !== null &&
+        typeof entry.agent_name === 'string'
+      ) {
+        return [{
+          name: entry.agent_name,
+          role: typeof entry.agent_role === 'string' ? entry.agent_role : 'agent',
+          lastSeenAt: now,
+        }];
+      }
+      return [];
     });
+
+    if (agents.length > 0) {
+      if (!agents.some((agent) => agent.name === DEFAULT_ORCHESTRATOR_NAME)) {
+        agents.push({
+          name: DEFAULT_ORCHESTRATOR_NAME,
+          role: 'orchestrator',
+          lastSeenAt: now,
+        });
+      }
+      return agents;
+    }
   }
 
-  const operatorRow = database
-    .prepare(`
-      SELECT client_name, last_seen_at
-      FROM connections
-      WHERE project_id = ?
-        AND channel_id = 'operator'
-        AND auth_status = 'success'
-        AND closed_at IS NULL
-      ORDER BY last_seen_at DESC
-      LIMIT 1
-    `)
-    .get(DEFAULT_PROJECT_ID) as { client_name?: string; last_seen_at?: string } | undefined;
-
-  if (operatorRow?.client_name) {
-    agents.set(operatorRow.client_name, {
-      name: operatorRow.client_name,
-      role: 'operator',
-      lastSeenAt: operatorRow.last_seen_at ?? now,
-    });
-  }
-
-  if (!agents.has(DEFAULT_ORCHESTRATOR_NAME)) {
-    agents.set(DEFAULT_ORCHESTRATOR_NAME, {
-      name: DEFAULT_ORCHESTRATOR_NAME,
-      role: 'orchestrator',
-      lastSeenAt: now,
-    });
-  }
-
-  return [...agents.values()];
+  return [{
+    name: DEFAULT_ORCHESTRATOR_NAME,
+    role: 'orchestrator',
+    lastSeenAt: now,
+  }];
 };
 
 export const getProjectIdentity = (): ProjectIdentity => ({

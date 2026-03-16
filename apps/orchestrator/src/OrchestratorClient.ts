@@ -318,7 +318,13 @@ export class DroidSwarmOrchestratorClient {
     }
 
     const details = agents.map((agent) => `${agent.agentName} (${agent.role})`).join(', ');
-    this.sendTaskChannelUpdate(taskId, 'execution', 'agent_assigned', `Assigned agents: ${details}.`);
+    this.sendTaskChannelUpdate(
+      taskId,
+      'execution',
+      'agent_assigned',
+      `Assigned agents: ${details}.`,
+      { assigned_agents: agents.map((agent) => ({ agent_name: agent.agentName, agent_role: agent.role })) },
+    );
   }
 
   private reportAgentCommunication(taskId: string, content: string): void {
@@ -330,8 +336,11 @@ export class DroidSwarmOrchestratorClient {
     phase: string,
     statusCode: string,
     content: string,
+    extraPayload?: Record<string, unknown>,
   ): void {
-    this.sendRaw(buildOrchestratorStatusUpdate(this.config, taskId, phase, statusCode, content, taskId));
+    this.sendRaw(
+      buildOrchestratorStatusUpdate(this.config, taskId, phase, statusCode, content, taskId, extraPayload),
+    );
   }
 
   private startHeartbeat(): void {

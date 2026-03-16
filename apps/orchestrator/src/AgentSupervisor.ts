@@ -96,11 +96,23 @@ export class AgentSupervisor {
       child.stdout?.on('data', (chunk) => {
         const text = chunk.toString();
         text
-          .split(/\\r?\\n/)
+          .split(/\r?\n/)
           .map((line) => line.trim())
           .filter(Boolean)
           .forEach((line) => {
             console.log('[AgentSupervisor]', agentName, 'stdout:', line);
+          });
+      });
+
+      child.stderr?.setEncoding('utf8');
+      child.stderr?.on('data', (chunk) => {
+        const text = chunk.toString();
+        text
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .forEach((line) => {
+            console.error('[AgentSupervisor]', agentName, 'stderr:', line);
           });
       });
 

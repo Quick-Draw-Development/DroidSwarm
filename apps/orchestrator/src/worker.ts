@@ -81,6 +81,7 @@ const runWorker = async (): Promise<void> => {
   });
 
   await waitForAuthReady(socket);
+  console.log(`[Worker ${options.agentName}] authenticated for ${options.role} on ${options.task.taskId}`);
 
   sendMessage(
     socket,
@@ -95,8 +96,11 @@ const runWorker = async (): Promise<void> => {
     ),
   );
 
+  console.log(`[Worker ${options.agentName}] notifying orchestrator of start`);
+
   let result: CodexAgentResult;
   try {
+    console.log(`[Worker ${options.agentName}] launching Codex prompt (${options.role})`);
     result = await runCodexPrompt({
       config,
       projectRoot: config.projectRoot,
@@ -146,6 +150,8 @@ const runWorker = async (): Promise<void> => {
     socket.close();
     return;
   }
+
+  console.log(`[Worker ${options.agentName}] Codex completed with status ${result.status}`);
 
   for (const artifact of result.artifacts) {
     sendMessage(socket, buildAgentArtifactMessage(config, options.task.taskId, options.task.taskId, options.agentName, artifact));

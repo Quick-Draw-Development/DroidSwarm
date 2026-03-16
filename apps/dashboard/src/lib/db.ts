@@ -11,6 +11,7 @@ const DEFAULT_PROJECT_ID = process.env.DROIDSWARM_PROJECT_ID ?? 'droidswarm';
 const DEFAULT_PROJECT_NAME = process.env.DROIDSWARM_PROJECT_NAME ?? 'DroidSwarm';
 const DEFAULT_DB_PATH = process.env.DROIDSWARM_DB_PATH ?? path.resolve(process.cwd(), 'data', 'droidswarm.db');
 const DEFAULT_SOCKET_URL = process.env.DROIDSWARM_SOCKET_URL ?? 'ws://127.0.0.1:8765';
+const DEFAULT_ORCHESTRATOR_NAME = process.env.DROIDSWARM_ORCHESTRATOR_NAME ?? 'Orchestrator';
 
 let databaseInstance: Database.Database | null = null;
 
@@ -119,6 +120,71 @@ const mapMessageRecord = (row: Record<string, unknown>): MessageRecord => ({
   createdAt: String(row.created_at),
 });
 
+const buildActiveAgents = (database: Database.Database, taskId: string): TaskDetails['activeAgents'] => {
+  const now = new Date().toISOString();
+  const rows = database
+    .prepare(`
+      SELECT client_name, client_type, last_seen_at
+      FROM connections
+      WHERE project_id = ?
+        AND channel_id = ?
+        AND auth_status = 'success'
+        AND closed_at IS NULL
+      ORDER BY last_seen_at DESC
+    `)
+    .all(DEFAULT_PROJECT_ID, taskId) as Array<{
+      client_name: string | null;
+      client_type: string | null;
+      last_seen_at: string | null;
+    }>;
+
+  const agents = new Map<string, TaskDetails['activeAgents'][number]>();
+  for (const row of rows) {
+    const name = typeof row.client_name === 'string' ? row.client_name.trim() : '';
+    if (!name || agents.has(name)) {
+      continue;
+    }
+
+    const role = row.client_type === 'dashboard' ? 'operator' : (row.client_type ?? 'agent');
+    agents.set(name, {
+      name,
+      role,
+      lastSeenAt: row.last_seen_at ?? now,
+    });
+  }
+
+  const operatorRow = database
+    .prepare(`
+      SELECT client_name, last_seen_at
+      FROM connections
+      WHERE project_id = ?
+        AND channel_id = 'operator'
+        AND auth_status = 'success'
+        AND closed_at IS NULL
+      ORDER BY last_seen_at DESC
+      LIMIT 1
+    `)
+    .get(DEFAULT_PROJECT_ID) as { client_name?: string; last_seen_at?: string } | undefined;
+
+  if (operatorRow?.client_name) {
+    agents.set(operatorRow.client_name, {
+      name: operatorRow.client_name,
+      role: 'operator',
+      lastSeenAt: operatorRow.last_seen_at ?? now,
+    });
+  }
+
+  if (!agents.has(DEFAULT_ORCHESTRATOR_NAME)) {
+    agents.set(DEFAULT_ORCHESTRATOR_NAME, {
+      name: DEFAULT_ORCHESTRATOR_NAME,
+      role: 'orchestrator',
+      lastSeenAt: now,
+    });
+  }
+
+  return [...agents.values()];
+};
+
 export const getProjectIdentity = (): ProjectIdentity => ({
   projectId: DEFAULT_PROJECT_ID,
   projectName: DEFAULT_PROJECT_NAME,
@@ -168,15 +234,12 @@ export const getTaskDetails = (taskId: string): TaskDetails | null => {
         .all(taskId, DEFAULT_PROJECT_ID) as Record<string, unknown>[]
     ).map(mapMessageRecord);
 
+    const activeAgents = task.status === 'cancelled' ? [] : buildActiveAgents(database, taskId);
+
     return {
       task,
       messages,
-      activeAgents: task.status === 'cancelled'
-        ? []
-        : [
-            { name: 'Orchestrator', role: 'orchestrator', lastSeenAt: new Date().toISOString() },
-            { name: 'Planner-Alpha', role: 'planner', lastSeenAt: new Date().toISOString() },
-          ],
+      activeAgents,
       handoffs: ['Planner-Alpha -> Architect-Beta: planning summary attached'],
       guardrails: task.status === 'cancelled'
         ? ['Task cancelled. Orchestrator should stop and remove assigned agents.']

@@ -1,7 +1,14 @@
 import { randomUUID } from 'node:crypto';
 
 import type { PersistenceClient } from './repositories';
-import type { PersistedTask, RunRecord, TaskAttemptRecord, TaskDependencyRecord } from '../types';
+import type {
+  ArtifactRecord,
+  CheckpointRecord,
+  PersistedTask,
+  RunRecord,
+  TaskAttemptRecord,
+  TaskDependencyRecord,
+} from '../types';
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -127,6 +134,34 @@ export class OrchestratorPersistenceService {
       }));
   }
 
+  recordArtifact(input: {
+    artifactId: string;
+    attemptId: string;
+    taskId: string;
+    kind: string;
+    summary: string;
+    content: string;
+    metadata?: Record<string, unknown>;
+    createdAt: string;
+  }): void {
+    if (!input.attemptId) {
+      console.warn('[OrchestratorPersistenceService] skipping artifact without attemptId', input.artifactId);
+      return;
+    }
+
+    this.persistence.artifacts.create({
+      artifactId: input.artifactId,
+      attemptId: input.attemptId,
+      taskId: input.taskId,
+      runId: this.run.runId,
+      kind: input.kind,
+      summary: input.summary,
+      content: input.content,
+      metadata: input.metadata,
+      createdAt: input.createdAt,
+    });
+  }
+
   recordCheckpoint(taskId: string, attemptId: string | undefined, payload: Record<string, unknown>): string {
     const checkpointId = randomUUID();
     this.persistence.checkpoints.create({
@@ -138,5 +173,26 @@ export class OrchestratorPersistenceService {
       createdAt: nowIso(),
     });
     return checkpointId;
+  }
+
+  getLatestCheckpoint(taskId: string): CheckpointRecord | undefined {
+    const row = this.persistence.database
+      .prepare('SELECT * FROM checkpoints WHERE task_id = ? ORDER BY created_at DESC LIMIT 1')
+      .get(taskId) as CheckpointRecord & { payload_json?: string } | undefined;
+    if (!row) {
+      return undefined;
+    }
+    return {
+      checkpointId: row.checkpoint_id,
+      taskId: row.task_id,
+      runId: row.run_id,
+      attemptId: row.attempt_id ?? undefined,
+      payloadJson: row.payload_json ?? '',
+      createdAt: row.created_at,
+    };
+  }
+
+  getArtifactsForTask(taskId: string): ArtifactRecord[] {
+    return this.persistence.artifacts.listByTask(taskId);
   }
 }

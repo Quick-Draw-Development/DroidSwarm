@@ -7,6 +7,7 @@ import path from 'node:path';
 
 import { openPersistenceDatabase } from './database';
 import { PersistenceClient } from './repositories';
+import { OrchestratorPersistenceService } from './service';
 import { PersistedTask } from '../types';
 
 const nowIso = (): string => new Date().toISOString();
@@ -125,6 +126,63 @@ describe('Orchestrator persistence repositories', () => {
       .prepare('SELECT status FROM task_attempts WHERE attempt_id = ?')
       .get(attempt.attemptId);
     assert.equal(updated?.status, 'completed');
+
+    db.close();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('stores artifacts and checkpoints via the persistence service', () => {
+    const tempDir = mkdtempSync(path.join(tmpdir(), 'droidswarm-persistence-'));
+    const dbPath = path.join(tempDir, 'state.db');
+    const db = openPersistenceDatabase(dbPath);
+    const persistence = PersistenceClient.fromDatabase(db);
+    const run = persistence.createRun('droidswarm');
+    const service = new OrchestratorPersistenceService(persistence, run);
+
+    const task: PersistedTask = {
+      taskId: 'task-checkpoint',
+      runId: run.runId,
+      name: 'checkpoint-task',
+      status: 'queued',
+      priority: 'high',
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    };
+    persistence.tasks.create(task);
+
+    const attempt = {
+      attemptId: 'attempt-checkpoint',
+      taskId: task.taskId,
+      runId: task.runId,
+      agentName: 'Agent-01',
+      status: 'running',
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    };
+    persistence.attempts.create(attempt);
+
+    const checkpointPayload = { summary: 'progress saved', compression: { compressed_content: 'droidspeak-v1' } };
+    const checkpointId = service.recordCheckpoint(task.taskId, attempt.attemptId, checkpointPayload);
+    const latestCheckpoint = service.getLatestCheckpoint(task.taskId);
+
+    assert.equal(typeof checkpointId, 'string');
+    assert.equal(latestCheckpoint?.attemptId, attempt.attemptId);
+    assert.equal(JSON.parse(latestCheckpoint?.payloadJson ?? '{}').summary, 'progress saved');
+
+    service.recordArtifact({
+      artifactId: 'artifact-checkpoint',
+      attemptId: attempt.attemptId,
+      taskId: task.taskId,
+      kind: 'checkpoint',
+      summary: 'checkpoint artifact',
+      content: 'details',
+      metadata: { source: 'test' },
+      createdAt: nowIso(),
+    });
+
+    const artifacts = service.getArtifactsForTask(task.taskId);
+    assert.equal(artifacts.length, 1);
+    assert.equal(artifacts[0].metadata?.source, 'test');
 
     db.close();
     rmSync(tempDir, { recursive: true, force: true });

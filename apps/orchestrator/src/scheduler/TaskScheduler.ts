@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { AgentSupervisor, defaultRoleInstructions } from '../AgentSupervisor';
 import type { OrchestratorPersistenceService } from '../persistence/service';
 import type {
+  CheckpointRecord,
   CodexAgentResult,
   OrchestratorConfig,
   PersistedTask,
@@ -22,6 +23,13 @@ const buildTaskRecord = (task: PersistedTask): TaskRecord => ({
 });
 
 const dependencySatisfiedStatuses: PersistedTask['status'][] = ['completed', 'verified', 'failed', 'cancelled'];
+
+type CheckpointPayload = {
+  summary?: string;
+  compression?: {
+    compressed_content?: string;
+  };
+};
 
 export interface TaskSchedulerEvents {
   onPlanProposed?: (
@@ -205,15 +213,20 @@ export class TaskScheduler {
   private launch(task: PersistedTask): void {
     const record = buildTaskRecord(task);
     const metadata = task.metadata ?? {};
+    const checkpoint = this.persistenceService.getLatestCheckpoint(task.taskId);
+    const checkpointPayload = checkpoint ? this.parseCheckpointPayload(checkpoint) : undefined;
+
     const defaultAssignment = defaultRoleInstructions(record)[0];
     const role = typeof metadata.agent_role === 'string' ? metadata.agent_role : defaultAssignment.role;
     const instructions = typeof metadata.agent_instructions === 'string'
       ? metadata.agent_instructions
       : defaultAssignment.instructions;
-    const parentSummary = typeof metadata.parent_summary === 'string' ? metadata.parent_summary : undefined;
-    const parentDroidspeak = typeof metadata.parent_droidspeak === 'string'
+    const metadataParentSummary = typeof metadata.parent_summary === 'string' ? metadata.parent_summary : undefined;
+    const metadataParentDroidspeak = typeof metadata.parent_droidspeak === 'string'
       ? metadata.parent_droidspeak
       : undefined;
+    const parentSummary = checkpointPayload?.summary ?? metadataParentSummary;
+    const parentDroidspeak = checkpointPayload?.compression?.compressed_content ?? metadataParentDroidspeak;
 
     const attemptId = randomUUID();
     const spawned = this.supervisor.startAgentForTask(record, role, attemptId, parentSummary, parentDroidspeak);
@@ -342,5 +355,13 @@ export class TaskScheduler {
 
     clearTimeout(timer);
     this.retryTimers.delete(taskId);
+  }
+
+  private parseCheckpointPayload(checkpoint: CheckpointRecord): CheckpointPayload | undefined {
+    try {
+      return JSON.parse(checkpoint.payloadJson) as CheckpointPayload;
+    } catch {
+      return undefined;
+    }
   }
 }

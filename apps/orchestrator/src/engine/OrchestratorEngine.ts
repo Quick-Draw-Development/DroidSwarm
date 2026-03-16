@@ -32,6 +32,7 @@ export interface OrchestratorEngineOptions {
 
 export class OrchestratorEngine implements TaskSchedulerEvents {
   private readonly prefix = '[OrchestratorEngine]';
+  private readonly agentAttemptMap = new Map<string, string>();
 
   constructor(
     private readonly options: OrchestratorEngineOptions,
@@ -47,6 +48,11 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
     }
 
     const isTaskChannel = source === 'task';
+
+    if (isTaskChannel && message.type === 'artifact_created') {
+      this.persistArtifact(message);
+      return;
+    }
 
     if (!isTaskChannel && message.type === 'status_update' && message.room_id === 'operator') {
       this.handleOperatorStatusMessage(message);
@@ -71,6 +77,10 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
   handleAgentAssignment(taskId: string, agents: SpawnedAgent[]): void {
     if (!agents.length) {
       return;
+    }
+
+    for (const agent of agents) {
+      this.agentAttemptMap.set(agent.agentName, agent.attemptId);
     }
 
     const details = agents.map((agent) => `${agent.agentName} (${agent.role})`).join(', ');
@@ -203,6 +213,29 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
     }
 
     return 'medium';
+  }
+
+  private persistArtifact(message: MessageEnvelope<'artifact_created'>): void {
+    const attemptId = this.agentAttemptMap.get(message.from.actor_name);
+    if (!attemptId) {
+      console.warn('[OrchestratorEngine] missing attempt for artifact', message.payload.artifact_id);
+      return;
+    }
+
+    const metadata = typeof message.payload.metadata === 'object' && message.payload.metadata !== null
+      ? (message.payload.metadata as Record<string, unknown>)
+      : undefined;
+
+    this.options.persistenceService.recordArtifact({
+      artifactId: message.payload.artifact_id,
+      attemptId,
+      taskId: message.payload.task_id,
+      kind: message.payload.kind,
+      summary: message.payload.summary,
+      content: message.payload.content,
+      metadata,
+      createdAt: message.timestamp,
+    });
   }
 
   private sendStatusUpdate(

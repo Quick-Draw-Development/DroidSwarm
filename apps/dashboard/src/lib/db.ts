@@ -12,76 +12,6 @@ const DEFAULT_PROJECT_NAME = process.env.DROIDSWARM_PROJECT_NAME ?? 'DroidSwarm'
 const DEFAULT_DB_PATH = process.env.DROIDSWARM_DB_PATH ?? path.resolve(process.cwd(), 'data', 'droidswarm.db');
 const DEFAULT_SOCKET_URL = process.env.DROIDSWARM_SOCKET_URL ?? 'ws://127.0.0.1:8765';
 
-const demoTasks: TaskRecord[] = [
-  {
-    taskId: 'task-design-system',
-    projectId: DEFAULT_PROJECT_ID,
-    title: 'Shape task intake and operator flow',
-    description: 'Finalize task intake, operator ack, and human clarification loop.',
-    taskType: 'feature',
-    priority: 'high',
-    status: 'planning',
-    branchType: 'feature',
-    branchName: 'feature/task-design-system',
-    createdByUserId: 'alice_dev',
-    createdByDisplayName: 'alice_dev',
-    needsClarification: true,
-    updatedAt: new Date().toISOString(),
-    agentCount: 3,
-  },
-  {
-    taskId: 'task-socket-server',
-    projectId: DEFAULT_PROJECT_ID,
-    title: 'Implement WebSocket server scaffold',
-    description: 'Typed protocol validation, rooms, persistence, and tests.',
-    taskType: 'task',
-    priority: 'high',
-    status: 'in_progress',
-    branchType: 'feature',
-    branchName: 'feature/task-socket-server',
-    createdByUserId: 'alice_dev',
-    createdByDisplayName: 'alice_dev',
-    needsClarification: false,
-    updatedAt: new Date().toISOString(),
-    agentCount: 2,
-  },
-];
-
-const demoMessages: MessageRecord[] = [
-  {
-    messageId: 'msg-1',
-    projectId: DEFAULT_PROJECT_ID,
-    channelId: 'task-design-system',
-    taskId: 'task-design-system',
-    messageType: 'clarification_request',
-    senderType: 'orchestrator',
-    senderName: 'Orchestrator',
-    content: '@alice_dev Which branch policy should hotfixes use?',
-    payload: {
-      question_id: 'question-1',
-      target_user_id: 'alice_dev',
-      compression: {
-        scheme: 'droidspeak-v1',
-        compressed_content: 'need branch-policy hotfix production',
-      },
-    },
-    createdAt: new Date().toISOString(),
-    mentionTarget: 'alice_dev',
-  },
-  {
-    messageId: 'msg-2',
-    projectId: DEFAULT_PROJECT_ID,
-    channelId: 'task-design-system',
-    taskId: 'task-design-system',
-    messageType: 'status_update',
-    senderType: 'agent',
-    senderName: 'Planner-Alpha',
-    content: 'Planning complete. Ready for task breakdown.',
-    payload: {},
-    createdAt: new Date().toISOString(),
-  },
-];
-
 let databaseInstance: Database.Database | null = null;
 
 export const resetDatabaseInstance = (): void => {
@@ -214,9 +144,9 @@ export const listTasks = (): TaskRecord[] => {
       .prepare('SELECT * FROM tasks WHERE project_id = ? ORDER BY updated_at DESC')
       .all(DEFAULT_PROJECT_ID) as Record<string, unknown>[];
 
-    return rows.length > 0 ? rows.map(mapTaskRecord) : demoTasks;
+    return rows.map(mapTaskRecord);
   } catch {
-    return demoTasks;
+    return [];
   }
 };
 
@@ -227,11 +157,11 @@ export const getTaskDetails = (taskId: string): TaskDetails | null => {
       .prepare('SELECT * FROM tasks WHERE task_id = ? AND project_id = ?')
       .get(taskId, DEFAULT_PROJECT_ID) as Record<string, unknown> | undefined;
 
-    const task = taskRow ? mapTaskRecord(taskRow) : demoTasks.find((candidate) => candidate.taskId === taskId);
-    if (!task) {
+    if (!taskRow) {
       return null;
     }
 
+    const task = mapTaskRecord(taskRow);
     const messages = (
       database
         .prepare('SELECT * FROM messages WHERE task_id = ? AND project_id = ? ORDER BY created_at ASC')
@@ -240,7 +170,7 @@ export const getTaskDetails = (taskId: string): TaskDetails | null => {
 
     return {
       task,
-      messages: messages.length > 0 ? messages : demoMessages.filter((message) => message.taskId === taskId),
+      messages,
       activeAgents: task.status === 'cancelled'
         ? []
         : [
@@ -256,21 +186,7 @@ export const getTaskDetails = (taskId: string): TaskDetails | null => {
       limits: ['Context pressure normal', 'No current rate-limit backoff'],
     };
   } catch {
-    const task = demoTasks.find((candidate) => candidate.taskId === taskId);
-    if (!task) {
-      return null;
-    }
-
-    return {
-      task,
-      messages: demoMessages.filter((message) => message.taskId === taskId),
-      activeAgents: [
-        { name: 'Orchestrator', role: 'orchestrator', lastSeenAt: new Date().toISOString() },
-      ],
-      handoffs: ['No persisted handoffs yet'],
-      guardrails: ['No persisted guardrails yet'],
-      limits: ['No persisted limits yet'],
-    };
+    return null;
   }
 };
 

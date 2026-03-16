@@ -19,6 +19,8 @@ var protocol_exports = {};
 __export(protocol_exports, {
   buildAuthMessage: () => buildAuthMessage,
   buildHeartbeatMessage: () => buildHeartbeatMessage,
+  buildRoomAuthMessage: () => buildRoomAuthMessage,
+  buildRoomHeartbeatMessage: () => buildRoomHeartbeatMessage,
   buildTaskIntakeAccepted: () => buildTaskIntakeAccepted,
   messageEnvelopeSchema: () => messageEnvelopeSchema,
   parseEnvelope: () => parseEnvelope
@@ -44,27 +46,29 @@ const messageEnvelopeSchema = import_zod.z.object({
 });
 const parseEnvelope = (raw) => messageEnvelopeSchema.parse(JSON.parse(raw));
 const nowIso = () => (/* @__PURE__ */ new Date()).toISOString();
-const buildAuthMessage = (config) => ({
+const buildAuthMessage = (config) => buildRoomAuthMessage(config, "operator", config.agentName, "orchestrator", config.agentRole);
+const buildRoomAuthMessage = (config, roomId, agentName, clientType, agentRole = config.agentRole) => ({
   type: "auth",
   project_id: config.projectId,
   timestamp: nowIso(),
   payload: {
-    room_id: "operator",
-    agent_name: config.agentName,
-    agent_role: config.agentRole,
-    client_type: "orchestrator",
-    token: config.operatorToken
+    room_id: roomId,
+    agent_name: agentName,
+    agent_role: agentRole,
+    client_type: clientType,
+    token: roomId === "operator" ? config.operatorToken : void 0
   }
 });
-const buildHeartbeatMessage = (config) => ({
+const buildHeartbeatMessage = (config) => buildRoomHeartbeatMessage(config, "operator", config.agentName);
+const buildRoomHeartbeatMessage = (config, roomId, agentName) => ({
   message_id: (0, import_node_crypto.randomUUID)(),
   project_id: config.projectId,
-  room_id: "operator",
+  room_id: roomId,
   type: "heartbeat",
   from: {
     actor_type: "orchestrator",
-    actor_id: config.agentName,
-    actor_name: config.agentName
+    actor_id: agentName,
+    actor_name: agentName
   },
   timestamp: nowIso(),
   payload: {}
@@ -92,6 +96,8 @@ const buildTaskIntakeAccepted = (config, taskId) => ({
 0 && (module.exports = {
   buildAuthMessage,
   buildHeartbeatMessage,
+  buildRoomAuthMessage,
+  buildRoomHeartbeatMessage,
   buildTaskIntakeAccepted,
   messageEnvelopeSchema,
   parseEnvelope

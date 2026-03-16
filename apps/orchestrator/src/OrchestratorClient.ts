@@ -5,7 +5,14 @@ import { AgentSupervisor } from './AgentSupervisor';
 import { loadConfig } from './config';
 import { runCodexPrompt } from './codex-runner';
 import { buildOperatorChatResponse, buildOrchestratorStatusUpdate } from './messages';
-import { buildAuthMessage, buildHeartbeatMessage, buildTaskIntakeAccepted, parseEnvelope } from './protocol';
+import {
+  buildAuthMessage,
+  buildHeartbeatMessage,
+  buildRoomAuthMessage,
+  buildRoomHeartbeatMessage,
+  buildTaskIntakeAccepted,
+  parseEnvelope,
+} from './protocol';
 import { TaskRegistry } from './task-registry';
 import { buildTaskCancellationAcknowledged, isCancellationMessage, resolveTaskFromMessage } from './task-events';
 import { buildReviewAnnouncement } from './operator-notifications';
@@ -19,6 +26,9 @@ export class DroidSwarmOrchestratorClient {
   private readonly registry = new TaskRegistry();
   private readonly supervisor: AgentSupervisor;
   private readonly prefix = '[OrchestratorClient]';
+  private readonly channelSockets = new Map<string, WebSocket>();
+  private readonly channelHeartbeats = new Map<string, NodeJS.Timeout>();
+  private readonly channelReconnects = new Map<string, NodeJS.Timeout>();
 
   constructor(private readonly config: OrchestratorConfig = loadConfig()) {
     this.supervisor = new AgentSupervisor(
@@ -56,6 +66,15 @@ export class DroidSwarmOrchestratorClient {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = undefined;
     }
+    for (const timer of this.channelReconnects.values()) {
+      clearTimeout(timer);
+    }
+    this.channelReconnects.clear();
+    for (const [taskId, socket] of this.channelSockets.entries()) {
+      socket.close();
+      this.clearChannelHeartbeat(taskId);
+    }
+    this.channelSockets.clear();
     this.socket?.close();
   }
 
@@ -71,7 +90,7 @@ export class DroidSwarmOrchestratorClient {
     });
 
     socket.on('message', (raw) => {
-      void this.handleMessage(raw.toString());
+      void this.handleMessage(raw.toString(), 'operator');
     });
 
     socket.on('close', () => {
@@ -88,13 +107,85 @@ export class DroidSwarmOrchestratorClient {
     });
   }
 
-  private async handleMessage(raw: string): Promise<void> {
+  private watchTaskChannel(taskId: string): void {
+    if (this.stopped || this.channelSockets.has(taskId)) {
+      return;
+    }
+
+    const agentName = `${this.config.agentName}-${taskId}`;
+    const channelSocket = new WebSocket(this.config.socketUrl);
+    this.channelSockets.set(taskId, channelSocket);
+    this.log('connecting to task channel', taskId);
+
+    channelSocket.on('open', () => {
+      this.clearChannelReconnect(taskId);
+      this.sendToSocket(channelSocket, buildRoomAuthMessage(this.config, taskId, agentName, 'orchestrator'));
+      this.startChannelHeartbeat(taskId, channelSocket, agentName);
+    });
+
+    channelSocket.on('message', (raw) => {
+      void this.handleMessage(raw.toString(), 'task');
+    });
+
+    channelSocket.on('close', () => {
+      this.clearChannelHeartbeat(taskId);
+      this.channelSockets.delete(taskId);
+      if (!this.stopped) {
+        this.scheduleTaskChannelReconnect(taskId);
+      }
+    });
+
+    channelSocket.on('error', () => {
+      channelSocket.close();
+    });
+  }
+
+  private scheduleTaskChannelReconnect(taskId: string): void {
+    this.clearChannelReconnect(taskId);
+    const timer = setTimeout(() => {
+      this.channelReconnects.delete(taskId);
+      this.watchTaskChannel(taskId);
+    }, this.config.reconnectMs);
+    this.channelReconnects.set(taskId, timer);
+  }
+
+  private clearChannelReconnect(taskId: string): void {
+    const timer = this.channelReconnects.get(taskId);
+    if (!timer) {
+      return;
+    }
+
+    clearTimeout(timer);
+    this.channelReconnects.delete(taskId);
+  }
+
+  private startChannelHeartbeat(taskId: string, socket: WebSocket, agentName: string): void {
+    this.clearChannelHeartbeat(taskId);
+    const timer = setInterval(() => {
+      this.sendToSocket(socket, buildRoomHeartbeatMessage(this.config, taskId, agentName));
+    }, this.config.heartbeatMs);
+    this.channelHeartbeats.set(taskId, timer);
+  }
+
+  private clearChannelHeartbeat(taskId: string): void {
+    const timer = this.channelHeartbeats.get(taskId);
+    if (!timer) {
+      return;
+    }
+
+    clearInterval(timer);
+    this.channelHeartbeats.delete(taskId);
+  }
+
+  private async handleMessage(raw: string, source: 'operator' | 'task' = 'operator'): Promise<void> {
     let message: MessageEnvelope;
     try {
       message = parseEnvelope(raw);
     } catch {
       return;
     }
+
+    const isTaskChannel = source === 'task';
 
     if (message.project_id !== this.config.projectId) {
       this.log('ignoring message from other project', this.summarizeMessage(message));
@@ -113,7 +204,7 @@ export class DroidSwarmOrchestratorClient {
       return;
     }
 
-    if (message.type === 'task_created') {
+    if (!isTaskChannel && message.type === 'task_created') {
       const task = resolveTaskFromMessage(message);
       if (!task) {
         this.log('failed to resolve task from task_created event', this.summarizeMessage(message));
@@ -121,6 +212,7 @@ export class DroidSwarmOrchestratorClient {
       }
 
       this.registry.register(task);
+      this.watchTaskChannel(task.taskId);
       this.sendRaw(buildTaskIntakeAccepted(this.config, task.taskId));
       this.log('registered task and accepted intake', task.taskId, task.title ?? 'untitled');
       this.supervisor.startInitialAgents(task);
@@ -128,7 +220,7 @@ export class DroidSwarmOrchestratorClient {
       return;
     }
 
-    if (isCancellationMessage(message)) {
+    if (!isTaskChannel && isCancellationMessage(message)) {
       const task = resolveTaskFromMessage(message);
       if (!task) {
         this.log('failed to resolve task from cancellation event', this.summarizeMessage(message));
@@ -256,11 +348,18 @@ export class DroidSwarmOrchestratorClient {
     }
   }
 
-  private sendRaw(message: MessageEnvelope | ReturnType<typeof buildAuthMessage>): void {
-    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+  private sendToSocket(
+    socket: WebSocket | undefined,
+    message: MessageEnvelope | ReturnType<typeof buildAuthMessage>,
+  ): void {
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
       return;
     }
 
-    this.socket.send(JSON.stringify(message));
+    socket.send(JSON.stringify(message));
+  }
+
+  private sendRaw(message: MessageEnvelope | ReturnType<typeof buildAuthMessage>): void {
+    this.sendToSocket(this.socket, message);
   }
 }

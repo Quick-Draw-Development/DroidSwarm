@@ -92,6 +92,18 @@ export class AgentSupervisor {
         stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
       });
 
+      child.stdout?.setEncoding('utf8');
+      child.stdout?.on('data', (chunk) => {
+        const text = chunk.toString();
+        text
+          .split(/\\r?\\n/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .forEach((line) => {
+            console.log('[AgentSupervisor]', agentName, 'stdout:', line);
+          });
+      });
+
       const agent: ActiveAgent = {
         child,
         taskId: task.taskId,

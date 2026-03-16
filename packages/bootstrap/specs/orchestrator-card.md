@@ -19,12 +19,13 @@ Central controller (super admin / conductor) for the multi-agent system. Manages
 - **Intake & Analysis**  
   Join privileged `operator` room on startup  
   Receive `task_created` events from the dashboard after the task has been persisted  
-  Validate payload and respond with `task_intake_accepted`  
-  Scope all persistence and task lifecycle actions to the configured `project_id`  
-  Create or resume the task session and start a trace for the intake workflow  
-  Create a resumable workflow checkpoint at major lifecycle boundaries rather than relying on full transcript replay  
-  Attach relevant documentation references to the task/session before delegating substantive work when those docs are known  
-  Detect whether the repository development base branch is `main` or `master`  
+  Validate payload and respond with `task_intake_accepted`
+  Scope all persistence and task lifecycle actions to the configured `project_id`
+  Create or resume the task session and start a trace for the intake workflow
+  Create a resumable workflow checkpoint at major lifecycle boundaries rather than relying on full transcript replay
+  Attach relevant documentation references to the task/session before delegating substantive work when those docs are known
+  - Act as the final arbitrator for every task by keeping one eyeball on each task room, so that the orchestrator can resolve plan conflicts, reassign agents, or reroute status transitions even when agents disagree.
+  Detect whether the repository development base branch is `main` or `master`
   Treat `production` as the live and most protected branch  
   If requirements are unclear, `@mention` the task creator with clarification questions before planning/execution  
   Classify: Hotfix bug → branch from `production` as `hotfix/[task-id]`; non-urgent bug → branch from `main` / `master` as `fix/[task-id]`; Feature/Task → branch from `main` / `master` as `feature/[task-id]` and enter Planning as needed
@@ -32,9 +33,10 @@ Central controller (super admin / conductor) for the multi-agent system. Manages
 - **Planning Stage**  
   Create dedicated room (`${issue_id}-planning`)  
   Record orchestrator-to-agent handoffs for planning participants  
-  Include documentation context and authoritative doc references in planning handoffs  
-  Summarize planning outcomes into durable task/session state before starting execution agents  
-  Spawn initial agents (Planner, Architect, Critic, etc.)  
+  Include documentation context and authoritative doc references in planning handoffs
+  Summarize planning outcomes into durable task/session state before starting execution agents
+  - Capture and publish the agreed-upon plan in the task room, then formally move the task from `planning` to `in_progress` so that the orchestrator's planning gate is closed before agents enter full execution.
+  Spawn initial agents (Planner, Architect, Critic, etc.)
   Monitor for consensus / task breakdown  
   Create child issues/subtasks → transition to Execution
 
@@ -43,6 +45,7 @@ Central controller (super admin / conductor) for the multi-agent system. Manages
   For feature work, create branches from detected `main` / `master` using `feature/[task-id]`  
   For non-urgent bug work, create branches from detected `main` / `master` using `fix/[task-id]`  
   For hotfix work, create branches from `production` using `hotfix/[task-id]`  
+  - Record branch decisions, create the required branch yourself before handing work to agents, then once they report the code is ready and a PR is opened, publish that PR link into the task channel and move the task into `review`.  
   Run guardrails before branch creation, code-writing work, PR creation, and merge preparation  
   Apply budget and context checks before spawning new agents or continuing large runs  
   Require a documentation-impact check before moving work toward review or done  
@@ -62,7 +65,7 @@ Central controller (super admin / conductor) for the multi-agent system. Manages
 - **WebSocket Management**  
   - Create/destroy rooms on demand  
   - Subscribe to privileged `operator` room for control-plane events  
-  - Join all rooms as privileged observer (`Orchestrator`)  
+  - Join all rooms as privileged observer (`Orchestrator`), keeping a subscription to every task channel so the orchestrator can hear every human/agent exchange and make centralized decisions.
   - Enforce protocol: Validate/auth connections, log every message, and prefer structured typed messages over freeform text  
   - Broadcast system messages (`spawned_agent`, `task_intake_accepted`, clarification questions, round instructions, etc.)  
   - Monitor heartbeats → detect/terminate stalled agents
@@ -133,6 +136,7 @@ Central controller (super admin / conductor) for the multi-agent system. Manages
     - When a task is created and the operator stages it for review (status `review`), broadcast `X is reviewing this task` so watchers know a human is now overseeing the work.
     - Immediately announce orchestrator-assigned agents (name + role) in the task channel so every participant can see who is working on the task.
     - Relay every agent-to-agent coordination (help requests, handoffs, clarifications, or context swaps) back into the same channel so the human operator can follow the multi-agent dialogue.
+    - Post the orchestrator-authored plan (including the branch name) into the task channel before execution agents start, watch for the assigned agent to open the pull request, then drop the PR link back into the channel and move the task to `review`.
 
 ## 4. Operational Rules
 - **Scaling & Limits**  

@@ -46,6 +46,9 @@ class DroidSwarmOrchestratorClient {
     this.stopped = false;
     this.registry = new import_task_registry.TaskRegistry();
     this.prefix = "[OrchestratorClient]";
+    this.channelSockets = /* @__PURE__ */ new Map();
+    this.channelHeartbeats = /* @__PURE__ */ new Map();
+    this.channelReconnects = /* @__PURE__ */ new Map();
     this.supervisor = new import_AgentSupervisor.AgentSupervisor(
       config,
       this.registry,
@@ -77,6 +80,15 @@ class DroidSwarmOrchestratorClient {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = void 0;
     }
+    for (const timer of this.channelReconnects.values()) {
+      clearTimeout(timer);
+    }
+    this.channelReconnects.clear();
+    for (const [taskId, socket] of this.channelSockets.entries()) {
+      socket.close();
+      this.clearChannelHeartbeat(taskId);
+    }
+    this.channelSockets.clear();
     this.socket?.close();
   }
   connect() {
@@ -89,7 +101,7 @@ class DroidSwarmOrchestratorClient {
       console.log("Orchestrator connection established.");
     });
     socket.on("message", (raw) => {
-      void this.handleMessage(raw.toString());
+      void this.handleMessage(raw.toString(), "operator");
     });
     socket.on("close", () => {
       this.clearHeartbeat();
@@ -103,13 +115,72 @@ class DroidSwarmOrchestratorClient {
       socket.close();
     });
   }
-  async handleMessage(raw) {
+  watchTaskChannel(taskId) {
+    if (this.stopped || this.channelSockets.has(taskId)) {
+      return;
+    }
+    const agentName = `${this.config.agentName}-${taskId}`;
+    const channelSocket = new import_ws.default(this.config.socketUrl);
+    this.channelSockets.set(taskId, channelSocket);
+    this.log("connecting to task channel", taskId);
+    channelSocket.on("open", () => {
+      this.clearChannelReconnect(taskId);
+      this.sendToSocket(channelSocket, (0, import_protocol.buildRoomAuthMessage)(this.config, taskId, agentName, "orchestrator"));
+      this.startChannelHeartbeat(taskId, channelSocket, agentName);
+    });
+    channelSocket.on("message", (raw) => {
+      void this.handleMessage(raw.toString(), "task");
+    });
+    channelSocket.on("close", () => {
+      this.clearChannelHeartbeat(taskId);
+      this.channelSockets.delete(taskId);
+      if (!this.stopped) {
+        this.scheduleTaskChannelReconnect(taskId);
+      }
+    });
+    channelSocket.on("error", () => {
+      channelSocket.close();
+    });
+  }
+  scheduleTaskChannelReconnect(taskId) {
+    this.clearChannelReconnect(taskId);
+    const timer = setTimeout(() => {
+      this.channelReconnects.delete(taskId);
+      this.watchTaskChannel(taskId);
+    }, this.config.reconnectMs);
+    this.channelReconnects.set(taskId, timer);
+  }
+  clearChannelReconnect(taskId) {
+    const timer = this.channelReconnects.get(taskId);
+    if (!timer) {
+      return;
+    }
+    clearTimeout(timer);
+    this.channelReconnects.delete(taskId);
+  }
+  startChannelHeartbeat(taskId, socket, agentName) {
+    this.clearChannelHeartbeat(taskId);
+    const timer = setInterval(() => {
+      this.sendToSocket(socket, (0, import_protocol.buildRoomHeartbeatMessage)(this.config, taskId, agentName));
+    }, this.config.heartbeatMs);
+    this.channelHeartbeats.set(taskId, timer);
+  }
+  clearChannelHeartbeat(taskId) {
+    const timer = this.channelHeartbeats.get(taskId);
+    if (!timer) {
+      return;
+    }
+    clearInterval(timer);
+    this.channelHeartbeats.delete(taskId);
+  }
+  async handleMessage(raw, source = "operator") {
     let message;
     try {
       message = (0, import_protocol.parseEnvelope)(raw);
     } catch {
       return;
     }
+    const isTaskChannel = source === "task";
     if (message.project_id !== this.config.projectId) {
       this.log("ignoring message from other project", this.summarizeMessage(message));
       return;
@@ -123,20 +194,21 @@ class DroidSwarmOrchestratorClient {
       this.handleOperatorStatusMessage(message);
       return;
     }
-    if (message.type === "task_created") {
+    if (!isTaskChannel && message.type === "task_created") {
       const task = (0, import_task_events.resolveTaskFromMessage)(message);
       if (!task) {
         this.log("failed to resolve task from task_created event", this.summarizeMessage(message));
         return;
       }
       this.registry.register(task);
+      this.watchTaskChannel(task.taskId);
       this.sendRaw((0, import_protocol.buildTaskIntakeAccepted)(this.config, task.taskId));
       this.log("registered task and accepted intake", task.taskId, task.title ?? "untitled");
       this.supervisor.startInitialAgents(task);
       this.log("started initial agents for task", task.taskId);
       return;
     }
-    if ((0, import_task_events.isCancellationMessage)(message)) {
+    if (!isTaskChannel && (0, import_task_events.isCancellationMessage)(message)) {
       const task = (0, import_task_events.resolveTaskFromMessage)(message);
       if (!task) {
         this.log("failed to resolve task from cancellation event", this.summarizeMessage(message));
@@ -244,11 +316,14 @@ ${this.config.droidspeakRules}
       this.heartbeatTimer = void 0;
     }
   }
-  sendRaw(message) {
-    if (!this.socket || this.socket.readyState !== import_ws.default.OPEN) {
+  sendToSocket(socket, message) {
+    if (!socket || socket.readyState !== import_ws.default.OPEN) {
       return;
     }
-    this.socket.send(JSON.stringify(message));
+    socket.send(JSON.stringify(message));
+  }
+  sendRaw(message) {
+    this.sendToSocket(this.socket, message);
   }
 }
 // Annotate the CommonJS export names for ESM import in node:

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { z } from 'zod';
 
-import type { AuthMessage, MessageEnvelope, OrchestratorConfig } from './types';
+import type { AuthMessage, ClientType, MessageEnvelope, OrchestratorConfig } from './types';
 
 const isoTimestampSchema = z.string().datetime({ offset: true });
 
@@ -27,28 +27,44 @@ export const parseEnvelope = (raw: string): MessageEnvelope => messageEnvelopeSc
 
 const nowIso = (): string => new Date().toISOString();
 
-export const buildAuthMessage = (config: OrchestratorConfig): AuthMessage => ({
+export const buildAuthMessage = (config: OrchestratorConfig): AuthMessage =>
+  buildRoomAuthMessage(config, 'operator', config.agentName, 'orchestrator', config.agentRole);
+
+export const buildRoomAuthMessage = (
+  config: OrchestratorConfig,
+  roomId: string,
+  agentName: string,
+  clientType: ClientType,
+  agentRole = config.agentRole,
+): AuthMessage => ({
   type: 'auth',
   project_id: config.projectId,
   timestamp: nowIso(),
   payload: {
-    room_id: 'operator',
-    agent_name: config.agentName,
-    agent_role: config.agentRole,
-    client_type: 'orchestrator',
-    token: config.operatorToken,
+    room_id: roomId,
+    agent_name: agentName,
+    agent_role: agentRole,
+    client_type: clientType,
+    token: roomId === 'operator' ? config.operatorToken : undefined,
   },
 });
 
-export const buildHeartbeatMessage = (config: OrchestratorConfig): MessageEnvelope => ({
+export const buildHeartbeatMessage = (config: OrchestratorConfig): MessageEnvelope =>
+  buildRoomHeartbeatMessage(config, 'operator', config.agentName);
+
+export const buildRoomHeartbeatMessage = (
+  config: OrchestratorConfig,
+  roomId: string,
+  agentName: string,
+): MessageEnvelope => ({
   message_id: randomUUID(),
   project_id: config.projectId,
-  room_id: 'operator',
+  room_id: roomId,
   type: 'heartbeat',
   from: {
     actor_type: 'orchestrator',
-    actor_id: config.agentName,
-    actor_name: config.agentName,
+    actor_id: agentName,
+    actor_name: agentName,
   },
   timestamp: nowIso(),
   payload: {},

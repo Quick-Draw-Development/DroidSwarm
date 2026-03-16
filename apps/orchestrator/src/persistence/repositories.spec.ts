@@ -205,4 +205,30 @@ describe('Orchestrator persistence repositories', () => {
     db.close();
     rmSync(tempDir, { recursive: true, force: true });
   });
+
+  it('persists operator control actions', () => {
+    const tempDir = mkdtempSync(path.join(tmpdir(), 'droidswarm-persistence-'));
+    const dbPath = path.join(tempDir, 'state.db');
+    const db = openPersistenceDatabase(dbPath);
+    const persistence = PersistenceClient.fromDatabase(db);
+    const run = persistence.createRun('droidswarm');
+    const service = new OrchestratorPersistenceService(persistence, run);
+
+    service.recordOperatorAction({
+      taskId: 'task-operator',
+      actionType: 'cancel_task',
+      detail: 'operator requested cancel',
+      metadata: { reason: 'urgent' },
+    });
+
+    const stored = db
+      .prepare('SELECT action_type, detail, metadata_json FROM operator_actions WHERE task_id = ?')
+      .get('task-operator') as { action_type: string; detail: string; metadata_json: string } | undefined;
+    assert.equal(stored?.action_type, 'cancel_task');
+    assert.equal(stored?.detail, 'operator requested cancel');
+    assert.equal(JSON.parse(stored?.metadata_json ?? '{}').reason, 'urgent');
+
+    db.close();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
 });

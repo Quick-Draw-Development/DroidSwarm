@@ -8,8 +8,8 @@ import type {
   OrchestratorConfig,
   PersistedTask,
   RequestedAgent,
-  TaskRecord,
   TaskPolicy,
+  TaskRecord,
 } from '../types';
 
 const buildTaskRecord = (task: PersistedTask): TaskRecord => ({
@@ -94,6 +94,17 @@ export class TaskScheduler {
       summary: result.summary,
     });
 
+    const stage = typeof task.metadata?.stage === 'string' ? task.metadata.stage : undefined;
+    if (stage === 'verification') {
+      this.handleVerificationResult(task, attemptId, result);
+      return;
+    }
+
+    if (stage === 'review') {
+      this.handleReviewResult(task, attemptId, result);
+      return;
+    }
+
     const limitedRequests = result.requested_agents.slice(0, this.config.schedulerMaxFanOut);
     if (limitedRequests.length > 0) {
       const created = this.createChildTasks(
@@ -111,13 +122,8 @@ export class TaskScheduler {
         );
       }
     } else if (result.status === 'completed') {
-      this.persistenceService.setTaskStatus(taskId, 'completed');
-      this.events?.onVerificationRequested?.(
-        taskId,
-        role,
-        this.config.agentName,
-        result.summary,
-      );
+      this.persistenceService.setTaskStatus(taskId, 'in_review');
+      this.startVerification(task, result.summary);
     } else {
       this.persistenceService.setTaskStatus(taskId, 'waiting_on_human');
       this.scheduleRetry(task.taskId);
@@ -391,6 +397,111 @@ export class TaskScheduler {
     this.retryTimers.delete(taskId);
   }
 
+  private handleVerificationResult(task: PersistedTask, attemptId: string, result: CodexAgentResult): void {
+    const parentId = task.parentTaskId;
+    if (!parentId) {
+      return;
+    }
+
+    if (result.status === 'completed') {
+      this.persistenceService.setTaskStatus(task.taskId, 'completed');
+      const parent = this.persistenceService.getTask(parentId);
+      if (!parent) {
+        return;
+      }
+      this.persistenceService.setTaskStatus(parent.taskId, 'verified');
+      this.startReview(parent, result.summary);
+    } else {
+      this.persistenceService.setTaskStatus(task.taskId, 'failed');
+      this.persistenceService.setTaskStatus(parentId, 'waiting_on_human');
+      this.scheduleRetry(task.taskId);
+    }
+
+    this.resolveParentIfReady(task);
+  }
+
+  private handleReviewResult(task: PersistedTask, attemptId: string, result: CodexAgentResult): void {
+    const parentId = task.parentTaskId;
+    if (!parentId) {
+      return;
+    }
+
+    if (result.status === 'completed') {
+      this.persistenceService.setTaskStatus(task.taskId, 'completed');
+      this.persistenceService.setTaskStatus(parentId, 'verified');
+    } else {
+      this.persistenceService.setTaskStatus(task.taskId, 'failed');
+      this.persistenceService.setTaskStatus(parentId, 'waiting_on_human');
+      this.scheduleRetry(task.taskId);
+    }
+
+    this.resolveParentIfReady(task);
+  }
+
+  private startVerification(parent: PersistedTask, summary: string | undefined): void {
+    if (this.hasStageDependency(parent, 'verification')) {
+      return;
+    }
+
+    const child = this.createStageTask(parent, 'verification', 'reviewer', 'Verification pass for implementation', summary);
+    this.readyQueue.add(child.taskId);
+    this.persistenceService.setTaskStatus(parent.taskId, 'in_review');
+    this.events?.onVerificationRequested?.(
+      parent.taskId,
+      'verification',
+      this.config.agentName,
+      summary,
+    );
+  }
+
+  private startReview(parent: PersistedTask, summary: string | undefined): void {
+    if (this.hasStageDependency(parent, 'review')) {
+      return;
+    }
+
+    const child = this.createStageTask(parent, 'review', 'reviewer', 'Human review pass', summary);
+    this.readyQueue.add(child.taskId);
+    this.persistenceService.setTaskStatus(parent.taskId, 'waiting_on_dependency');
+  }
+
+  private createStageTask(
+    parent: PersistedTask,
+    stage: 'verification' | 'review',
+    role: string,
+    description: string,
+    parentSummary?: string,
+  ): PersistedTask {
+    const taskId = randomUUID();
+    const record = this.persistenceService.createTask({
+      taskId,
+      name: `${parent.name} → ${stage}`,
+      priority: parent.priority,
+      parentTaskId: parent.taskId,
+      status: 'queued',
+      metadata: {
+        stage,
+        agent_role: role,
+        task_type: stage,
+        description,
+        parent_summary: parentSummary,
+      },
+    });
+    this.persistenceService.addDependency(parent.taskId, record.taskId);
+    return record;
+  }
+
+  private hasStageDependency(parent: PersistedTask, stage: string): boolean {
+    const dependents = this.persistenceService.listDependents(parent.taskId);
+    for (const dependency of dependents) {
+      const child = this.persistenceService.getTask(dependency.dependsOnTaskId);
+      if (child?.metadata?.stage === stage) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+
   private parseCheckpointPayload(checkpoint: CheckpointRecord): CheckpointPayload | undefined {
     try {
       return JSON.parse(checkpoint.payloadJson) as CheckpointPayload;
@@ -513,11 +624,4 @@ export class TaskScheduler {
     this.persistenceService.setTaskStatus(task.taskId, 'waiting_on_human');
   }
 
-  private parseCheckpointPayload(checkpoint: CheckpointRecord): CheckpointPayload | undefined {
-    try {
-      return JSON.parse(checkpoint.payloadJson) as CheckpointPayload;
-    } catch {
-      return undefined;
-    }
-  }
 }

@@ -4,10 +4,10 @@ import { loadConfig } from './config';
 import { buildAgentPrompt } from './agent-prompt';
 import { runCodexPrompt } from './codex-runner';
 import {
-  buildAgentArtifactMessage,
-  buildAgentRequestHelp,
+  buildArtifactCreatedMessage,
   buildAgentStatusUpdate,
   buildClarificationRequest,
+  buildSpawnRequestedMessage,
 } from './messages';
 import { buildAuthMessage, parseEnvelope } from './protocol';
 import type { CodexAgentResult, MessageEnvelope, OrchestratorConfig, TaskRecord } from './types';
@@ -154,11 +154,17 @@ const runWorker = async (): Promise<void> => {
   console.log(`[Worker ${options.agentName}] Codex completed with status ${result.status}`);
 
   for (const artifact of result.artifacts) {
-    sendMessage(socket, buildAgentArtifactMessage(config, options.task.taskId, options.task.taskId, options.agentName, artifact));
+    sendMessage(
+      socket,
+      buildArtifactCreatedMessage(config, options.task.taskId, options.task.taskId, options.agentName, artifact),
+    );
   }
 
   for (const request of result.requested_agents) {
-    sendMessage(socket, buildAgentRequestHelp(config, options.task.taskId, options.task.taskId, options.agentName, request));
+    sendMessage(
+      socket,
+      buildSpawnRequestedMessage(config, options.task.taskId, options.task.taskId, options.agentName, request),
+    );
   }
 
   if (result.clarification_question) {

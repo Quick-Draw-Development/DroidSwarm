@@ -1,4 +1,6 @@
-import { buildOperatorChatResponse, buildOrchestratorStatusUpdate } from '../messages';
+import { randomUUID } from 'node:crypto';
+
+import { buildOperatorChatResponse, buildOrchestratorStatusUpdate, buildTaskAssignedMessage } from '../messages';
 import { buildTaskIntakeAccepted } from '../protocol';
 import { isCancellationMessage, resolveTaskFromMessage } from '../task-events';
 import type { MessageEnvelope, OrchestratorConfig, PersistedTask, SpawnedAgent } from '../types';
@@ -64,6 +66,14 @@ export class OrchestratorEngine {
     }
 
     const details = agents.map((agent) => `${agent.agentName} (${agent.role})`).join(', ');
+    const assignmentId = randomUUID();
+    this.options.gateway.send(buildTaskAssignedMessage(
+      this.options.config,
+      taskId,
+      taskId,
+      assignmentId,
+      agents,
+    ));
     this.sendStatusUpdate(
       taskId,
       taskId,
@@ -71,6 +81,7 @@ export class OrchestratorEngine {
       'agent_assigned',
       `Assigned agents: ${details}.`,
       {
+        assignment_id: assignmentId,
         assigned_agents: agents.map((agent) => ({
           agent_name: agent.agentName,
           agent_role: agent.role,

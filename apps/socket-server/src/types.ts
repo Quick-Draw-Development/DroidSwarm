@@ -1,84 +1,15 @@
 import type WebSocket from 'ws';
-
-export const MESSAGE_TYPES = [
-  'auth',
-  'status_update',
-  'request_help',
-  'handoff_event',
-  'guardrail_event',
-  'trace_event',
-  'usage_event',
-  'limit_event',
-  'checkpoint_event',
-  'artifact',
-  'proposal',
-  'vote',
-  'clarification_request',
-  'clarification_response',
-  'task_created',
-  'task_intake_accepted',
-  'chat',
-  'heartbeat',
-] as const;
-
-export type MessageType = (typeof MESSAGE_TYPES)[number];
-
-export const ACTOR_TYPES = ['agent', 'orchestrator', 'human', 'system', 'tool'] as const;
-export type ActorType = (typeof ACTOR_TYPES)[number];
-
-export const CLIENT_TYPES = ['agent', 'orchestrator', 'human', 'dashboard', 'system'] as const;
-export type ClientType = (typeof CLIENT_TYPES)[number];
-
-export interface ActorRef {
-  actor_type: ActorType;
-  actor_id: string;
-  actor_name: string;
-}
-
-export interface MessageEnvelope<TPayload = Record<string, unknown>> {
-  message_id: string;
-  project_id: string;
-  room_id: string;
-  task_id?: string;
-  type: Exclude<MessageType, 'auth'>;
-  from: ActorRef;
-  timestamp: string;
-  payload: TPayload;
-  reply_to?: string;
-  trace_id?: string;
-  span_id?: string;
-  session_id?: string;
-  usage?: UsageShape;
-  compression?: CompressionShape;
-}
-
-export interface AuthPayload {
-  room_id: string;
-  agent_name: string;
-  agent_role: string;
-  client_type?: ClientType;
-  token?: string;
-}
-
-export interface AuthMessage {
-  type: 'auth';
-  project_id: string;
-  timestamp: string;
-  payload: AuthPayload;
-}
-
-export interface CompressionShape {
-  scheme: string;
-  compressed_content: string;
-}
-
-export interface UsageShape {
-  total_tokens?: number;
-  input_tokens?: number;
-  cached_input_tokens?: number;
-  output_tokens?: number;
-  reasoning_output_tokens?: number;
-}
+export type {
+  ActorRef,
+  ActorType,
+  AuthMessage,
+  ClientType,
+  CompressionShape,
+  MessageEnvelope,
+  MessagePayloadMap,
+  MessageType,
+  UsageShape,
+} from '../../../../libs/protocol/src';
 
 export interface ConnectedClient {
   connectionId: string;

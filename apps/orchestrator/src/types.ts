@@ -1,46 +1,12 @@
-export type ActorType = 'agent' | 'orchestrator' | 'human' | 'system' | 'tool';
-export type ClientType = 'agent' | 'orchestrator' | 'human' | 'dashboard' | 'system';
-export type MessageType =
-  | 'auth'
-  | 'status_update'
-  | 'request_help'
-  | 'artifact'
-  | 'clarification_request'
-  | 'task_created'
-  | 'task_intake_accepted'
-  | 'chat'
-  | 'heartbeat';
-
-export interface ActorRef {
-  actor_type: ActorType;
-  actor_id: string;
-  actor_name: string;
-}
-
-export interface MessageEnvelope<TPayload = Record<string, unknown>> {
-  message_id: string;
-  project_id: string;
-  room_id: string;
-  task_id?: string;
-  type: Exclude<MessageType, 'auth'>;
-  from: ActorRef;
-  timestamp: string;
-  payload: TPayload;
-  compression?: string;
-}
-
-export interface AuthMessage {
-  type: 'auth';
-  project_id: string;
-  timestamp: string;
-  payload: {
-    room_id: string;
-    agent_name: string;
-    agent_role: string;
-    client_type: ClientType;
-    token?: string;
-  };
-}
+export type {
+  ActorRef,
+  ActorType,
+  AuthMessage,
+  ClientType,
+  MessageEnvelope,
+  MessagePayloadMap,
+  MessageType,
+} from '../../../libs/protocol/src';
 
 export interface OrchestratorConfig {
   environment: 'development' | 'test' | 'production';

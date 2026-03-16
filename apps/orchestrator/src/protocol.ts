@@ -1,29 +1,10 @@
 import { randomUUID } from 'node:crypto';
 
-import { z } from 'zod';
-
 import type { AuthMessage, ClientType, MessageEnvelope, OrchestratorConfig } from './types';
+import { messageEnvelopeSchema } from '../../../libs/protocol/src';
 
-const isoTimestampSchema = z.string().datetime({ offset: true });
-
-const actorRefSchema = z.object({
-  actor_type: z.enum(['agent', 'orchestrator', 'human', 'system', 'tool']),
-  actor_id: z.string().min(1),
-  actor_name: z.string().min(1),
-});
-
-export const messageEnvelopeSchema = z.object({
-  message_id: z.string().min(1),
-  project_id: z.string().min(1),
-  room_id: z.string().min(1),
-  task_id: z.string().min(1).optional(),
-  type: z.enum(['status_update', 'task_created', 'task_intake_accepted', 'chat', 'heartbeat']),
-  from: actorRefSchema,
-  timestamp: isoTimestampSchema,
-  payload: z.record(z.string(), z.unknown()),
-});
-
-export const parseEnvelope = (raw: string): MessageEnvelope => messageEnvelopeSchema.parse(JSON.parse(raw));
+export const parseEnvelope = (raw: string): MessageEnvelope =>
+  messageEnvelopeSchema.parse(JSON.parse(raw));
 
 const nowIso = (): string => new Date().toISOString();
 

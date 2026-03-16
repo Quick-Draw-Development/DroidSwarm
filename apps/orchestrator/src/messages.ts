@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
 
-import type { CodexAgentResult, MessageEnvelope, OrchestratorConfig, RequestedAgent } from './types';
+import type {
+  CodexAgentResult,
+  MessageEnvelope,
+  OrchestratorConfig,
+  RequestedAgent,
+  SpawnedAgent,
+} from './types';
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -59,7 +65,7 @@ export const buildOrchestratorStatusUpdate = (
   },
 });
 
-export const buildAgentArtifactMessage = (
+export const buildArtifactCreatedMessage = (
   config: OrchestratorConfig,
   taskId: string,
   roomId: string,
@@ -70,17 +76,19 @@ export const buildAgentArtifactMessage = (
   project_id: config.projectId,
   room_id: roomId,
   task_id: taskId,
-  type: 'artifact',
+  type: 'artifact_created',
   from: buildActor(agentName, 'agent'),
   timestamp: nowIso(),
   payload: {
-    artifact_kind: artifact.kind,
-    title: artifact.title,
+    artifact_id: randomUUID(),
+    task_id: taskId,
+    kind: artifact.kind,
+    summary: artifact.title,
     content: artifact.content,
   },
 });
 
-export const buildAgentRequestHelp = (
+export const buildSpawnRequestedMessage = (
   config: OrchestratorConfig,
   taskId: string,
   roomId: string,
@@ -91,14 +99,40 @@ export const buildAgentRequestHelp = (
   project_id: config.projectId,
   room_id: roomId,
   task_id: taskId,
-  type: 'request_help',
+  type: 'spawn_requested',
   from: buildActor(agentName, 'agent'),
   timestamp: nowIso(),
   payload: {
+    task_id: taskId,
     needed_role: request.role,
     reason_code: request.reason,
     instructions: request.instructions,
     content: `Need ${request.role}: ${request.reason}`,
+  },
+});
+
+export const buildTaskAssignedMessage = (
+  config: OrchestratorConfig,
+  taskId: string,
+  roomId: string,
+  assignmentId: string,
+  agents: SpawnedAgent[],
+): MessageEnvelope => ({
+  message_id: randomUUID(),
+  project_id: config.projectId,
+  room_id: roomId,
+  task_id: taskId,
+  type: 'task_assigned',
+  from: buildActor(config.agentName, 'orchestrator'),
+  timestamp: nowIso(),
+  payload: {
+    task_id: taskId,
+    assignment_id: assignmentId,
+    assigned_agents: agents.map((agent) => ({
+      agent_name: agent.agentName,
+      agent_role: agent.role,
+      attempt_id: agent.attemptId,
+    })),
   },
 });
 

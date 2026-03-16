@@ -195,4 +195,15 @@ export class OrchestratorPersistenceService {
   getArtifactsForTask(taskId: string): ArtifactRecord[] {
     return this.persistence.artifacts.listByTask(taskId);
   }
+
+  recordBudgetEvent(taskId: string | undefined, detail: string, consumed: number): void {
+    this.persistence.budgets.record({
+      eventId: randomUUID(),
+      runId: this.run.runId,
+      taskId: taskId ?? null,
+      detail,
+      consumed,
+      createdAt: nowIso(),
+    });
+  }
 }

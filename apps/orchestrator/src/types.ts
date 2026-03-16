@@ -32,6 +32,9 @@ export interface OrchestratorConfig {
   schedulerMaxTaskDepth: number;
   schedulerMaxFanOut: number;
   schedulerRetryIntervalMs: number;
+  maxConcurrentCodeAgents: number;
+  sideEffectActionsBeforeReview: number;
+  allowedTools: string[];
 }
 
 export interface TaskRecord {
@@ -43,6 +46,16 @@ export interface TaskRecord {
   createdByUserId?: string;
   createdAt: string;
   branchName?: string;
+}
+
+export interface TaskPolicy {
+  maxDepth?: number;
+  maxChildren?: number;
+  maxTokens?: number;
+  maxToolCalls?: number;
+  timeoutMs?: number;
+  allowedTools?: string[];
+  approvalPolicy?: 'auto' | 'manual';
 }
 
 export interface TaskState {

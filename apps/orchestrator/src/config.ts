@@ -12,6 +12,17 @@ const toPositiveInt = (value: string | undefined, fallback: number): number => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 
+const parseCommaList = (value: string | undefined): string[] => {
+  if (!value) {
+    return [];
+  }
+
+  return value
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+};
+
 export const loadConfig = (): OrchestratorConfig => {
   const environment = (process.env.NODE_ENV ?? 'development') as OrchestratorConfig['environment'];
   const host = process.env.DROIDSWARM_SOCKET_HOST ?? '127.0.0.1';
@@ -47,5 +58,11 @@ export const loadConfig = (): OrchestratorConfig => {
     schedulerMaxTaskDepth: toPositiveInt(process.env.DROIDSWARM_SCHEDULER_MAX_TASK_DEPTH, 4),
     schedulerMaxFanOut: toPositiveInt(process.env.DROIDSWARM_SCHEDULER_MAX_FAN_OUT, 3),
     schedulerRetryIntervalMs: toPositiveInt(process.env.DROIDSWARM_SCHEDULER_RETRY_INTERVAL_MS, 30_000),
+    maxConcurrentCodeAgents: toPositiveInt(process.env.DROIDSWARM_MAX_CONCURRENT_CODE_AGENTS, 6),
+    sideEffectActionsBeforeReview: toPositiveInt(
+      process.env.DROIDSWARM_SIDE_EFFECT_ACTIONS_BEFORE_REVIEW,
+      5,
+    ),
+    allowedTools: parseCommaList(process.env.DROIDSWARM_ALLOWED_TOOLS),
   };
 };

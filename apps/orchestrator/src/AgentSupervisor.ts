@@ -171,6 +171,21 @@ export class AgentSupervisor {
     return this.agents.size;
   }
 
+  countActiveAgents(predicate?: (agent: ActiveAgent) => boolean): number {
+    if (!predicate) {
+      return this.agents.size;
+    }
+
+    let count = 0;
+    for (const agent of this.agents.values()) {
+      if (predicate(agent)) {
+        count += 1;
+      }
+    }
+
+    return count;
+  }
+
   private handleAgentMessage(task: TaskRecord, message: AgentResultMessage): void {
     if (message.type !== 'agent_result' || message.taskId !== task.taskId) {
       return;

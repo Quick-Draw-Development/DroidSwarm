@@ -187,4 +187,22 @@ describe('Orchestrator persistence repositories', () => {
     db.close();
     rmSync(tempDir, { recursive: true, force: true });
   });
+
+  it('records budget events when thresholds fire', () => {
+    const tempDir = mkdtempSync(path.join(tmpdir(), 'droidswarm-persistence-'));
+    const dbPath = path.join(tempDir, 'state.db');
+    const db = openPersistenceDatabase(dbPath);
+    const persistence = PersistenceClient.fromDatabase(db);
+    const run = persistence.createRun('droidswarm');
+    const service = new OrchestratorPersistenceService(persistence, run);
+
+    service.recordBudgetEvent('task-limit', 'test limit hit', 1);
+
+    const event = db.prepare('SELECT detail, consumed FROM budget_events WHERE task_id = ?').get('task-limit');
+    assert.equal(event?.detail, 'test limit hit');
+    assert.equal(event?.consumed, 1);
+
+    db.close();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
 });

@@ -9,6 +9,7 @@ import type {
   PersistedTask,
   RequestedAgent,
   TaskRecord,
+  TaskPolicy,
 } from '../types';
 
 const buildTaskRecord = (task: PersistedTask): TaskRecord => ({
@@ -95,8 +96,15 @@ export class TaskScheduler {
 
     const limitedRequests = result.requested_agents.slice(0, this.config.schedulerMaxFanOut);
     if (limitedRequests.length > 0) {
-      this.persistenceService.setTaskStatus(taskId, 'waiting_on_dependency');
-      this.createChildTasks(task, limitedRequests, result.summary, result.compression?.compressed_content);
+      const created = this.createChildTasks(
+        task,
+        limitedRequests,
+        result.summary,
+        result.compression?.compressed_content,
+      );
+      if (created) {
+        this.persistenceService.setTaskStatus(task.taskId, 'waiting_on_dependency');
+      }
       if (limitedRequests.length < result.requested_agents.length) {
         this.log(
           `truncated ${result.requested_agents.length - limitedRequests.length} requested agents for ${taskId}`,
@@ -165,7 +173,23 @@ export class TaskScheduler {
       return false;
     }
 
-    if (this.supervisor.getActiveAgentCount() >= this.config.maxConcurrentAgents) {
+    const globalActive = this.supervisor.getActiveAgentCount();
+    const codeCount = this.supervisor.countActiveAgents((agent) => this.isCodeRole(agent.role));
+    if (this.config.maxConcurrentCodeAgents > 0 && codeCount >= this.config.maxConcurrentCodeAgents) {
+      this.recordBudgetLimit(
+        task.taskId,
+        `Concurrent code agent limit (${this.config.maxConcurrentCodeAgents}) reached`,
+        codeCount,
+      );
+      return false;
+    }
+
+    if (globalActive >= this.config.maxConcurrentAgents) {
+      this.recordBudgetLimit(
+        task.taskId,
+        `Global concurrent agent limit (${this.config.maxConcurrentAgents}) reached`,
+        globalActive,
+      );
       return false;
     }
 
@@ -228,6 +252,11 @@ export class TaskScheduler {
     const parentSummary = checkpointPayload?.summary ?? metadataParentSummary;
     const parentDroidspeak = checkpointPayload?.compression?.compressed_content ?? metadataParentDroidspeak;
 
+    if (!this.checkSideEffectBudget(task)) {
+      this.readyQueue.add(task.taskId);
+      return;
+    }
+
     const attemptId = randomUUID();
     const spawned = this.supervisor.startAgentForTask(record, role, attemptId, parentSummary, parentDroidspeak);
     if (!spawned) {
@@ -255,14 +284,18 @@ export class TaskScheduler {
     requests: RequestedAgent[],
     parentSummary: string,
     parentDroidspeak?: string,
-  ): void {
+  ): boolean {
     const taskDepth = this.getTaskDepth(task.taskId);
     const childIds: string[] = [];
     if (taskDepth + 1 > this.config.schedulerMaxTaskDepth) {
       this.log(`max depth ${this.config.schedulerMaxTaskDepth} reached for ${task.taskId}; waiting on human`);
       this.persistenceService.setTaskStatus(task.taskId, 'waiting_on_human');
       this.scheduleRetry(task.taskId);
-      return;
+      return false;
+    }
+
+    if (!this.enforceTaskPolicy(task, requests)) {
+      return false;
     }
 
     for (const request of requests) {
@@ -297,6 +330,7 @@ export class TaskScheduler {
         childIds,
       );
     }
+    return childIds.length > 0;
   }
 
   private resolveParentIfReady(task: PersistedTask): void {
@@ -355,6 +389,128 @@ export class TaskScheduler {
 
     clearTimeout(timer);
     this.retryTimers.delete(taskId);
+  }
+
+  private parseCheckpointPayload(checkpoint: CheckpointRecord): CheckpointPayload | undefined {
+    try {
+      return JSON.parse(checkpoint.payloadJson) as CheckpointPayload;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private isCodeRole(role: string): boolean {
+    const normalized = role.toLowerCase();
+    return normalized.includes('code') || normalized.includes('coder') || normalized.includes('dev');
+  }
+
+  private recordBudgetLimit(taskId: string | undefined, detail: string, consumed: number): void {
+    this.persistenceService.recordBudgetEvent(taskId, detail, consumed);
+  }
+
+  private checkSideEffectBudget(task: PersistedTask): boolean {
+    if (this.config.sideEffectActionsBeforeReview <= 0) {
+      return true;
+    }
+
+    const sideEffectArtifacts = this.persistenceService
+      .getArtifactsForTask(task.taskId)
+      .filter((artifact) => artifact.kind === 'side_effect').length;
+    if (sideEffectArtifacts >= this.config.sideEffectActionsBeforeReview) {
+      this.recordBudgetLimit(
+        task.taskId,
+        `Side-effect action limit (${this.config.sideEffectActionsBeforeReview}) reached`,
+        sideEffectArtifacts,
+      );
+      this.persistenceService.setTaskStatus(task.taskId, 'waiting_on_human');
+      return false;
+    }
+
+    return true;
+  }
+
+  private getTaskPolicy(task: PersistedTask): TaskPolicy {
+    const rawPolicy = task.metadata?.policy;
+    if (!rawPolicy || typeof rawPolicy !== 'object') {
+      return {};
+    }
+
+    const policyRecord = rawPolicy as Record<string, unknown>;
+    return {
+      maxDepth: this.toPositiveNumber(policyRecord.max_depth ?? policyRecord.maxDepth),
+      maxChildren: this.toPositiveNumber(policyRecord.max_children ?? policyRecord.maxChildren),
+      maxTokens: this.toPositiveNumber(policyRecord.max_tokens ?? policyRecord.maxTokens),
+      maxToolCalls: this.toPositiveNumber(policyRecord.max_tool_calls ?? policyRecord.maxToolCalls),
+      timeoutMs: this.toPositiveNumber(policyRecord.timeout_ms ?? policyRecord.timeoutMs),
+      allowedTools: Array.isArray(policyRecord.allowed_tools)
+        ? policyRecord.allowed_tools.filter((value: unknown): value is string => typeof value === 'string')
+        : undefined,
+      approvalPolicy: typeof policyRecord.approval_policy === 'string' &&
+        ['auto', 'manual'].includes(policyRecord.approval_policy)
+        ? (policyRecord.approval_policy as TaskPolicy['approvalPolicy'])
+        : undefined,
+    };
+  }
+
+  private toPositiveNumber(value: unknown): number | undefined {
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+      return value;
+    }
+
+    if (typeof value === 'string') {
+      const parsed = Number.parseInt(value, 10);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return parsed;
+      }
+    }
+
+    return undefined;
+  }
+
+  private getPolicyChildCount(task: PersistedTask): number {
+    return this.persistenceService.listDependents(task.taskId).length;
+  }
+
+  private enforceTaskPolicy(task: PersistedTask, requests: RequestedAgent[]): boolean {
+    const policy = this.getTaskPolicy(task);
+
+    if (policy.maxDepth != null) {
+      const depth = this.getTaskDepth(task.taskId);
+      if (depth >= policy.maxDepth) {
+        this.recordPolicyViolation(
+          task,
+          `Task depth ${depth} meets policy max depth ${policy.maxDepth}`,
+          depth,
+        );
+        return false;
+      }
+    }
+
+    const childCount = this.getPolicyChildCount(task);
+    if (policy.maxChildren != null && childCount + requests.length > policy.maxChildren) {
+      this.recordPolicyViolation(
+        task,
+        `Policy max children ${policy.maxChildren} exceeded (${childCount} existing + ${requests.length} new)`,
+        childCount + requests.length,
+      );
+      return false;
+    }
+
+    if (policy.approvalPolicy === 'manual' && requests.length > 0) {
+      this.recordPolicyViolation(
+        task,
+        'Manual approval policy requires human review before spawning assistants',
+        requests.length,
+      );
+      return false;
+    }
+
+    return true;
+  }
+
+  private recordPolicyViolation(task: PersistedTask, detail: string, consumed: number): void {
+    this.recordBudgetLimit(task.taskId, detail, consumed);
+    this.persistenceService.setTaskStatus(task.taskId, 'waiting_on_human');
   }
 
   private parseCheckpointPayload(checkpoint: CheckpointRecord): CheckpointPayload | undefined {

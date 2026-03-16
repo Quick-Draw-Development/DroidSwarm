@@ -7,6 +7,7 @@ import {
   ArtifactRecord,
   BudgetEventRecord,
   CheckpointRecord,
+  OperatorControlActionRecord,
   PersistedTask,
   RunRecord,
   TaskAttemptRecord,
@@ -300,6 +301,30 @@ export class BudgetEventRepository {
   }
 }
 
+export class OperatorActionRepository {
+  constructor(private readonly database: Database.Database) {}
+
+  record(action: OperatorControlActionRecord): void {
+    this.database
+      .prepare(`
+        INSERT INTO operator_actions (
+          action_id, run_id, task_id, action_type, detail, metadata_json, created_at
+        ) VALUES (
+          @actionId, @runId, @taskId, @actionType, @detail, @metadataJson, @createdAt
+        )
+      `)
+      .run({
+        actionId: action.actionId,
+        runId: action.runId,
+        taskId: action.taskId ?? null,
+        actionType: action.actionType,
+        detail: action.detail,
+        metadataJson: action.metadataJson ?? null,
+        createdAt: action.createdAt,
+      });
+  }
+}
+
 export class TaskDependencyRepository {
   constructor(private readonly database: Database.Database) {}
 
@@ -355,6 +380,7 @@ export class PersistenceClient {
     public readonly artifacts: ArtifactRepository,
     public readonly checkpoints: CheckpointRepository,
     public readonly budgets: BudgetEventRepository,
+    public readonly actions: OperatorActionRepository,
     public readonly dependencies: TaskDependencyRepository,
   ) {}
 
@@ -365,11 +391,12 @@ export class PersistenceClient {
       new TaskRepository(database),
       new TaskAttemptRepository(database),
       new AgentAssignmentRepository(database),
-      new ArtifactRepository(database),
-      new CheckpointRepository(database),
-      new BudgetEventRepository(database),
-      new TaskDependencyRepository(database),
-    );
+    new ArtifactRepository(database),
+    new CheckpointRepository(database),
+    new BudgetEventRepository(database),
+    new OperatorActionRepository(database),
+    new TaskDependencyRepository(database),
+  );
   }
 
   createRun(projectId: string): RunRecord {

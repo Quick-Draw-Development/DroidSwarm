@@ -182,3 +182,13 @@ export interface TaskDependencyRecord {
   dependsOnTaskId: string;
   createdAt: string;
 }
+
+export interface OperatorControlActionRecord {
+  actionId: string;
+  runId: string;
+  taskId?: string;
+  actionType: 'cancel_task' | 'request_review' | 'reprioritize';
+  detail: string;
+  metadataJson?: string;
+  createdAt: string;
+}

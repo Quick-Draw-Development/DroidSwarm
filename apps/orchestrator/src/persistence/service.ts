@@ -4,6 +4,7 @@ import type { PersistenceClient } from './repositories';
 import type {
   ArtifactRecord,
   CheckpointRecord,
+  OperatorControlActionRecord,
   PersistedTask,
   RunRecord,
   TaskAttemptRecord,
@@ -73,6 +74,21 @@ export class OrchestratorPersistenceService {
       status,
       updatedAt: nowIso(),
     };
+    this.persistence.tasks.create(updated);
+  }
+
+  updateTaskPriority(taskId: string, priority: PersistedTask['priority']): void {
+    const existing = this.persistence.tasks.get(taskId);
+    if (!existing) {
+      return;
+    }
+
+    const updated: PersistedTask = {
+      ...existing,
+      priority,
+      updatedAt: nowIso(),
+    };
+
     this.persistence.tasks.create(updated);
   }
 
@@ -203,6 +219,23 @@ export class OrchestratorPersistenceService {
       taskId: taskId ?? null,
       detail,
       consumed,
+      createdAt: nowIso(),
+    });
+  }
+
+  recordOperatorAction(action: {
+    taskId?: string;
+    actionType: OperatorControlActionRecord['actionType'];
+    detail: string;
+    metadata?: Record<string, unknown>;
+  }): void {
+    this.persistence.actions.record({
+      actionId: randomUUID(),
+      runId: this.run.runId,
+      taskId: action.taskId,
+      actionType: action.actionType,
+      detail: action.detail,
+      metadataJson: action.metadata ? JSON.stringify(action.metadata) : undefined,
       createdAt: nowIso(),
     });
   }

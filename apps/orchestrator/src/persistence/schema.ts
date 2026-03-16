@@ -86,6 +86,18 @@ export const applyPersistenceSchema = (database: Database.Database): void => {
       FOREIGN KEY(task_id) REFERENCES tasks(task_id)
     );
 
+    CREATE TABLE IF NOT EXISTS operator_actions (
+      action_id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      task_id TEXT,
+      action_type TEXT NOT NULL,
+      detail TEXT NOT NULL,
+      metadata_json TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(run_id) REFERENCES runs(run_id),
+      FOREIGN KEY(task_id) REFERENCES tasks(task_id)
+    );
+
     CREATE TABLE IF NOT EXISTS task_dependencies (
       dependency_id TEXT PRIMARY KEY,
       task_id TEXT NOT NULL,

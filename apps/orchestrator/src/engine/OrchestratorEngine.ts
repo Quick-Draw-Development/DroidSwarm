@@ -18,6 +18,7 @@ import { SocketGateway, MessageSource } from '../socket/SocketGateway';
 import { TaskScheduler } from '../scheduler/TaskScheduler';
 import { AgentSupervisor } from '../AgentSupervisor';
 import { OperatorCommandHandler } from '../operator/OperatorCommandHandler';
+import { OperatorControlAction, parseOperatorIntent } from '../operator/operator-intents';
 import type { TaskSchedulerEvents } from '../scheduler/TaskScheduler';
 
 export interface OrchestratorEngineOptions {
@@ -168,6 +169,12 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
       return;
     }
 
+    const metadataTaskId = typeof message.payload.metadata === 'object' && message.payload.metadata !== null
+      ? (message.payload.metadata as Record<string, unknown>).task_id
+      : undefined;
+    const resolvedTaskId = message.task_id ?? (typeof metadataTaskId === 'string' ? metadataTaskId : undefined);
+    const intent = parseOperatorIntent(content, resolvedTaskId);
+
     this.sendStatusUpdate(
       'operator',
       undefined,
@@ -175,17 +182,22 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
       'Processing operator instruction.',
     );
 
-    try {
-      const response = await this.options.commandHandler.process(content);
-      this.options.gateway.send(buildOperatorChatResponse(this.options.config, response));
-    } catch (error) {
-      this.options.gateway.send(
-        buildOperatorChatResponse(
-          this.options.config,
-          error instanceof Error ? error.message : 'Failed to process operator instruction.',
-        ),
-      );
+    if (intent.category === 'note') {
+      try {
+        const response = await this.options.commandHandler.process(content);
+        this.options.gateway.send(buildOperatorChatResponse(this.options.config, response));
+      } catch (error) {
+        this.options.gateway.send(
+          buildOperatorChatResponse(
+            this.options.config,
+            error instanceof Error ? error.message : 'Failed to process operator instruction.',
+          ),
+        );
+      }
+      return;
     }
+
+    await this.handleOperatorCommand(intent.action, message, intent.referencedTaskId ?? resolvedTaskId);
   }
 
   private handleOperatorStatusMessage(message: MessageEnvelope): void {
@@ -255,6 +267,77 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
         content,
         taskId,
         extraPayload,
+      ),
+    );
+  }
+
+  private async handleOperatorCommand(
+    action: OperatorControlAction,
+    message: MessageEnvelope,
+    taskId?: string,
+  ): Promise<void> {
+    if (!taskId) {
+      this.options.gateway.send(buildOperatorChatResponse(
+        this.options.config,
+        'Could not determine which task you meant; please include a task identifier.',
+      ));
+      return;
+    }
+
+    const detail = action.reason ?? message.payload.content ?? action.type;
+    this.options.persistenceService.recordOperatorAction({
+      taskId,
+      actionType: action.type,
+      detail,
+      metadata: {
+        operator: message.from.actor_name,
+        priority: action.priority,
+      },
+    });
+
+    switch (action.type) {
+      case 'cancel_task':
+        this.cancelTask(taskId, detail);
+        break;
+      case 'request_review':
+        this.options.persistenceService.setTaskStatus(taskId, 'in_review');
+        this.handleVerificationRequested(taskId, 'operator_review', message.from.actor_name, detail);
+        break;
+      case 'reprioritize':
+        if (action.priority) {
+          this.options.persistenceService.updateTaskPriority(taskId, action.priority);
+          this.sendStatusUpdate(
+            'operator',
+            taskId,
+            'operator_instruction',
+            'reprioritized',
+            `Updated priority to ${action.priority}.`,
+          );
+        }
+        break;
+    }
+
+    this.options.gateway.send(buildOperatorChatResponse(
+      this.options.config,
+      `Recorded operator action: ${action.type}.`,
+    ));
+  }
+
+  private cancelTask(taskId: string, detail: string): void {
+    const removedAgents = this.options.supervisor.cancelTask(taskId);
+    this.options.persistenceService.setTaskStatus(taskId, 'cancelled');
+    this.options.gateway.send(
+      buildOrchestratorStatusUpdate(
+        this.options.config,
+        'operator',
+        'operator',
+        'task_cancelled',
+        `Cancelled task per operator: ${detail}`,
+        taskId,
+        {
+          removed_agents: removedAgents,
+          removed_agent_count: removedAgents.length,
+        },
       ),
     );
   }

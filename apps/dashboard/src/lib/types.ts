@@ -65,6 +65,17 @@ export interface TaskNode {
   updatedAt: string;
 }
 
+export interface RunTimelineEntry {
+  eventId: string;
+  taskId: string;
+  taskName?: string;
+  eventType: string;
+  detail: string;
+  actorType: string;
+  actorId: string;
+  createdAt: string;
+}
+
 export interface ArtifactSummary {
   artifactId: string;
   taskId: string;
@@ -103,6 +114,17 @@ export interface VerificationTaskSummary {
   status: string;
   parentTaskId?: string;
   updatedAt: string;
+}
+
+export interface OrchestrationInsightsData {
+  runs: RunSummary[];
+  tasks: TaskNode[];
+  artifacts: ArtifactSummary[];
+  checkpoints: CheckpointSummary[];
+  budgets: BudgetEventSummary[];
+  assignments: AgentAssignmentSummary[];
+  verifications: VerificationTaskSummary[];
+  timeline: RunTimelineEntry[];
 }
 export interface ProjectIdentity {
   projectId: string;

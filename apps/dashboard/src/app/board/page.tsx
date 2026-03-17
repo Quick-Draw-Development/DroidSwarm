@@ -4,7 +4,19 @@ import { BoardShell } from '../../components/BoardShell';
 import { UsernameGate } from '../../components/UsernameGate';
 import { USERNAME_COOKIE } from '../../lib/identity';
 import { getAppVersion } from '../../lib/version';
-import { getProjectIdentity, listOperatorMessages, listTasks } from '../../lib/db';
+import {
+  getProjectIdentity,
+  listAgentAssignmentsForRun,
+  listArtifactsForRun,
+  listBudgetEventsForRun,
+  listCheckpointsForRun,
+  listOperatorMessages,
+  listRuns,
+  listTaskNodesForRun,
+  listBoardTasksForRun,
+  listVerificationOutcomesForRun,
+  listRunTimelineEvents,
+} from '../../lib/db';
 
 export default async function BoardPage() {
   const cookieStore = await cookies();
@@ -15,7 +27,19 @@ export default async function BoardPage() {
   }
 
   const project = getProjectIdentity();
-  const tasks = listTasks();
+  const runs = listRuns();
+  const latestRunId = runs[0]?.runId;
+  const tasks = listBoardTasksForRun(latestRunId);
+  const insights = {
+    runs,
+    tasks: listTaskNodesForRun(latestRunId),
+    artifacts: listArtifactsForRun(latestRunId),
+    checkpoints: listCheckpointsForRun(latestRunId),
+    budgets: listBudgetEventsForRun(latestRunId),
+    assignments: listAgentAssignmentsForRun(latestRunId),
+    verifications: listVerificationOutcomesForRun(latestRunId),
+    timeline: listRunTimelineEvents(latestRunId),
+  };
   const operatorMessages = listOperatorMessages();
   const appVersion = getAppVersion();
 
@@ -23,6 +47,7 @@ export default async function BoardPage() {
     <BoardShell
       username={username}
       tasks={tasks}
+      insights={insights}
       projectName={project.projectName}
       operatorMessages={operatorMessages}
       appVersion={appVersion}

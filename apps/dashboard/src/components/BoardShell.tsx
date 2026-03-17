@@ -2,7 +2,8 @@ import { AddTaskForm } from './AddTaskForm';
 import { BoardClient } from './BoardClient';
 import { LiveConnectionStatus } from './LiveConnectionStatus';
 import { ProvideInstructionsModal } from './ProvideInstructionsModal';
-import type { MessageRecord, TaskRecord } from '../lib/types';
+import { OrchestrationInsights } from './OrchestrationInsights';
+import type { MessageRecord, TaskRecord, OrchestrationInsightsData } from '../lib/types';
 
 export function BoardShell({
   username,
@@ -10,12 +11,14 @@ export function BoardShell({
   projectName,
   operatorMessages,
   appVersion,
+  insights,
 }: {
   username: string;
   tasks: TaskRecord[];
   projectName: string;
   operatorMessages: MessageRecord[];
   appVersion?: string;
+  insights: OrchestrationInsightsData;
 }) {
   return (
     <main className="dashboard-shell">
@@ -41,6 +44,7 @@ export function BoardShell({
         <AddTaskForm username={username} />
       </section>
       <BoardClient username={username} tasks={tasks} />
+      <OrchestrationInsights data={insights} />
     </main>
   );
 }

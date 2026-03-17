@@ -5,13 +5,82 @@ import { randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
 import WebSocket from 'ws';
 
-import type { BoardStatus, MessageRecord, ProjectIdentity, TaskDetails, TaskRecord } from './types';
+import type {
+  ArtifactSummary,
+  AgentAssignmentSummary,
+  BoardStatus,
+  BudgetEventSummary,
+  CheckpointSummary,
+  MessageRecord,
+  ProjectIdentity,
+  RunSummary,
+  RunTimelineEntry,
+  TaskDetails,
+  TaskNode,
+  TaskRecord,
+  VerificationTaskSummary,
+} from './types';
 
 const DEFAULT_PROJECT_ID = process.env.DROIDSWARM_PROJECT_ID ?? 'droidswarm';
 const DEFAULT_PROJECT_NAME = process.env.DROIDSWARM_PROJECT_NAME ?? 'DroidSwarm';
 const DEFAULT_DB_PATH = process.env.DROIDSWARM_DB_PATH ?? path.resolve(process.cwd(), 'data', 'droidswarm.db');
 const DEFAULT_SOCKET_URL = process.env.DROIDSWARM_SOCKET_URL ?? 'ws://127.0.0.1:8765';
 const DEFAULT_ORCHESTRATOR_NAME = process.env.DROIDSWARM_ORCHESTRATOR_NAME ?? 'Orchestrator';
+
+type RawTaskRow = {
+  task_id: string;
+  run_id: string;
+  parent_task_id?: string | null;
+  name: string;
+  status: string;
+  priority: string;
+  metadata_json?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type BoardTaskRow = RawTaskRow & {
+  agent_count?: number;
+};
+
+const fetchTaskRowsForRun = (database: Database.Database, runId: string): BoardTaskRow[] => {
+  return database
+    .prepare(`
+      SELECT
+        t.*,
+        COUNT(DISTINCT aa.agent_name) AS agent_count
+      FROM tasks t
+      LEFT JOIN task_attempts ta ON ta.task_id = t.task_id
+      LEFT JOIN agent_assignments aa ON aa.attempt_id = ta.attempt_id
+      WHERE t.run_id = ?
+      GROUP BY t.task_id
+      ORDER BY t.updated_at DESC
+    `)
+    .all(runId) as BoardTaskRow[];
+};
+
+const fetchRawTaskRows = (database: Database.Database, runId: string): RawTaskRow[] => {
+  return database
+    .prepare(`
+      SELECT *
+      FROM tasks
+      WHERE run_id = ?
+      ORDER BY updated_at DESC
+    `)
+    .all(runId) as RawTaskRow[];
+};
+
+const countAgentsForTask = (database: Database.Database, taskId: string): number => {
+  const row = database
+    .prepare(`
+      SELECT COUNT(DISTINCT aa.agent_name) as agent_count
+      FROM agent_assignments aa
+      JOIN task_attempts ta ON ta.attempt_id = aa.attempt_id
+      WHERE ta.task_id = ?
+    `)
+    .get(taskId) as { agent_count?: number } | undefined;
+  return typeof row?.agent_count === 'number' ? row.agent_count : 0;
+};
 
 let databaseInstance: Database.Database | null = null;
 
@@ -46,17 +115,6 @@ const ensureDashboardSchema = (database: Database.Database): void => {
       content TEXT,
       payload_json TEXT NOT NULL,
       created_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS channels (
-      channel_id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
-      task_id TEXT,
-      channel_type TEXT NOT NULL,
-      name TEXT NOT NULL,
-      status TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS task_events (
@@ -103,6 +161,111 @@ const mapMessageRecord = (row: Record<string, unknown>): MessageRecord => ({
   createdAt: String(row.created_at),
 });
 
+const parseMetadata = (value?: string | null): Record<string, unknown> | undefined => {
+  if (!value) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const normalizePriority = (value: unknown): TaskRecord['priority'] => {
+  if (typeof value === 'string' && ['low', 'medium', 'high', 'urgent'].includes(value)) {
+    return value as TaskRecord['priority'];
+  }
+  return 'medium';
+};
+
+const normalizeTaskType = (value: unknown): TaskRecord['taskType'] => {
+  if (typeof value === 'string') {
+    const candidate = value.toLowerCase();
+    if (['feature', 'bug', 'hotfix', 'task'].includes(candidate)) {
+      return candidate as TaskRecord['taskType'];
+    }
+  }
+  return 'task';
+};
+
+const mapWorkflowStatusToBoardStatus = (value: unknown): BoardStatus => {
+  const status = typeof value === 'string' ? value : 'queued';
+  if (status === 'planning') {
+    return 'planning';
+  }
+  if (status === 'waiting_on_dependency') {
+    return 'planning';
+  }
+  if (status === 'running') {
+    return 'in_progress';
+  }
+  if (status === 'waiting_on_human' || status === 'review' || status === 'failed') {
+    return 'review';
+  }
+  if (status === 'in_review') {
+    return 'review';
+  }
+  if (status === 'verified' || status === 'completed') {
+    return 'done';
+  }
+  if (status === 'cancelled') {
+    return 'cancelled';
+  }
+  return 'todo';
+};
+
+const buildTaskRecordFromRow = (row: BoardTaskRow, agentCount?: number): TaskRecord => {
+  const metadata = parseMetadata(row.metadata_json);
+  const stage = typeof metadata?.stage === 'string' ? metadata.stage : undefined;
+  const description = typeof metadata?.description === 'string'
+    ? metadata.description
+    : row.name;
+  const createdBy = typeof metadata?.created_by === 'string'
+    ? metadata.created_by
+    : 'operator';
+  const displayName = typeof metadata?.created_by_display_name === 'string'
+    ? metadata.created_by_display_name
+    : createdBy;
+
+  return {
+    taskId: row.task_id,
+    projectId: row.run_id,
+    title: row.name,
+    description,
+    taskType: normalizeTaskType(metadata?.task_type ?? metadata?.taskType),
+    priority: normalizePriority(row.priority),
+    status: mapWorkflowStatusToBoardStatus(row.status),
+    branchName: typeof metadata?.branch_name === 'string' ? metadata.branch_name : undefined,
+    createdByUserId: createdBy,
+    createdByDisplayName: displayName,
+    needsClarification: Boolean(metadata?.needs_clarification),
+    blockedReason: typeof metadata?.blocked_reason === 'string'
+      ? metadata.blocked_reason
+      : typeof metadata?.blockedReason === 'string'
+        ? metadata.blockedReason
+        : undefined,
+    stage,
+    updatedAt: row.updated_at,
+    agentCount: typeof agentCount === 'number' ? agentCount : 0,
+  };
+};
+
+const buildTaskNodeFromRow = (row: RawTaskRow): TaskNode => {
+  const metadata = parseMetadata(row.metadata_json);
+  return {
+    taskId: row.task_id,
+    name: row.name,
+    status: row.status,
+    priority: row.priority,
+    parentTaskId: row.parent_task_id ?? undefined,
+    stage: typeof metadata?.stage === 'string' ? metadata.stage : undefined,
+    updatedAt: row.updated_at,
+  };
+};
+
 const parsePayload = (payloadJson: string): Record<string, unknown> | null => {
   try {
     const parsed = JSON.parse(payloadJson);
@@ -115,66 +278,39 @@ const parsePayload = (payloadJson: string): Record<string, unknown> | null => {
 };
 
 const buildActiveAgents = (database: Database.Database, taskId: string): TaskDetails['activeAgents'] => {
-  const now = new Date().toISOString();
   const rows = database
     .prepare(`
-      SELECT payload_json, created_at
-      FROM messages
-      WHERE project_id = ?
-        AND task_id = ?
-        AND message_type = 'status_update'
-      ORDER BY created_at DESC
+      SELECT aa.agent_name, aa.assigned_at, ta.metadata_json
+      FROM agent_assignments aa
+      JOIN task_attempts ta ON ta.attempt_id = aa.attempt_id
+      WHERE ta.task_id = ?
+      ORDER BY aa.assigned_at DESC
       LIMIT 20
     `)
-    .all(DEFAULT_PROJECT_ID, taskId) as Array<{ payload_json: string }>;
+    .all(taskId) as Array<{ agent_name: string; assigned_at: string; metadata_json?: string }>;
 
+  const agentsMap = new Map<string, TaskDetails['activeAgents'][number]>();
   for (const row of rows) {
-    const payload = parsePayload(row.payload_json);
-    if (!payload) {
-      continue;
-    }
-
-    if (payload.status_code !== 'agent_assigned') {
-      continue;
-    }
-
-    const assigned = payload.assigned_agents;
-    if (!Array.isArray(assigned)) {
-      continue;
-    }
-
-    const agents = assigned.flatMap((entry) => {
-      if (
-        typeof entry === 'object' &&
-        entry !== null &&
-        typeof entry.agent_name === 'string'
-      ) {
-        return [{
-          name: entry.agent_name,
-          role: typeof entry.agent_role === 'string' ? entry.agent_role : 'agent',
-          lastSeenAt: now,
-        }];
-      }
-      return [];
-    });
-
-    if (agents.length > 0) {
-      if (!agents.some((agent) => agent.name === DEFAULT_ORCHESTRATOR_NAME)) {
-        agents.push({
-          name: DEFAULT_ORCHESTRATOR_NAME,
-          role: 'orchestrator',
-          lastSeenAt: now,
-        });
-      }
-      return agents;
+    const metadata = parseMetadata(row.metadata_json);
+    const role = typeof metadata?.role === 'string' ? metadata.role : 'agent';
+    if (!agentsMap.has(row.agent_name)) {
+      agentsMap.set(row.agent_name, {
+        name: row.agent_name,
+        role,
+        lastSeenAt: row.assigned_at,
+      });
     }
   }
 
-  return [{
-    name: DEFAULT_ORCHESTRATOR_NAME,
-    role: 'orchestrator',
-    lastSeenAt: now,
-  }];
+  if (agentsMap.size === 0) {
+    return [{
+      name: DEFAULT_ORCHESTRATOR_NAME,
+      role: 'orchestrator',
+      lastSeenAt: new Date().toISOString(),
+    }];
+  }
+
+  return Array.from(agentsMap.values());
 };
 
 export const getProjectIdentity = (): ProjectIdentity => ({
@@ -195,14 +331,313 @@ export const listOperatorMessages = (): MessageRecord[] => {
   }
 };
 
-export const listTasks = (): TaskRecord[] => {
+export const listRuns = (): RunSummary[] => {
   try {
     const database = getDatabase();
     const rows = database
-      .prepare('SELECT * FROM tasks WHERE project_id = ? ORDER BY updated_at DESC')
-      .all(DEFAULT_PROJECT_ID) as Record<string, unknown>[];
+      .prepare('SELECT * FROM runs WHERE project_id = ? ORDER BY updated_at DESC')
+      .all(DEFAULT_PROJECT_ID) as Array<{
+        run_id: string;
+        project_id: string;
+        status: string;
+        metadata_json?: string | null;
+        created_at: string;
+        updated_at: string;
+      }>;
 
-    return rows.map(mapTaskRecord);
+    return rows.map((row) => ({
+      runId: row.run_id,
+      status: row.status,
+      metadata: parseMetadata(row.metadata_json),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+  } catch {
+    return [];
+  }
+};
+
+export const listBoardTasksForRun = (runId?: string): TaskRecord[] => {
+  if (!runId) {
+    return [];
+  }
+
+  try {
+    const database = getDatabase();
+    const rows = fetchTaskRowsForRun(database, runId);
+    return rows.map((row) => buildTaskRecordFromRow(row, typeof row.agent_count === 'number' ? row.agent_count : 0));
+  } catch {
+    return [];
+  }
+};
+
+export const listTaskNodesForRun = (runId?: string): TaskNode[] => {
+  if (!runId) {
+    return [];
+  }
+
+  try {
+    const database = getDatabase();
+    const rows = fetchRawTaskRows(database, runId);
+    return rows.map(buildTaskNodeFromRow);
+  } catch {
+    return [];
+  }
+};
+
+export const listArtifactsForRun = (runId?: string): ArtifactSummary[] => {
+  if (!runId) {
+    return [];
+  }
+
+  try {
+    const database = getDatabase();
+    const rows = database
+      .prepare(`
+        SELECT artifact_id, task_id, kind, summary, created_at
+        FROM artifacts
+        WHERE run_id = ?
+        ORDER BY created_at DESC
+        LIMIT 6
+      `)
+      .all(runId) as Array<{
+        artifact_id: string;
+        task_id: string;
+        kind: string;
+        summary: string;
+        created_at: string;
+      }>;
+
+    return rows.map((row) => ({
+      artifactId: row.artifact_id,
+      taskId: row.task_id,
+      kind: row.kind,
+      summary: row.summary,
+      createdAt: row.created_at,
+    }));
+  } catch {
+    return [];
+  }
+};
+
+export const listCheckpointsForRun = (runId?: string): CheckpointSummary[] => {
+  if (!runId) {
+    return [];
+  }
+
+  try {
+    const database = getDatabase();
+    const rows = database
+      .prepare(`
+        SELECT checkpoint_id, task_id, payload_json, created_at
+        FROM checkpoints
+        WHERE run_id = ?
+        ORDER BY created_at DESC
+        LIMIT 5
+      `)
+      .all(runId) as Array<{
+        checkpoint_id: string;
+        task_id: string;
+        payload_json?: string | null;
+        created_at: string;
+      }>;
+
+    return rows.map((row) => {
+      const metadata = parseMetadata(row.payload_json);
+      const summary = typeof metadata?.summary === 'string' ? metadata.summary : undefined;
+      return {
+        checkpointId: row.checkpoint_id,
+        taskId: row.task_id,
+        summary,
+        createdAt: row.created_at,
+      };
+    });
+  } catch {
+    return [];
+  }
+};
+
+export const listBudgetEventsForRun = (runId?: string): BudgetEventSummary[] => {
+  if (!runId) {
+    return [];
+  }
+
+  try {
+    const database = getDatabase();
+    const rows = database
+      .prepare(`
+        SELECT event_id, task_id, detail, consumed, created_at
+        FROM budget_events
+        WHERE run_id = ?
+        ORDER BY created_at DESC
+        LIMIT 6
+      `)
+      .all(runId) as Array<{
+        event_id: string;
+        task_id?: string | null;
+        detail: string;
+        consumed: number;
+        created_at: string;
+      }>;
+
+    return rows.map((row) => ({
+      eventId: row.event_id,
+      taskId: typeof row.task_id === 'string' ? row.task_id : undefined,
+      detail: row.detail,
+      consumed: row.consumed,
+      createdAt: row.created_at,
+    }));
+  } catch {
+    return [];
+  }
+};
+
+export const listAgentAssignmentsForRun = (runId?: string): AgentAssignmentSummary[] => {
+  if (!runId) {
+    return [];
+  }
+
+  try {
+    const database = getDatabase();
+    const rows = database
+      .prepare(`
+        SELECT aa.agent_name, aa.assigned_at, ta.task_id, t.name AS task_name, ta.metadata_json
+        FROM agent_assignments aa
+        JOIN task_attempts ta ON ta.attempt_id = aa.attempt_id
+        JOIN tasks t ON t.task_id = ta.task_id
+        WHERE ta.run_id = ?
+        ORDER BY aa.assigned_at DESC
+        LIMIT 6
+      `)
+      .all(runId) as Array<{
+        agent_name: string;
+        assigned_at: string;
+        task_id: string;
+        task_name: string;
+        metadata_json?: string | null;
+      }>;
+
+    return rows.map((row) => {
+      const metadata = parseMetadata(row.metadata_json);
+      return {
+        agentName: row.agent_name,
+        role: typeof metadata?.role === 'string' ? metadata.role : undefined,
+        taskId: row.task_id,
+        taskName: row.task_name,
+        assignedAt: row.assigned_at,
+      };
+    });
+  } catch {
+    return [];
+  }
+};
+
+export const listVerificationOutcomesForRun = (runId?: string): VerificationTaskSummary[] => {
+  if (!runId) {
+    return [];
+  }
+
+  try {
+    const database = getDatabase();
+    const rows = database
+      .prepare(`
+        SELECT vr.task_id, vr.stage, vr.status, vr.created_at, t.name AS task_name, t.parent_task_id
+        FROM verification_reviews vr
+        JOIN tasks t ON t.task_id = vr.task_id
+        WHERE vr.run_id = ?
+        ORDER BY vr.created_at DESC
+        LIMIT 6
+      `)
+      .all(runId) as Array<{
+        task_id: string;
+        stage: string;
+        status: string;
+        created_at: string;
+        task_name: string;
+        parent_task_id?: string | null;
+      }>;
+
+    return rows.map((row) => ({
+      taskId: row.task_id,
+      name: row.task_name,
+      stage: row.stage,
+      status: row.status,
+      parentTaskId: row.parent_task_id ?? undefined,
+      updatedAt: row.created_at,
+    }));
+  } catch {
+    return [];
+  }
+};
+
+const mapTimelineRow = (row: {
+  event_id: string;
+  task_id: string;
+  event_type: string;
+  actor_type: string;
+  actor_id: string;
+  payload_json?: string | null;
+  created_at: string;
+  task_name?: string | null;
+}): RunTimelineEntry => {
+  const payload = parsePayload(row.payload_json ?? '') ?? {};
+  const detailParts: string[] = [];
+
+  if (typeof payload.status === 'string') {
+    detailParts.push(`status ${payload.status}`);
+  }
+
+  if (typeof payload.detail === 'string') {
+    detailParts.push(payload.detail);
+  }
+
+  if (typeof payload.content === 'string' && payload.content.length > 0) {
+    detailParts.push(payload.content);
+  }
+
+  const detail = detailParts.length > 0 ? detailParts.join(' · ') : row.event_type;
+
+  return {
+    eventId: row.event_id,
+    taskId: row.task_id,
+    taskName: row.task_name ?? undefined,
+    eventType: row.event_type,
+    detail,
+    actorType: row.actor_type,
+    actorId: row.actor_id,
+    createdAt: row.created_at,
+  };
+};
+
+export const listRunTimelineEvents = (runId?: string): RunTimelineEntry[] => {
+  if (!runId) {
+    return [];
+  }
+
+  try {
+    const database = getDatabase();
+    const rows = database
+      .prepare(`
+        SELECT te.event_id, te.task_id, te.event_type, te.actor_type, te.actor_id,
+               te.payload_json, te.created_at, t.name AS task_name
+        FROM task_events te
+        JOIN tasks t ON t.task_id = te.task_id
+        WHERE te.project_id = ? AND t.run_id = ?
+        ORDER BY te.created_at DESC
+        LIMIT 10
+      `)
+      .all(DEFAULT_PROJECT_ID, runId) as Array<{
+        event_id: string;
+        task_id: string;
+        event_type: string;
+        actor_type: string;
+        actor_id: string;
+        payload_json?: string | null;
+        created_at: string;
+        task_name?: string | null;
+      }>;
+
+    return rows.map(mapTimelineRow);
   } catch {
     return [];
   }
@@ -212,14 +647,20 @@ export const getTaskDetails = (taskId: string): TaskDetails | null => {
   try {
     const database = getDatabase();
     const taskRow = database
-      .prepare('SELECT * FROM tasks WHERE task_id = ? AND project_id = ?')
+      .prepare(`
+        SELECT t.*
+        FROM tasks t
+        JOIN runs r ON r.run_id = t.run_id
+        WHERE t.task_id = ? AND r.project_id = ?
+      `)
       .get(taskId, DEFAULT_PROJECT_ID) as Record<string, unknown> | undefined;
 
     if (!taskRow) {
       return null;
     }
 
-    const task = mapTaskRecord(taskRow);
+    const rawRow = taskRow as BoardTaskRow;
+    const task = buildTaskRecordFromRow(rawRow, countAgentsForTask(database, taskId));
     const messages = (
       database
         .prepare('SELECT * FROM messages WHERE task_id = ? AND project_id = ? ORDER BY created_at ASC')
@@ -233,12 +674,18 @@ export const getTaskDetails = (taskId: string): TaskDetails | null => {
       messages,
       activeAgents,
       handoffs: ['Planner-Alpha -> Architect-Beta: planning summary attached'],
-      guardrails: task.status === 'cancelled'
-        ? ['Task cancelled. Orchestrator should stop and remove assigned agents.']
-        : task.needsClarification
-          ? ['Waiting on creator clarification before branch creation']
-          : ['Branch policy check passed'],
-      limits: ['Context pressure normal', 'No current rate-limit backoff'],
+      guardrails: [
+        task.status === 'cancelled'
+          ? 'Task cancelled. Orchestrator should stop and remove assigned agents.'
+          : task.needsClarification
+            ? 'Waiting on creator clarification before branch creation'
+            : `Current stage: ${task.stage ?? 'planning'}`,
+        `Priority guardrails: ${task.priority}`,
+      ],
+      limits: [
+        `Agents assigned: ${task.agentCount}`,
+        `Latest update: ${new Date(task.updatedAt).toLocaleString()}`,
+      ],
     };
   } catch {
     return null;
@@ -501,35 +948,6 @@ export const createTask = async (input: {
 
   database
     .prepare(`
-      INSERT INTO tasks (
-        task_id, project_id, title, description, task_type, priority, status,
-        created_by_user_id, created_by_display_name, needs_clarification, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `)
-    .run(
-      task.taskId,
-      task.projectId,
-      task.title,
-      task.description,
-      task.taskType,
-      task.priority,
-      task.status,
-      task.createdByUserId,
-      task.createdByDisplayName,
-      0,
-      task.updatedAt,
-    );
-
-  database
-    .prepare(`
-      INSERT OR REPLACE INTO channels (
-        channel_id, project_id, task_id, channel_type, name, status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `)
-    .run(task.taskId, task.projectId, task.taskId, 'task', task.taskId, 'active', now, now);
-
-  database
-    .prepare(`
       INSERT INTO task_events (
         event_id, project_id, task_id, event_type, actor_type, actor_id, payload_json, created_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -578,14 +996,6 @@ export const updateTaskStatus = async (input: {
 }): Promise<void> => {
   const database = getDatabase();
   const now = new Date().toISOString();
-
-  database
-    .prepare(`
-      UPDATE tasks
-      SET status = ?, updated_at = ?, blocked_reason = CASE WHEN ? = 'cancelled' THEN 'Cancelled from board' ELSE NULL END
-      WHERE task_id = ? AND project_id = ?
-    `)
-    .run(input.status, now, input.status, input.taskId, DEFAULT_PROJECT_ID);
 
   database
     .prepare(`

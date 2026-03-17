@@ -43,6 +43,7 @@ export function TaskCard({
       <div className="task-flags">
         {mentionTargeted ? <span className="flag flag-mention">Needs your reply</span> : null}
         {task.blockedReason ? <span className="flag flag-blocked">Blocked</span> : null}
+        {task.stage ? <span className="stage-pill">{task.stage}</span> : null}
       </div>
       <Link className="task-link" href={`/channels/${task.taskId}`}>
         View Channel

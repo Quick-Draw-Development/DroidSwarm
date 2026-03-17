@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { ChildProcess, fork } from 'node:child_process';
 
-import { TaskRegistry } from './task-registry';
+import { WorkerRegistry } from './worker-registry';
 import type {
   CodexAgentResult,
   OrchestratorConfig,
@@ -63,7 +63,7 @@ export class AgentSupervisor {
 
   constructor(
     private readonly config: OrchestratorConfig,
-    private readonly registry: TaskRegistry,
+    private readonly registry: WorkerRegistry,
     private readonly entryScript: string,
     callbacks: AgentSupervisorCallbacks = {},
   ) {
@@ -163,7 +163,7 @@ export class AgentSupervisor {
       this.agents.delete(agentName);
     }
 
-    this.registry.cancel(taskId, new Date().toISOString());
+    this.registry.clearAgents(taskId);
     return removedAgents;
   }
 
@@ -192,7 +192,7 @@ export class AgentSupervisor {
     }
 
     const taskState = this.registry.get(task.taskId);
-    if (!taskState || taskState.status === 'cancelled') {
+    if (!taskState) {
       return;
     }
 

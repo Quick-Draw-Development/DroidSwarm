@@ -5,7 +5,7 @@
 - **Run lifecycle & persistence** – `apps/orchestrator/src/OrchestratorClient.ts` creates a `RunRecord` via `PersistenceClient` and builds `OrchestratorPersistenceService`. Tasks are stored via `persistence.tasks`, attempts via `persistence.attempts`, and the `TaskScheduler` orchestrates retries, checkpoints, verification, and review branches.
 - **Dependency handling** – `TaskScheduler.createChildTasks` writes dependencies in `persistence.dependencies`, then uses `listDependencies` when deciding whether to un-block parents. Success currently treats completion/verification/failed/cancelled all as “satisfied.”
 - **Worker ingestion** – `AgentSupervisor` forks codex worker processes, streams stdout/stderr for logging, and forwards `agent_result` messages into `TaskScheduler.handleAgentResult`. `TaskScheduler` immediately reacts, modifies task rows, and invokes persisted events via `OrchestratorPersistenceService`.
-- **Transient registry** – `TaskRegistry` sits in memory under `apps/orchestrator/src/task-registry.ts` to track active agents/last update time for cancellation logic; it is not durable.
+- **Transient registry** – `WorkerRegistry` lives under `apps/orchestrator/src/worker-registry.ts` and only tracks active agents, cancellation handles, and heartbeat timestamps; no workflow truth is stored there, so persistence must be the source of task state.
 - **Policy resolution** – Hard-coded heuristics live inside `TaskScheduler` (see `getTaskPolicy`, `enforceTaskPolicy`, `applyUsageConstraints`, `checkSideEffectBudget`) but the defaults and merge behavior are spread across helpers, with no centralized merge of global config + task metadata.
 - **Operator command parsing** – `OperatorChatResponder`, `OrchestratorEngine`, and `operator/operator-intents.ts` parse freeform text into intents (`note` vs command) and apply them via `OperatorActionService`; commands are parsed via keyword matching, without explicit syntactic guardrails.
 - **Dashboard data sources** – `apps/dashboard/src/lib/db.ts` currently queries `tasks`, `task_attempts`, `artifacts`, `checkpoints`, `verification_reviews`, `budget_events`, `agent_assignments`, and `task_events` derived from the same SQLite used by the orchestrator. UI components render columns based on `listBoardTasksForRun`, `getTaskDetails`, and supporting APIs.
@@ -16,7 +16,7 @@
 1. **Run lifecycle**: runs stay in `queued` until `TaskScheduler` first executes, and there is no `run_started/run_completed` event history or terminal state handling for cancellations/failures/orphans.
 2. **Dependency semantics**: parents assume every dependency “finished” is success, so failures/cancellations invisibly allow parents to complete; no escalation mechanism exists.
 3. **Durable events**: worker messages are handled directly via IPC (`AgentSupervisor`) and scheduler reactions mutate state before any event persistence, leaving replay or restart impossible.
-4. **Registry responsibilities**: `TaskRegistry` currently carries state (e.g., `TaskState.status`) that should live in `tasks` table, but it also doubles as the only cancellation/assignment source.
+4. **Registry responsibilities**: the runtime `WorkerRegistry` now only tracks live agent handles and assignments; the `tasks` table is the single source of truth for task metadata, status, and lifecycle.
 5. **Policy resolution**: global settings (`OrchestratorConfig`) and metadata-based overrides are merged ad hoc inside `TaskScheduler`. Effective policy is never recorded in persistence for audit or scheduler enforceability.
 6. **Side-effects**: rules exist for gating review upon hitting side-effect counts, but there is no explicit operator feedback, review insertion event, or checkpoint-based gating for cross-run actions.
 7. **Operator commands**: natural-language parsing easily interprets non-destructive chatter as destructive commands. There is no command syntax, confirmation, or auditable action log tied to structured operator input.
@@ -49,4 +49,3 @@
 3. Phase 3 event-persistence coverage across worker, scheduler, and socket server.
 4. Phase 4 rename/refactor runtime registry and tighten in-memory concerns.
 5. Phase 5-10 continue with policy, review gating, operator command hardening, indexing, dashboard integration, and restart/recovery.
-

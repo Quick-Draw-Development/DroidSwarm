@@ -10,7 +10,7 @@ import { PersistenceClient } from './persistence/repositories';
 import { OrchestratorPersistenceService } from './persistence/service';
 import { TaskScheduler } from './scheduler/TaskScheduler';
 import { OrchestratorEngine } from './engine/OrchestratorEngine';
-import { TaskRegistry } from './task-registry';
+import { WorkerRegistry } from './worker-registry';
 import { OperatorActionService } from './operator/OperatorActionService';
 import { SocketGateway } from './socket/SocketGateway';
 import { AgentSupervisor } from './AgentSupervisor';
@@ -156,7 +156,7 @@ const createEnvironment = (options?: { dbPath?: string; run?: RunRecord }): Envi
   const scheduler = new TaskScheduler(service, supervisor as unknown as AgentSupervisor, schedulerConfig);
   const chatResponder = new StubChatResponder(schedulerConfig);
   const controlService = new OperatorActionService(service, supervisor as unknown as AgentSupervisor);
-  const registry = new TaskRegistry();
+  const registry = new WorkerRegistry();
   const engine = new OrchestratorEngine({
     config: schedulerConfig,
     persistenceService: service,

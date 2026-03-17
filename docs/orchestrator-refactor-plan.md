@@ -28,7 +28,7 @@
 - Dashboard views for state: `apps/dashboard/src/app/channels/[taskId]/page.tsx`, `ChannelRoom.tsx`, sidebar cards
 
 ## Gaps
-- The orchestrator's source of truth lives in memory (`TaskRegistry`), so process restarts lose task topology, retries, and assignments.
+- The orchestrator's runtime registry (`WorkerRegistry`) owns only live agent presence, and the durable persistence layer is the source of truth so restarts retain task topology, retries, and assignments.
 - Worker-directed `requested_agents` immediately spawn new processes; no scheduler approves decomposition or respects durability/weaving.
 - Protocol lacks execution-specific event types (`plan_proposed`, `artifact_created`, `task_assigned`, etc.), making it hard to reason about workflow state.
 - Operator chat is tightly coupled to Codex prompts, so conversational commands can mutate state without explicit actions.

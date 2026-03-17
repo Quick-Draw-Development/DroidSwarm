@@ -10,7 +10,7 @@ This project now relies on `apps/orchestrator` as the durable control plane: it 
 2. **Scheduler and state management**
    - `TaskScheduler` owns the task graph: it tracks queued workloads, enforces depth/fan-out limits, launches verified workers through the supervisor, starts verification/review stages, records checkpoints/artifacts, and emits policy/budget events.
    - `OrchestratorEngine` wires the scheduler to the `AgentSupervisor`, operator commands, and the gateway. It also keeps an agent→attempt map and forwards structured events such as plan proposals, checkpoint creation, and verification outcomes to both the socket channel and the dashboard timeline.
-   - `TaskRegistry` is now a small helper for broadcasting agent presence; the durable persistence layer is the canonical source of truth.
+   - `WorkerRegistry` is now a small helper for broadcasting agent presence; the durable persistence layer is the canonical source of truth.
 
 3. **Supervisor and agent runtime**
    - `AgentSupervisor` is limited to process lifecycle tasks (spawn, terminate, callbacks, agent counting). It no longer interprets workflow topology or requested-agent fan-out directly.

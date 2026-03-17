@@ -20,7 +20,7 @@ import type {
   SpawnedAgent,
 } from '../types';
 import { buildReviewAnnouncement } from '../operator-notifications';
-import { TaskRegistry } from '../task-registry';
+import { WorkerRegistry } from '../worker-registry';
 import type { OrchestratorPersistenceService } from '../persistence/service';
 import { SocketGateway, MessageSource } from '../socket/SocketGateway';
 import { TaskScheduler } from '../scheduler/TaskScheduler';
@@ -39,7 +39,7 @@ export interface OrchestratorEngineOptions {
   gateway: SocketGateway;
   chatResponder: OperatorChatResponder;
   controlService: OperatorActionService;
-  registry: TaskRegistry;
+  registry: WorkerRegistry;
   runLifecycle: RunLifecycleService;
 }
 

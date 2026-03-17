@@ -5,7 +5,7 @@ import { loadConfig } from './config';
 import { OrchestratorEngine } from './engine/OrchestratorEngine';
 import { OperatorActionService } from './operator/OperatorActionService';
 import { OperatorChatResponder } from './operator/OperatorChatResponder';
-import { TaskRegistry } from './task-registry';
+import { WorkerRegistry } from './worker-registry';
 import { TaskScheduler } from './scheduler/TaskScheduler';
 import { SocketGateway } from './socket/SocketGateway';
 import { openPersistenceDatabase } from './persistence/database';
@@ -16,7 +16,7 @@ import type { Database } from 'better-sqlite3';
 import type { OrchestratorConfig, RunRecord } from './types';
 
 export class DroidSwarmOrchestratorClient {
-  private readonly registry = new TaskRegistry();
+  private readonly registry = new WorkerRegistry();
   private readonly supervisor: AgentSupervisor;
   private readonly gateway: SocketGateway;
   private readonly database: Database;

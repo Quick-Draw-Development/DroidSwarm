@@ -58,11 +58,10 @@ export interface TaskPolicy {
   approvalPolicy?: 'auto' | 'manual';
 }
 
-export interface TaskState {
+export interface WorkerState {
   task: TaskRecord;
-  status: 'pending' | 'cancelled';
   activeAgents: string[];
-  updatedAt: string;
+  lastUpdated: string;
 }
 
 export interface RequestedAgent {

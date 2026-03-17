@@ -20,6 +20,13 @@
         "main": "apps/orchestrator/src/main.ts",
         "tsConfig": "apps/orchestrator/tsconfig.app.json",
         "generatePackageJson": true,
+        "assets": [
+          {
+            "glob": "**/*",
+            "input": "libs/protocol/src",
+            "output": "libs/protocol/src"
+          }
+        ],
         "esbuildOptions": {
           "sourcemap": true,
           "outExtension": {

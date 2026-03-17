@@ -11,7 +11,14 @@ import {
 } from '../messages';
 import { buildTaskIntakeAccepted } from '../protocol';
 import { isCancellationMessage, resolveTaskFromMessage } from '../task-events';
-import type { MessageEnvelope, OrchestratorConfig, PersistedTask, SpawnedAgent } from '../types';
+import type {
+  CodexAgentResult,
+  ExecutionEventRecord,
+  MessageEnvelope,
+  OrchestratorConfig,
+  PersistedTask,
+  SpawnedAgent,
+} from '../types';
 import { buildReviewAnnouncement } from '../operator-notifications';
 import { TaskRegistry } from '../task-registry';
 import type { OrchestratorPersistenceService } from '../persistence/service';
@@ -57,6 +64,30 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
 
     if (isTaskChannel && message.type === 'artifact_created') {
       this.persistArtifact(message as MessageEnvelope<'artifact_created'>);
+      return;
+    }
+
+    if (isTaskChannel && message.type === 'spawn_requested') {
+      const payload = message.payload as Record<string, unknown>;
+      this.recordChannelEvent(
+        'spawn_requested',
+        `Spawn requested for ${payload.needed_role ?? 'agent'}`,
+        message,
+        {
+          role: payload.needed_role,
+          reason: payload.reason_code,
+        },
+      );
+      return;
+    }
+
+    if (isTaskChannel && message.type === 'clarification_request') {
+      const payload = message.payload as Record<string, unknown>;
+      this.recordChannelEvent(
+        'clarification_requested',
+        `Clarification requested: ${payload.question ?? payload.content ?? 'question'}`,
+        message,
+      );
       return;
     }
 
@@ -114,6 +145,28 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
       },
     );
   }
+
+  handleAgentResultFromSupervisor = (
+    taskId: string,
+    attemptId: string,
+    agentName: string,
+    role: string,
+    result: CodexAgentResult,
+  ): void => {
+    this.recordExecutionEvent(
+      'agent_result',
+      `Agent ${agentName} reported ${result.status}`,
+      {
+        taskId,
+        attemptId,
+        agentName,
+        role,
+        status: result.status,
+        summary: result.summary,
+      },
+    );
+    this.options.scheduler.handleAgentResult(taskId, attemptId, agentName, role, result);
+  };
 
   handleAgentCommunication(taskId: string, content: string): void {
     this.sendStatusUpdate(taskId, taskId, 'execution', 'agent_communication', content);
@@ -255,6 +308,17 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
       ? (message.payload.metadata as Record<string, unknown>)
       : undefined;
 
+    this.recordChannelEvent(
+      'artifact_created',
+      `Artifact ${message.payload.artifact_id} (${message.payload.kind})`,
+      message,
+      {
+        artifactId: message.payload.artifact_id,
+        kind: message.payload.kind,
+        summary: message.payload.summary,
+      },
+    );
+
     this.options.persistenceService.recordArtifact({
       artifactId: message.payload.artifact_id,
       attemptId,
@@ -285,6 +349,33 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
         taskId,
         extraPayload,
       ),
+    );
+  }
+
+  private recordExecutionEvent(
+    eventType: ExecutionEventRecord['eventType'],
+    detail: string,
+    metadata?: Record<string, unknown>,
+  ): void {
+    this.options.persistenceService.recordExecutionEvent(eventType, detail, metadata);
+  }
+
+  private recordChannelEvent(
+    eventType: ExecutionEventRecord['eventType'],
+    detail: string,
+    message: MessageEnvelope,
+    metadata?: Record<string, unknown>,
+  ): void {
+    this.recordExecutionEvent(
+      eventType,
+      detail,
+      {
+        taskId: message.task_id,
+        actor_type: message.from.actor_type,
+        actor_id: message.from.actor_id,
+        actor_name: message.from.actor_name,
+        ...metadata,
+      },
     );
   }
 
@@ -357,6 +448,16 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
     plan?: string,
     dependencies?: string[],
   ): void => {
+    this.recordExecutionEvent(
+      'plan_proposed',
+      `Plan ${planId} proposed for ${taskId}`,
+      {
+        taskId,
+        planId,
+        dependencies,
+        summary,
+      },
+    );
     this.options.gateway.send(
       buildPlanProposedMessage(
         this.options.config,
@@ -375,6 +476,15 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
     summary: string,
     metadata?: Record<string, unknown>,
   ): void => {
+    this.recordExecutionEvent(
+      'checkpoint_created',
+      `Checkpoint ${checkpointId} for ${taskId}`,
+      {
+        taskId,
+        checkpointId,
+        metadata,
+      },
+    );
     this.options.gateway.send(
       buildCheckpointCreatedMessage(
         this.options.config,
@@ -393,6 +503,16 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
     requestedBy: string,
     detail?: string,
   ): void => {
+    this.recordExecutionEvent(
+      'verification_requested',
+      `Verification ${verificationType} requested for ${taskId}`,
+      {
+        taskId,
+        verificationType,
+        requestedBy,
+        detail,
+      },
+    );
     this.options.gateway.send(
       buildVerificationRequestedMessage(
         this.options.config,

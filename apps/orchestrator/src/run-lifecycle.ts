@@ -20,7 +20,7 @@ export class RunLifecycleService {
     for (const run of activeRuns) {
       const reason = 'unexpected orchestrator restart';
       this.persistence.runs.updateStatus(run.runId, 'failed', { reason });
-      this.persistence.recordRunEvent(run.runId, 'run_recovered', 'Run recovered after restart', { reason });
+      this.persistence.recordExecutionEvent(run.runId, 'run_recovered', 'Run recovered after restart', { reason });
       this.markRunningAttemptsFailed(run.runId, reason);
       this.failPendingTasks(run.runId, reason);
     }
@@ -31,7 +31,7 @@ export class RunLifecycleService {
       return;
     }
     this.persistence.runs.updateStatus(run.runId, 'running');
-    this.persistence.recordRunEvent(run.runId, 'run_started', 'Run started');
+    this.persistence.recordExecutionEvent(run.runId, 'run_started', 'Run started');
   }
 
   completeRun(run: RunRecord, detail = 'Run completed'): void {
@@ -39,7 +39,7 @@ export class RunLifecycleService {
       return;
     }
     this.persistence.runs.updateStatus(run.runId, 'completed');
-    this.persistence.recordRunEvent(run.runId, 'run_completed', detail);
+    this.persistence.recordExecutionEvent(run.runId, 'run_completed', detail);
   }
 
   failRun(run: RunRecord, detail: string): void {
@@ -47,7 +47,7 @@ export class RunLifecycleService {
       return;
     }
     this.persistence.runs.updateStatus(run.runId, 'failed');
-    this.persistence.recordRunEvent(run.runId, 'run_failed', detail);
+    this.persistence.recordExecutionEvent(run.runId, 'run_failed', detail);
   }
 
   cancelRun(run: RunRecord, detail = 'Run cancelled'): void {
@@ -55,7 +55,7 @@ export class RunLifecycleService {
       return;
     }
     this.persistence.runs.updateStatus(run.runId, 'cancelled');
-    this.persistence.recordRunEvent(run.runId, 'run_cancelled', detail);
+    this.persistence.recordExecutionEvent(run.runId, 'run_cancelled', detail);
   }
 
   private markRunningAttemptsFailed(runId: string, reason: string): void {

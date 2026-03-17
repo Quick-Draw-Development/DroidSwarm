@@ -10,10 +10,10 @@ import {
   OperatorControlActionRecord,
   PersistedTask,
   RunRecord,
-  RunEventRecord,
   TaskAttemptRecord,
   TaskDependencyRecord,
   VerificationOutcomeRecord,
+  ExecutionEventRecord,
 } from '../types';
 
 const nowIso = (): string => new Date().toISOString();
@@ -42,7 +42,7 @@ type RunRow = {
 type ExecutionEventRow = {
   event_id: string;
   run_id: string;
-  event_type: RunEventRecord['eventType'];
+  event_type: ExecutionEventRecord['eventType'];
   detail: string;
   metadata_json?: string | null;
   created_at: string;
@@ -174,10 +174,10 @@ export class RunRepository {
   }
 }
 
-export class RunEventRepository {
+export class ExecutionEventRepository {
   constructor(private readonly database: Database.Database) {}
 
-  record(event: RunEventRecord): void {
+  record(event: ExecutionEventRecord): void {
     this.database
       .prepare(`
         INSERT INTO execution_events (
@@ -524,7 +524,7 @@ export class PersistenceClient {
     public readonly actions: OperatorActionRepository,
     public readonly dependencies: TaskDependencyRepository,
     public readonly verifications: VerificationOutcomeRepository,
-    public readonly events: RunEventRepository,
+    public readonly executionEvents: ExecutionEventRepository,
   ) {}
 
   static fromDatabase(database: Database.Database): PersistenceClient {
@@ -540,7 +540,7 @@ export class PersistenceClient {
       new OperatorActionRepository(database),
       new TaskDependencyRepository(database),
       new VerificationOutcomeRepository(database),
-      new RunEventRepository(database),
+      new ExecutionEventRepository(database),
     );
   }
 
@@ -557,8 +557,8 @@ export class PersistenceClient {
     return run;
   }
 
-  recordRunEvent(runId: string, eventType: RunEventRecord['eventType'], detail: string, metadata?: Record<string, unknown>): void {
-    this.events.record({
+  recordExecutionEvent(runId: string, eventType: ExecutionEventRecord['eventType'], detail: string, metadata?: Record<string, unknown>): void {
+    this.executionEvents.record({
       eventId: randomUUID(),
       runId,
       eventType,

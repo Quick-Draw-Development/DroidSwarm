@@ -112,10 +112,22 @@ export interface RunRecord {
   metadata?: Record<string, unknown>;
 }
 
-export interface RunEventRecord {
+export interface ExecutionEventRecord {
   eventId: string;
   runId: string;
-  eventType: 'run_started' | 'run_completed' | 'run_failed' | 'run_cancelled' | 'run_recovered';
+  eventType:
+    | 'run_started'
+    | 'run_completed'
+    | 'run_failed'
+    | 'run_cancelled'
+    | 'run_recovered'
+    | 'spawn_requested'
+    | 'artifact_created'
+    | 'clarification_requested'
+    | 'checkpoint_created'
+    | 'verification_requested'
+    | 'agent_result'
+    | 'plan_proposed';
   detail: string;
   metadata?: Record<string, unknown>;
   createdAt: string;

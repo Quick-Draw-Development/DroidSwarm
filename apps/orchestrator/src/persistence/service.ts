@@ -4,6 +4,7 @@ import type { PersistenceClient } from './repositories';
 import type {
   ArtifactRecord,
   CheckpointRecord,
+  ExecutionEventRecord,
   OperatorControlActionRecord,
   PersistedTask,
   RunRecord,
@@ -302,6 +303,10 @@ export class OrchestratorPersistenceService {
       metadataJson: action.metadata ? JSON.stringify(action.metadata) : undefined,
       createdAt: nowIso(),
     });
+  }
+
+  recordExecutionEvent(eventType: ExecutionEventRecord['eventType'], detail: string, metadata?: Record<string, unknown>): void {
+    this.persistence.recordExecutionEvent(this.run.runId, eventType, detail, metadata);
   }
 
   updateTaskMetadata(taskId: string, metadata: Record<string, unknown>): void {

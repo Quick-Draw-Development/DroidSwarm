@@ -70,7 +70,7 @@ export class DroidSwarmOrchestratorClient {
     this.supervisor.setCallbacks({
       onAgentsAssigned: this.engine.handleAgentAssignment.bind(this.engine),
       onAgentCommunication: this.engine.handleAgentCommunication.bind(this.engine),
-      onAgentResult: this.scheduler.handleAgentResult.bind(this.scheduler),
+      onAgentResult: this.engine.handleAgentResultFromSupervisor,
     });
 
     this.gateway.setMessageHandler(this.engine.handleMessage.bind(this.engine));

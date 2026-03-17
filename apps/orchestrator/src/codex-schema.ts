@@ -66,5 +66,18 @@ export const codexAgentOutputSchema = {
         },
       },
     },
+    metrics: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        tokens: { type: 'number', minimum: 0 },
+        tool_calls: { type: 'number', minimum: 0 },
+        tools: {
+          type: 'array',
+          items: { type: 'string' },
+        },
+        duration_ms: { type: 'number', minimum: 0 },
+      },
+    },
   },
 } as const;

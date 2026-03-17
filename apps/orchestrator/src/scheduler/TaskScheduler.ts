@@ -87,6 +87,10 @@ export class TaskScheduler {
     }
 
     this.clearRetry(task.taskId);
+    if (!this.applyUsageConstraints(task, attemptId, result)) {
+      this.schedule();
+      return;
+    }
 
     const attemptStatus = result.status === 'completed' ? 'completed' : 'failed';
     this.persistenceService.updateAttemptStatus(attemptId, attemptStatus, {
@@ -614,6 +618,97 @@ export class TaskScheduler {
         requests.length,
       );
       return false;
+    }
+
+    return true;
+  }
+
+  private applyUsageConstraints(task: PersistedTask, attemptId: string, result: CodexAgentResult): boolean {
+    const policy = this.getTaskPolicy(task);
+    const metrics = result.metrics;
+    const existingUsage = (task.metadata?.usage ?? {}) as Record<string, number | undefined>;
+    let tokensTotal = existingUsage.tokens ?? 0;
+    let toolCallsTotal = existingUsage.tool_calls ?? 0;
+
+    if (metrics?.tokens != null) {
+      tokensTotal += metrics.tokens;
+    }
+    if (metrics?.tool_calls != null) {
+      toolCallsTotal += metrics.tool_calls;
+    }
+
+    const shouldPersistUsage = Boolean(metrics?.tokens != null || metrics?.tool_calls != null);
+    const usageUpdates: Record<string, unknown> = {};
+    if (shouldPersistUsage) {
+      usageUpdates.usage = {
+        ...existingUsage,
+        tokens: tokensTotal,
+        tool_calls: toolCallsTotal,
+      };
+    }
+
+    const persistUsage = (): void => {
+      if (!shouldPersistUsage) {
+        return;
+      }
+
+      this.persistenceService.updateTaskMetadata(task.taskId, {
+        ...(task.metadata ?? {}),
+        ...usageUpdates,
+      });
+    };
+
+    if (policy.maxTokens != null && tokensTotal > policy.maxTokens) {
+      persistUsage();
+      this.recordPolicyViolation(
+        task,
+        `Policy max tokens ${policy.maxTokens} exceeded (${tokensTotal})`,
+        tokensTotal,
+      );
+      return false;
+    }
+
+    if (policy.maxToolCalls != null && toolCallsTotal > policy.maxToolCalls) {
+      persistUsage();
+      this.recordPolicyViolation(
+        task,
+        `Policy max tool calls ${policy.maxToolCalls} exceeded (${toolCallsTotal})`,
+        toolCallsTotal,
+      );
+      return false;
+    }
+
+    if (policy.allowedTools && policy.allowedTools.length > 0 && Array.isArray(metrics?.tools)) {
+      const disallowed = metrics.tools.filter((tool) => !policy.allowedTools!.includes(tool));
+      if (disallowed.length > 0) {
+        persistUsage();
+        this.recordPolicyViolation(
+          task,
+          `Tool usage forbidden by policy (${disallowed.join(', ')})`,
+          disallowed.length,
+        );
+        return false;
+      }
+    }
+
+    if (policy.timeoutMs != null) {
+      const attempt = this.persistenceService.getAttempt(attemptId);
+      if (attempt) {
+        const elapsedMs = Date.now() - new Date(attempt.createdAt).getTime();
+        if (elapsedMs > policy.timeoutMs) {
+          persistUsage();
+          this.recordPolicyViolation(
+            task,
+            `Task exceeded timeout ${policy.timeoutMs}ms (${Math.round(elapsedMs)}ms)`,
+            elapsedMs,
+          );
+          return false;
+        }
+      }
+    }
+
+    if (shouldPersistUsage) {
+      persistUsage();
     }
 
     return true;

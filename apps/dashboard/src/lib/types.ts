@@ -15,6 +15,7 @@ export interface TaskRecord {
   createdByDisplayName: string;
   needsClarification: boolean;
   blockedReason?: string;
+  stage?: string;
   updatedAt: string;
   agentCount: number;
 }
@@ -46,6 +47,63 @@ export interface TaskDetails {
   limits: string[];
 }
 
+export interface RunSummary {
+  runId: string;
+  status: string;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaskNode {
+  taskId: string;
+  name: string;
+  status: string;
+  priority: string;
+  parentTaskId?: string;
+  stage?: string;
+  updatedAt: string;
+}
+
+export interface ArtifactSummary {
+  artifactId: string;
+  taskId: string;
+  kind: string;
+  summary: string;
+  createdAt: string;
+}
+
+export interface CheckpointSummary {
+  checkpointId: string;
+  taskId: string;
+  summary?: string;
+  createdAt: string;
+}
+
+export interface BudgetEventSummary {
+  eventId: string;
+  taskId?: string;
+  detail: string;
+  consumed: number;
+  createdAt: string;
+}
+
+export interface AgentAssignmentSummary {
+  agentName: string;
+  role?: string;
+  taskId: string;
+  taskName?: string;
+  assignedAt: string;
+}
+
+export interface VerificationTaskSummary {
+  taskId: string;
+  name: string;
+  stage: string;
+  status: string;
+  parentTaskId?: string;
+  updatedAt: string;
+}
 export interface ProjectIdentity {
   projectId: string;
   projectName: string;

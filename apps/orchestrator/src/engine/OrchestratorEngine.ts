@@ -17,7 +17,8 @@ import type { OrchestratorPersistenceService } from '../persistence/service';
 import { SocketGateway, MessageSource } from '../socket/SocketGateway';
 import { TaskScheduler } from '../scheduler/TaskScheduler';
 import { AgentSupervisor } from '../AgentSupervisor';
-import { OperatorCommandHandler } from '../operator/OperatorCommandHandler';
+import { OperatorActionService } from '../operator/OperatorActionService';
+import { OperatorChatResponder } from '../operator/OperatorChatResponder';
 import { OperatorControlAction, parseOperatorIntent } from '../operator/operator-intents';
 import type { TaskSchedulerEvents } from '../scheduler/TaskScheduler';
 
@@ -27,7 +28,8 @@ export interface OrchestratorEngineOptions {
   scheduler: TaskScheduler;
   supervisor: AgentSupervisor;
   gateway: SocketGateway;
-  commandHandler: OperatorCommandHandler;
+  chatResponder: OperatorChatResponder;
+  controlService: OperatorActionService;
   registry: TaskRegistry;
 }
 
@@ -184,7 +186,7 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
 
     if (intent.category === 'note') {
       try {
-        const response = await this.options.commandHandler.process(content);
+        const response = await this.options.chatResponder.respond(content);
         this.options.gateway.send(buildOperatorChatResponse(this.options.config, response));
       } catch (error) {
         this.options.gateway.send(
@@ -285,61 +287,44 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
     }
 
     const detail = action.reason ?? message.payload.content ?? action.type;
-    this.options.persistenceService.recordOperatorAction({
-      taskId,
-      actionType: action.type,
-      detail,
-      metadata: {
-        operator: message.from.actor_name,
-        priority: action.priority,
-      },
-    });
+    const outcome = this.options.controlService.execute(action, taskId, message.from.actor_name, detail);
 
-    switch (action.type) {
-      case 'cancel_task':
-        this.cancelTask(taskId, detail);
-        break;
-      case 'request_review':
-        this.options.persistenceService.setTaskStatus(taskId, 'in_review');
-        this.handleVerificationRequested(taskId, 'operator_review', message.from.actor_name, detail);
-        break;
-      case 'reprioritize':
-        if (action.priority) {
-          this.options.persistenceService.updateTaskPriority(taskId, action.priority);
-          this.sendStatusUpdate(
-            'operator',
-            taskId,
-            'operator_instruction',
-            'reprioritized',
-            `Updated priority to ${action.priority}.`,
-          );
-        }
-        break;
+    if (outcome.actionType === 'cancel_task') {
+      const removedAgents = outcome.removedAgents ?? [];
+      this.options.gateway.send(
+        buildOrchestratorStatusUpdate(
+          this.options.config,
+          'operator',
+          'operator',
+          'task_cancelled',
+          `Cancelled task per operator: ${detail}`,
+          taskId,
+          {
+            removed_agents: removedAgents,
+            removed_agent_count: removedAgents.length,
+          },
+        ),
+      );
+    }
+
+    if (outcome.reviewRequested) {
+      this.handleVerificationRequested(taskId, 'operator_review', message.from.actor_name, detail);
+    }
+
+    if (outcome.priority) {
+      this.sendStatusUpdate(
+        'operator',
+        taskId,
+        'operator_instruction',
+        'reprioritized',
+        `Updated priority to ${outcome.priority}.`,
+      );
     }
 
     this.options.gateway.send(buildOperatorChatResponse(
       this.options.config,
-      `Recorded operator action: ${action.type}.`,
+      `Recorded operator action: ${outcome.actionType}.`,
     ));
-  }
-
-  private cancelTask(taskId: string, detail: string): void {
-    const removedAgents = this.options.supervisor.cancelTask(taskId);
-    this.options.persistenceService.setTaskStatus(taskId, 'cancelled');
-    this.options.gateway.send(
-      buildOrchestratorStatusUpdate(
-        this.options.config,
-        'operator',
-        'operator',
-        'task_cancelled',
-        `Cancelled task per operator: ${detail}`,
-        taskId,
-        {
-          removed_agents: removedAgents,
-          removed_agent_count: removedAgents.length,
-        },
-      ),
-    );
   }
 
   private scheduleTask(taskId: string): void {

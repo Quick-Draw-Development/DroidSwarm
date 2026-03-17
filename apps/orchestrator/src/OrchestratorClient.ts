@@ -3,7 +3,8 @@ import path from 'node:path';
 import { AgentSupervisor } from './AgentSupervisor';
 import { loadConfig } from './config';
 import { OrchestratorEngine } from './engine/OrchestratorEngine';
-import { OperatorCommandHandler } from './operator/OperatorCommandHandler';
+import { OperatorActionService } from './operator/OperatorActionService';
+import { OperatorChatResponder } from './operator/OperatorChatResponder';
 import { TaskRegistry } from './task-registry';
 import { TaskScheduler } from './scheduler/TaskScheduler';
 import { SocketGateway } from './socket/SocketGateway';
@@ -48,7 +49,8 @@ export class DroidSwarmOrchestratorClient {
       scheduler: this.scheduler,
       supervisor: this.supervisor,
       gateway: this.gateway,
-      commandHandler: new OperatorCommandHandler(this.config),
+      chatResponder: new OperatorChatResponder(this.config),
+      controlService: new OperatorActionService(this.persistenceService, this.supervisor),
       registry: this.registry,
     });
 

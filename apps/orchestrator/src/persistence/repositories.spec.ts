@@ -196,6 +196,15 @@ describe('Orchestrator persistence repositories', () => {
     const run = persistence.createRun('droidswarm');
     const service = new OrchestratorPersistenceService(persistence, run);
 
+    service.createTask({
+      taskId: 'task-limit',
+      name: 'budget-guard',
+      priority: 'low',
+      metadata: {
+        description: 'placeholder for budget events',
+      },
+    });
+
     service.recordBudgetEvent('task-limit', 'test limit hit', 1);
 
     const event = db.prepare('SELECT detail, consumed FROM budget_events WHERE task_id = ?').get('task-limit');
@@ -213,6 +222,15 @@ describe('Orchestrator persistence repositories', () => {
     const persistence = PersistenceClient.fromDatabase(db);
     const run = persistence.createRun('droidswarm');
     const service = new OrchestratorPersistenceService(persistence, run);
+
+    service.createTask({
+      taskId: 'task-operator',
+      name: 'operator-placeholder',
+      priority: 'medium',
+      metadata: {
+        description: 'placeholder for operator actions',
+      },
+    });
 
     service.recordOperatorAction({
       taskId: 'task-operator',

@@ -88,6 +88,12 @@ export interface CodexAgentResult {
     scheme: 'droidspeak-v1';
     compressed_content: string;
   };
+  metrics?: {
+    tokens?: number;
+    tool_calls?: number;
+    tools?: string[];
+    duration_ms?: number;
+  };
 }
 
 export interface SpawnedAgent {

@@ -150,6 +150,26 @@ export class OrchestratorPersistenceService {
       }));
   }
 
+  getAttempt(attemptId: string): TaskAttemptRecord | undefined {
+    const row = this.persistence.database
+      .prepare('SELECT * FROM task_attempts WHERE attempt_id = ?')
+      .get(attemptId) as TaskAttemptRecord & { metadata_json?: string } | undefined;
+    if (!row) {
+      return undefined;
+    }
+
+    return {
+      attemptId: row.attempt_id,
+      taskId: row.task_id,
+      runId: row.run_id,
+      agentName: row.agent_name,
+      status: row.status as TaskAttemptRecord['status'],
+      metadata: row.metadata_json ? JSON.parse(row.metadata_json) as Record<string, unknown> : undefined,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
   recordArtifact(input: {
     artifactId: string;
     attemptId: string;
@@ -238,5 +258,19 @@ export class OrchestratorPersistenceService {
       metadataJson: action.metadata ? JSON.stringify(action.metadata) : undefined,
       createdAt: nowIso(),
     });
+  }
+
+  updateTaskMetadata(taskId: string, metadata: Record<string, unknown>): void {
+    const existing = this.persistence.tasks.get(taskId);
+    if (!existing) {
+      return;
+    }
+
+    const updated: PersistedTask = {
+      ...existing,
+      metadata,
+      updatedAt: nowIso(),
+    };
+    this.persistence.tasks.create(updated);
   }
 }

@@ -35,23 +35,6 @@ const getDatabase = (): Database.Database => {
 
 const ensureDashboardSchema = (database: Database.Database): void => {
   database.exec(`
-    CREATE TABLE IF NOT EXISTS tasks (
-      task_id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
-      title TEXT NOT NULL,
-      description TEXT NOT NULL,
-      task_type TEXT NOT NULL,
-      priority TEXT NOT NULL,
-      status TEXT NOT NULL,
-      branch_type TEXT,
-      branch_name TEXT,
-      created_by_user_id TEXT NOT NULL,
-      created_by_display_name TEXT NOT NULL,
-      needs_clarification INTEGER NOT NULL DEFAULT 0,
-      blocked_reason TEXT,
-      updated_at TEXT NOT NULL
-    );
-
     CREATE TABLE IF NOT EXISTS messages (
       message_id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,

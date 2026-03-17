@@ -1,10 +1,10 @@
 import { runCodexPrompt } from '../codex-runner';
 import type { OrchestratorConfig } from '../types';
 
-export class OperatorCommandHandler {
+export class OperatorChatResponder {
   constructor(private readonly config: OrchestratorConfig) {}
 
-  async process(content: string): Promise<string> {
+  async respond(content: string): Promise<string> {
     const instructionSections = [
       this.config.orchestratorRules
         ? `Orchestrator rules:\n${this.config.orchestratorRules}\n`

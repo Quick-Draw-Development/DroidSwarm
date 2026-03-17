@@ -38,6 +38,9 @@ describe('TaskScheduler', () => {
       getActiveAgentCount() {
         return 0;
       },
+      countActiveAgents(_predicate?: (agent: unknown) => boolean) {
+        return 0;
+      },
     } as unknown as AgentSupervisor;
 
     const config: OrchestratorConfig = {
@@ -113,8 +116,109 @@ describe('TaskScheduler', () => {
     };
     scheduler.handleAgentResult(childTask.taskId, childAttempt.attemptId, childAttempt.agentName, childAttempt.role, childResult);
 
-    assert.equal(service.getTask(childTask.taskId)?.status, 'completed');
-    assert.equal(service.getTask(rootTask.taskId)?.status, 'completed');
+    assert.equal(service.getTask(childTask.taskId)?.status, 'in_review');
+    assert.equal(service.getTask(rootTask.taskId)?.status, 'waiting_on_dependency');
+
+    database.close();
+    rmSync(workspace, { recursive: true, force: true });
+  });
+
+  it('enforces token policies before letting work continue', () => {
+    const workspace = mkdtempSync(path.join(tmpdir(), 'droidswarm-scheduler-'));
+    const dbPath = path.join(workspace, 'state.db');
+    const database = openPersistenceDatabase(dbPath);
+    const persistence = PersistenceClient.fromDatabase(database);
+    const service = new OrchestratorPersistenceService(persistence, persistence.createRun('droidswarm'));
+
+    const spawnLog: Array<{ taskId: string; role: string; attemptId: string }> = [];
+    const supervisorStub = {
+      startAgentForTask(task, role, attemptId) {
+        spawnLog.push({ taskId: task.taskId, role, attemptId });
+        return {
+          agentName: `test-${attemptId}`,
+          taskId: task.taskId,
+          role,
+          attemptId,
+        };
+      },
+      setCallbacks() {
+        return;
+      },
+      getActiveAgentCount() {
+        return 0;
+      },
+      countActiveAgents(_predicate?: (agent: unknown) => boolean) {
+        return 0;
+      },
+    } as unknown as AgentSupervisor;
+
+    const config: OrchestratorConfig = {
+      environment: 'test',
+      projectId: 'droidswarm',
+      projectName: 'DroidSwarm',
+      projectRoot: '/',
+      agentName: 'Orchestrator',
+      agentRole: 'control-plane',
+      socketUrl: 'ws://localhost:8765',
+      heartbeatMs: 1000,
+      reconnectMs: 1000,
+      codexBin: 'codex',
+      codexSandboxMode: 'workspace-write',
+      maxAgentsPerTask: 4,
+      maxConcurrentAgents: 4,
+      specDir: '',
+      orchestratorRules: '',
+      droidspeakRules: '',
+      agentRules: '',
+      dbPath: '',
+      schedulerMaxTaskDepth: 4,
+      schedulerMaxFanOut: 3,
+      schedulerRetryIntervalMs: 1000,
+    };
+    const scheduler = new TaskScheduler(service, supervisorStub, config);
+    const policyTask = service.createTask({
+      taskId: 'policy-root',
+      name: 'Policy Task',
+      priority: 'medium',
+      metadata: {
+        description: 'Respect token guards',
+        task_type: 'plan',
+        policy: {
+          max_tokens: 100,
+        },
+      },
+    });
+    scheduler.handleNewTask(policyTask.taskId);
+
+    assert.equal(spawnLog.length, 1);
+
+    const result: CodexAgentResult = {
+      status: 'completed',
+      summary: 'too many tokens',
+      requested_agents: [],
+      artifacts: [],
+      doc_updates: [],
+      branch_actions: [],
+      metrics: {
+        tokens: 150,
+      },
+    };
+
+    scheduler.handleAgentResult(
+      policyTask.taskId,
+      spawnLog[0].attemptId,
+      spawnLog[0].agentName,
+      spawnLog[0].role,
+      result,
+    );
+
+    assert.equal(service.getTask(policyTask.taskId)?.status, 'waiting_on_human');
+    assert.equal(spawnLog.length, 1);
+    const budgetEvent = database
+      .prepare('SELECT detail FROM budget_events WHERE task_id = ? ORDER BY created_at DESC LIMIT 1')
+      .get(policyTask.taskId);
+    assert.ok(budgetEvent);
+    assert.ok(typeof budgetEvent.detail === 'string' && budgetEvent.detail.includes('max tokens'));
 
     database.close();
     rmSync(workspace, { recursive: true, force: true });

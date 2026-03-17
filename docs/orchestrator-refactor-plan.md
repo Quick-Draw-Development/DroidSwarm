@@ -47,7 +47,8 @@
 - **Scheduler**: New module (`apps/orchestrator/src/scheduler/`) that reads persisted task graph, respects budgets, enforces fan-out/depth limits, and tells `WorkerSupervisor` when to start attempts.
 - **WorkerSupervisor**: Refined `AgentSupervisor.ts`, kept under `supervisor/`, focusing on process lifecycle, not topology.
 - **Persistence Layer**: New `apps/orchestrator/src/persistence/` with repository abstractions over SQLite (runs/tasks/attempts/assignments/artifacts/checkpoints/budget events).
-- **OperatorCommandHandler**: Parses operator room chat into explicit control actions used by `OrchestratorEngine`/`Scheduler` rather than the current `runCodexPrompt` path.
+- **OperatorChatResponder**: Handles natural-language operator notes by calling `runCodexPrompt` to craft acknowledgments.
+- **OperatorActionService**: Persists explicit control actions and updates orchestrator/scheduler state so intent is decoupled from the chat surface.
 - **Types/Protocol**: Extend `types.ts` and `protocol.ts` with discriminated unions for execution events, budget policies, and artifact metadata.
 
 ## Phase 0 Next Steps

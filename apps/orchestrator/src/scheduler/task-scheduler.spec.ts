@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import type { CodexAgentResult, OrchestratorConfig } from '../types';
+import type { CodexAgentResult, OrchestratorConfig, TaskPolicy } from '../types';
 import type { AgentSupervisor } from '../AgentSupervisor';
 import { openPersistenceDatabase } from '../persistence/database';
 import { PersistenceClient } from '../persistence/repositories';
@@ -300,6 +300,9 @@ describe('TaskScheduler', () => {
     scheduler.handleNewTask(policyTask.taskId);
 
     assert.equal(spawnLog.length, 1);
+    const recordedAttempt = service.getAttempt(spawnLog[0].attemptId);
+    const recordedPolicy = recordedAttempt?.metadata?.effective_policy as TaskPolicy | undefined;
+    assert.equal(recordedPolicy?.maxTokens, 100);
 
     const result: CodexAgentResult = {
       status: 'completed',
@@ -328,6 +331,87 @@ describe('TaskScheduler', () => {
       .get(policyTask.taskId) as { detail: string } | undefined;
     assert.ok(budgetEvent);
     assert.ok(typeof budgetEvent.detail === 'string' && budgetEvent.detail.includes('max tokens'));
+
+    database.close();
+    rmSync(workspace, { recursive: true, force: true });
+  });
+
+  it('records global policy defaults with attempts when no overrides exist', () => {
+    const workspace = mkdtempSync(path.join(tmpdir(), 'droidswarm-scheduler-policy-'));
+    const dbPath = path.join(workspace, 'state.db');
+    const database = openPersistenceDatabase(dbPath);
+    const persistence = PersistenceClient.fromDatabase(database);
+    const service = new OrchestratorPersistenceService(persistence, persistence.createRun('droidswarm'));
+
+    const spawnLog: Array<{ taskId: string; role: string; attemptId: string; agentName: string }> = [];
+    const supervisorStub = {
+      startAgentForTask(task, role, attemptId) {
+        spawnLog.push({ taskId: task.taskId, role, attemptId, agentName: `test-${attemptId}` });
+        return {
+          agentName: `test-${attemptId}`,
+          taskId: task.taskId,
+          role,
+          attemptId,
+        };
+      },
+      setCallbacks() {
+        return;
+      },
+      getActiveAgentCount() {
+        return 0;
+      },
+      countActiveAgents(_predicate?: (agent: unknown) => boolean) {
+        return 0;
+      },
+    } as unknown as AgentSupervisor;
+
+    const config: OrchestratorConfig = {
+      environment: 'test',
+      projectId: 'droidswarm',
+      projectName: 'DroidSwarm',
+      projectRoot: '/',
+      agentName: 'Orchestrator',
+      agentRole: 'control-plane',
+      socketUrl: 'ws://localhost:8765',
+      heartbeatMs: 1000,
+      reconnectMs: 1000,
+      codexBin: 'codex',
+      codexSandboxMode: 'workspace-write',
+      maxAgentsPerTask: 4,
+      maxConcurrentAgents: 4,
+      specDir: '',
+      orchestratorRules: '',
+      droidspeakRules: '',
+      agentRules: '',
+      dbPath: '',
+      schedulerMaxTaskDepth: 4,
+      schedulerMaxFanOut: 3,
+      schedulerRetryIntervalMs: 1000,
+      maxConcurrentCodeAgents: 2,
+      sideEffectActionsBeforeReview: 1,
+      allowedTools: [],
+      policyDefaults: {
+        maxTokens: 50,
+        approvalPolicy: 'auto',
+      },
+    };
+    const scheduler = new TaskScheduler(service, supervisorStub, config);
+    const defaultTask = service.createTask({
+      taskId: 'default-policy',
+      name: 'Default Policy Task',
+      priority: 'medium',
+      metadata: {
+        description: 'Use global defaults',
+        task_type: 'plan',
+      },
+    });
+    scheduler.handleNewTask(defaultTask.taskId);
+
+    assert.equal(spawnLog.length, 1);
+    const recordedAttempt = service.getAttempt(spawnLog[0].attemptId);
+    const recordedPolicy = recordedAttempt?.metadata?.effective_policy as TaskPolicy | undefined;
+    assert.equal(recordedPolicy?.maxTokens, 50);
+    assert.equal(recordedPolicy?.approvalPolicy, 'auto');
 
     database.close();
     rmSync(workspace, { recursive: true, force: true });

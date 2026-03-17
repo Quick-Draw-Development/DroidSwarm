@@ -35,6 +35,7 @@ export interface OrchestratorConfig {
   maxConcurrentCodeAgents: number;
   sideEffectActionsBeforeReview: number;
   allowedTools: string[];
+  policyDefaults?: TaskPolicy;
 }
 
 export interface TaskRecord {

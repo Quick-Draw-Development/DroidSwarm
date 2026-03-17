@@ -311,6 +311,7 @@ export class TaskScheduler {
       return;
     }
 
+    const effectivePolicy = this.resolveTaskPolicy(task);
     this.persistenceService.createAttempt(
       attemptId,
       task,
@@ -320,6 +321,7 @@ export class TaskScheduler {
         instructions,
         parent_summary: parentSummary,
         parent_droidspeak: parentDroidspeak,
+        effective_policy: effectivePolicy,
       },
     );
     this.persistenceService.recordAssignment(spawned.agentName, attemptId);
@@ -660,6 +662,21 @@ export class TaskScheduler {
     };
   }
 
+  private resolveTaskPolicy(task: PersistedTask): TaskPolicy {
+    const overrides = this.getTaskPolicy(task);
+    const defaults = this.config.policyDefaults ?? {};
+    const allowedTools = overrides.allowedTools ?? defaults.allowedTools;
+    return {
+      maxDepth: overrides.maxDepth ?? defaults.maxDepth,
+      maxChildren: overrides.maxChildren ?? defaults.maxChildren,
+      maxTokens: overrides.maxTokens ?? defaults.maxTokens,
+      maxToolCalls: overrides.maxToolCalls ?? defaults.maxToolCalls,
+      timeoutMs: overrides.timeoutMs ?? defaults.timeoutMs,
+      allowedTools: allowedTools ? [...allowedTools] : undefined,
+      approvalPolicy: overrides.approvalPolicy ?? defaults.approvalPolicy,
+    };
+  }
+
   private toPositiveNumber(value: unknown): number | undefined {
     if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
       return value;
@@ -680,7 +697,7 @@ export class TaskScheduler {
   }
 
   private enforceTaskPolicy(task: PersistedTask, requests: RequestedAgent[]): boolean {
-    const policy = this.getTaskPolicy(task);
+    const policy = this.resolveTaskPolicy(task);
 
     if (policy.maxDepth != null) {
       const depth = this.getTaskDepth(task.taskId);
@@ -717,7 +734,7 @@ export class TaskScheduler {
   }
 
   private applyUsageConstraints(task: PersistedTask, attemptId: string, result: CodexAgentResult): boolean {
-    const policy = this.getTaskPolicy(task);
+    const policy = this.resolveTaskPolicy(task);
     const metrics = result.metrics;
     const existingUsage = (task.metadata?.usage ?? {}) as Record<string, number | undefined>;
     let tokensTotal = existingUsage.tokens ?? 0;

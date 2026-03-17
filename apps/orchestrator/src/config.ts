@@ -1,7 +1,7 @@
 import path from 'node:path';
 
 import { loadSpecCards } from './specs';
-import type { OrchestratorConfig } from './types';
+import type { OrchestratorConfig, TaskPolicy } from './types';
 
 const toPositiveInt = (value: string | undefined, fallback: number): number => {
   if (!value) {
@@ -23,6 +23,31 @@ const parseCommaList = (value: string | undefined): string[] => {
     .filter(Boolean);
 };
 
+const toPositiveIntOrUndefined = (value: string | undefined): number | undefined => {
+  if (!value) {
+    return undefined;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+};
+
+const parseOptionalCommaList = (value: string | undefined): string[] | undefined => {
+  if (!value) {
+    return undefined;
+  }
+
+  const list = parseCommaList(value);
+  return list.length > 0 ? list : undefined;
+};
+
+const parseApprovalPolicy = (value: string | undefined): TaskPolicy['approvalPolicy'] | undefined => {
+  if (value === 'auto' || value === 'manual') {
+    return value;
+  }
+  return undefined;
+};
+
 export const loadConfig = (): OrchestratorConfig => {
   const environment = (process.env.NODE_ENV ?? 'development') as OrchestratorConfig['environment'];
   const host = process.env.DROIDSWARM_SOCKET_HOST ?? '127.0.0.1';
@@ -31,6 +56,9 @@ export const loadConfig = (): OrchestratorConfig => {
     process.env.DROIDSWARM_SPECS_DIR ??
     path.resolve(__dirname, '..', '..', '..', 'packages', 'bootstrap', 'specs');
   const specs = loadSpecCards(specDir);
+  const allowedTools = parseCommaList(process.env.DROIDSWARM_ALLOWED_TOOLS);
+  const policyAllowedTools =
+    parseOptionalCommaList(process.env.DROIDSWARM_POLICY_ALLOWED_TOOLS) ?? (allowedTools.length > 0 ? allowedTools : undefined);
 
   return {
     environment,
@@ -63,6 +91,15 @@ export const loadConfig = (): OrchestratorConfig => {
       process.env.DROIDSWARM_SIDE_EFFECT_ACTIONS_BEFORE_REVIEW,
       5,
     ),
-    allowedTools: parseCommaList(process.env.DROIDSWARM_ALLOWED_TOOLS),
+    allowedTools,
+    policyDefaults: {
+      maxDepth: toPositiveIntOrUndefined(process.env.DROIDSWARM_POLICY_MAX_DEPTH),
+      maxChildren: toPositiveIntOrUndefined(process.env.DROIDSWARM_POLICY_MAX_CHILDREN),
+      maxTokens: toPositiveIntOrUndefined(process.env.DROIDSWARM_POLICY_MAX_TOKENS),
+      maxToolCalls: toPositiveIntOrUndefined(process.env.DROIDSWARM_POLICY_MAX_TOOL_CALLS),
+      timeoutMs: toPositiveIntOrUndefined(process.env.DROIDSWARM_POLICY_TIMEOUT_MS),
+      allowedTools: policyAllowedTools,
+      approvalPolicy: parseApprovalPolicy(process.env.DROIDSWARM_POLICY_APPROVAL_POLICY),
+    },
   };
 };

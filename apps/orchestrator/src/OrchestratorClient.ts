@@ -11,6 +11,7 @@ import { SocketGateway } from './socket/SocketGateway';
 import { openPersistenceDatabase } from './persistence/database';
 import { PersistenceClient } from './persistence/repositories';
 import { OrchestratorPersistenceService } from './persistence/service';
+import { RunLifecycleService } from './run-lifecycle';
 import type { Database } from 'better-sqlite3';
 import type { OrchestratorConfig, RunRecord } from './types';
 
@@ -20,6 +21,7 @@ export class DroidSwarmOrchestratorClient {
   private readonly gateway: SocketGateway;
   private readonly database: Database;
   private readonly persistence: PersistenceClient;
+  private readonly runLifecycle: RunLifecycleService;
   private readonly prefix = '[OrchestratorClient]';
   private scheduler?: TaskScheduler;
   private currentRun?: RunRecord;
@@ -29,6 +31,7 @@ export class DroidSwarmOrchestratorClient {
   constructor(private readonly config: OrchestratorConfig = loadConfig()) {
     this.database = openPersistenceDatabase(this.config.dbPath);
     this.persistence = PersistenceClient.fromDatabase(this.database);
+    this.runLifecycle = new RunLifecycleService(this.persistence);
     this.gateway = new SocketGateway(this.config);
     this.supervisor = new AgentSupervisor(
       config,
@@ -39,7 +42,9 @@ export class DroidSwarmOrchestratorClient {
 
   start(): void {
     this.log('starting orchestrator');
+    this.runLifecycle.recoverInterruptedRuns();
     this.currentRun = this.persistence.createRun(this.config.projectId);
+    this.runLifecycle.startRun(this.currentRun);
     this.persistenceService = new OrchestratorPersistenceService(this.persistence, this.currentRun);
     this.scheduler = new TaskScheduler(this.persistenceService, this.supervisor, this.config);
 
@@ -52,6 +57,7 @@ export class DroidSwarmOrchestratorClient {
       chatResponder: new OperatorChatResponder(this.config),
       controlService: new OperatorActionService(this.persistenceService, this.supervisor),
       registry: this.registry,
+      runLifecycle: this.runLifecycle,
     });
 
     this.scheduler.setEvents({
@@ -74,6 +80,9 @@ export class DroidSwarmOrchestratorClient {
   }
 
   stop(): void {
+    if (this.currentRun) {
+      this.runLifecycle.completeRunById(this.currentRun.runId);
+    }
     this.gateway.stop();
     this.database.close();
   }

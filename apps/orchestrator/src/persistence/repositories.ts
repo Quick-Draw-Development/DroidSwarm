@@ -10,6 +10,7 @@ import {
   OperatorControlActionRecord,
   PersistedTask,
   RunRecord,
+  RunEventRecord,
   TaskAttemptRecord,
   TaskDependencyRecord,
   VerificationOutcomeRecord,
@@ -36,6 +37,15 @@ type RunRow = {
   metadata_json?: string | null;
   created_at: string;
   updated_at: string;
+};
+
+type ExecutionEventRow = {
+  event_id: string;
+  run_id: string;
+  event_type: RunEventRecord['eventType'];
+  detail: string;
+  metadata_json?: string | null;
+  created_at: string;
 };
 
 type TaskRow = {
@@ -100,7 +110,7 @@ export class RunRepository {
         metadataJson: run.metadata ? JSON.stringify(run.metadata) : null,
         createdAt: run.createdAt,
         updatedAt: run.updatedAt,
-      });
+    });
   }
 
   get(runId: string): RunRecord | null {
@@ -133,6 +143,57 @@ export class RunRepository {
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       }));
+  }
+
+  updateStatus(runId: string, status: RunRecord['status'], metadata?: Record<string, unknown>): void {
+    const existing = this.get(runId);
+    if (!existing) {
+      return;
+    }
+    const updated: RunRecord = {
+      ...existing,
+      status,
+      metadata: metadata ?? existing.metadata,
+      updatedAt: nowIso(),
+    };
+    this.create(updated);
+  }
+
+  listActiveRuns(): RunRecord[] {
+    return this.database
+      .prepare('SELECT * FROM runs WHERE status NOT IN (?, ?, ?)')
+      .all('completed', 'failed', 'cancelled')
+      .map((row: RunRow) => ({
+        runId: row.run_id,
+        projectId: row.project_id,
+        status: row.status,
+        metadata: parseJson<Record<string, unknown>>(row.metadata_json),
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      }));
+  }
+}
+
+export class RunEventRepository {
+  constructor(private readonly database: Database.Database) {}
+
+  record(event: RunEventRecord): void {
+    this.database
+      .prepare(`
+        INSERT INTO execution_events (
+          event_id, run_id, event_type, detail, metadata_json, created_at
+        ) VALUES (
+          @eventId, @runId, @eventType, @detail, @metadataJson, @createdAt
+        )
+      `)
+      .run({
+        eventId: event.eventId,
+        runId: event.runId,
+        eventType: event.eventType,
+        detail: event.detail,
+        metadataJson: event.metadata ? JSON.stringify(event.metadata) : null,
+        createdAt: event.createdAt,
+      });
   }
 }
 
@@ -463,6 +524,7 @@ export class PersistenceClient {
     public readonly actions: OperatorActionRepository,
     public readonly dependencies: TaskDependencyRepository,
     public readonly verifications: VerificationOutcomeRepository,
+    public readonly events: RunEventRepository,
   ) {}
 
   static fromDatabase(database: Database.Database): PersistenceClient {
@@ -478,6 +540,7 @@ export class PersistenceClient {
       new OperatorActionRepository(database),
       new TaskDependencyRepository(database),
       new VerificationOutcomeRepository(database),
+      new RunEventRepository(database),
     );
   }
 
@@ -492,5 +555,16 @@ export class PersistenceClient {
     };
     this.runs.create(run);
     return run;
+  }
+
+  recordRunEvent(runId: string, eventType: RunEventRecord['eventType'], detail: string, metadata?: Record<string, unknown>): void {
+    this.events.record({
+      eventId: randomUUID(),
+      runId,
+      eventType,
+      detail,
+      metadata,
+      createdAt: nowIso(),
+    });
   }
 }

@@ -21,6 +21,7 @@ import { AgentSupervisor } from '../AgentSupervisor';
 import { OperatorActionService } from '../operator/OperatorActionService';
 import { OperatorChatResponder } from '../operator/OperatorChatResponder';
 import { OperatorControlAction, parseOperatorIntent } from '../operator/operator-intents';
+import { RunLifecycleService } from '../run-lifecycle';
 import type { TaskSchedulerEvents } from '../scheduler/TaskScheduler';
 
 export interface OrchestratorEngineOptions {
@@ -32,6 +33,7 @@ export interface OrchestratorEngineOptions {
   chatResponder: OperatorChatResponder;
   controlService: OperatorActionService;
   registry: TaskRegistry;
+  runLifecycle: RunLifecycleService;
 }
 
 export class OrchestratorEngine implements TaskSchedulerEvents {
@@ -164,6 +166,10 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
         },
       ),
     );
+    const persisted = this.options.persistenceService.getTask(task.taskId);
+    if (persisted) {
+      this.options.runLifecycle.cancelRunById(persisted.runId, 'Operator cancelled task');
+    }
   }
 
   private async handleOperatorChat(message: MessageEnvelope<'chat'>): Promise<void> {

@@ -10,6 +10,7 @@ import type {
   RequestedAgent,
   TaskPolicy,
   TaskRecord,
+  TaskDependencyRecord,
   VerificationOutcomeRecord,
 } from '../types';
 
@@ -24,7 +25,8 @@ const buildTaskRecord = (task: PersistedTask): TaskRecord => ({
   branchName: typeof task.metadata?.branch_name === 'string' ? task.metadata.branch_name : undefined,
 });
 
-const dependencySatisfiedStatuses: PersistedTask['status'][] = ['completed', 'verified', 'failed', 'cancelled'];
+const dependencySuccessStatuses: PersistedTask['status'][] = ['completed', 'verified'];
+const dependencyFailureStatuses: PersistedTask['status'][] = ['failed', 'cancelled'];
 
 type CheckpointPayload = {
   summary?: string;
@@ -229,7 +231,13 @@ export class TaskScheduler {
       return task.status === 'queued' || task.status === 'planning';
     }
 
-    if (!this.areDependenciesSatisfied(dependencies)) {
+    const evaluation = this.evaluateDependencies(task, dependencies);
+    if (evaluation.blockingDependency) {
+      this.handleDependencyFailure(task, evaluation.blockingDependency);
+      return false;
+    }
+
+    if (!evaluation.satisfied) {
       if (task.status !== 'waiting_on_dependency') {
         this.persistenceService.setTaskStatus(task.taskId, 'waiting_on_dependency');
       }
@@ -242,15 +250,35 @@ export class TaskScheduler {
     return true;
   }
 
-  private areDependenciesSatisfied(dependencies: { dependsOnTaskId: string }[]): boolean {
+  private evaluateDependencies(task: PersistedTask, dependencies: TaskDependencyRecord[]): { satisfied: boolean; blockingDependency?: PersistedTask } {
     for (const dependency of dependencies) {
       const candidate = this.persistenceService.getTask(dependency.dependsOnTaskId);
-      if (!candidate || !dependencySatisfiedStatuses.includes(candidate.status)) {
-        return false;
+      if (!candidate) {
+        return { satisfied: false };
       }
+
+      if (dependencySuccessStatuses.includes(candidate.status)) {
+        continue;
+      }
+
+      if (dependencyFailureStatuses.includes(candidate.status)) {
+        return { satisfied: false, blockingDependency: candidate };
+      }
+
+      return { satisfied: false };
     }
 
-    return true;
+    return { satisfied: true };
+  }
+
+  private handleDependencyFailure(task: PersistedTask, dependency: PersistedTask): void {
+    const reason = `Dependency ${dependency.taskId} ${dependency.status}`;
+    this.persistenceService.updateTaskMetadata(task.taskId, {
+      ...(task.metadata ?? {}),
+      blocked_reason: reason,
+    });
+    this.persistenceService.setTaskStatus(task.taskId, 'failed');
+    this.recordBudgetLimit(task.taskId, reason, 0);
   }
 
   private launch(task: PersistedTask): void {
@@ -363,14 +391,16 @@ export class TaskScheduler {
     }
 
     const dependencies = this.persistenceService.listDependencies(parent.taskId);
-    const incomplete = dependencies.some((dependency) => {
-      const child = this.persistenceService.getTask(dependency.dependsOnTaskId);
-      return !child || !dependencySatisfiedStatuses.includes(child.status);
-    });
-
-    if (!incomplete) {
-      this.persistenceService.setTaskStatus(parent.taskId, 'completed');
+    const evaluation = this.evaluateDependencies(parent, dependencies);
+    if (evaluation.blockingDependency) {
+      this.handleDependencyFailure(parent, evaluation.blockingDependency);
+      return;
     }
+    if (!evaluation.satisfied) {
+      return;
+    }
+
+    this.persistenceService.setTaskStatus(parent.taskId, 'completed');
   }
 
   private log(message: string): void {

@@ -15,6 +15,7 @@ import { OperatorActionService } from './operator/OperatorActionService';
 import { SocketGateway } from './socket/SocketGateway';
 import { AgentSupervisor } from './AgentSupervisor';
 import { OperatorChatResponder } from './operator/OperatorChatResponder';
+import { RunLifecycleService } from './run-lifecycle';
 
 const DEFAULT_CONFIG: OrchestratorConfig = {
   environment: 'test',
@@ -165,6 +166,7 @@ const createEnvironment = (options?: { dbPath?: string; run?: RunRecord }): Envi
     chatResponder,
     controlService,
     registry,
+    runLifecycle: new RunLifecycleService(persistence),
   });
   scheduler.setEvents({
     onPlanProposed: engine.onPlanProposed,

@@ -126,6 +126,109 @@ describe('TaskScheduler', () => {
     rmSync(workspace, { recursive: true, force: true });
   });
 
+  it('fails parent tasks when required dependencies fail', () => {
+    const workspace = mkdtempSync(path.join(tmpdir(), 'droidswarm-scheduler-'));
+    const dbPath = path.join(workspace, 'state.db');
+    const database = openPersistenceDatabase(dbPath);
+    const persistence = PersistenceClient.fromDatabase(database);
+    const service = new OrchestratorPersistenceService(persistence, persistence.createRun('droidswarm'));
+
+    const spawnLog: Array<{ taskId: string; role: string; attemptId: string; agentName: string }> = [];
+    const supervisorStub = {
+      startAgentForTask(task, role, attemptId) {
+        spawnLog.push({ taskId: task.taskId, role, attemptId, agentName: `test-${attemptId}` });
+        return {
+          agentName: `test-${attemptId}`,
+          taskId: task.taskId,
+          role,
+          attemptId,
+        };
+      },
+      setCallbacks() {
+        return;
+      },
+      getActiveAgentCount() {
+        return 0;
+      },
+      countActiveAgents(_predicate?: (agent: unknown) => boolean) {
+        return 0;
+      },
+    } as unknown as AgentSupervisor;
+
+    const config: OrchestratorConfig = {
+      environment: 'test',
+      projectId: 'droidswarm',
+      projectName: 'DroidSwarm',
+      projectRoot: '/',
+      agentName: 'Orchestrator',
+      agentRole: 'control-plane',
+      socketUrl: 'ws://localhost:8765',
+      heartbeatMs: 1000,
+      reconnectMs: 1000,
+      codexBin: 'codex',
+      codexSandboxMode: 'workspace-write',
+      maxAgentsPerTask: 4,
+      maxConcurrentAgents: 4,
+      specDir: '',
+      orchestratorRules: '',
+      droidspeakRules: '',
+      agentRules: '',
+      dbPath: '',
+      schedulerMaxTaskDepth: 4,
+      schedulerMaxFanOut: 3,
+      schedulerRetryIntervalMs: 1000,
+      maxConcurrentCodeAgents: 2,
+      sideEffectActionsBeforeReview: 1,
+      allowedTools: [],
+    };
+    const scheduler = new TaskScheduler(service, supervisorStub, config);
+    const rootTask = service.createTask({
+      taskId: 'root',
+      name: 'Root Plan',
+      priority: 'medium',
+      metadata: {
+        description: 'Root plan',
+      },
+    });
+    scheduler.handleNewTask(rootTask.taskId);
+
+    const planResult: CodexAgentResult = {
+      status: 'completed',
+      summary: 'need help',
+      requested_agents: [{
+        role: 'coder',
+        reason: 'implement feature',
+        instructions: 'Do work.',
+      }],
+      artifacts: [],
+      doc_updates: [],
+      branch_actions: [],
+    };
+    scheduler.handleAgentResult(rootTask.taskId, spawnLog[0].attemptId, spawnLog[0].agentName, spawnLog[0].role, planResult);
+
+    const childTask = service.getTasks().find((task) => task.parentTaskId === rootTask.taskId);
+    assert.ok(childTask);
+
+    const childAttempt = spawnLog[1];
+    const childResult: CodexAgentResult = {
+      status: 'completed',
+      summary: 'could not proceed',
+      requested_agents: [],
+      artifacts: [],
+      doc_updates: [],
+      branch_actions: [],
+    };
+    scheduler.handleAgentResult(childTask!.taskId, childAttempt.attemptId, childAttempt.agentName, childAttempt.role, childResult);
+    service.setTaskStatus(childTask!.taskId, 'failed');
+    scheduler.handleNewTask(rootTask.taskId);
+
+    assert.equal(service.getTask(rootTask.taskId)?.status, 'failed');
+    assert.equal(service.getTask(rootTask.taskId)?.metadata?.blocked_reason, `Dependency ${childTask!.taskId} failed`);
+
+    database.close();
+    rmSync(workspace, { recursive: true, force: true });
+  });
+
   it('enforces token policies before letting work continue', () => {
     const workspace = mkdtempSync(path.join(tmpdir(), 'droidswarm-scheduler-'));
     const dbPath = path.join(workspace, 'state.db');

@@ -14,6 +14,16 @@ export const applyPersistenceSchema = (database: Database.Database): void => {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS execution_events (
+      event_id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      detail TEXT NOT NULL,
+      metadata_json TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(run_id) REFERENCES runs(run_id)
+    );
+
     CREATE TABLE IF NOT EXISTS tasks (
       task_id TEXT PRIMARY KEY,
       run_id TEXT NOT NULL,

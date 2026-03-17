@@ -112,6 +112,15 @@ export interface RunRecord {
   metadata?: Record<string, unknown>;
 }
 
+export interface RunEventRecord {
+  eventId: string;
+  runId: string;
+  eventType: 'run_started' | 'run_completed' | 'run_failed' | 'run_cancelled' | 'run_recovered';
+  detail: string;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+}
+
 export interface PersistedTask {
   taskId: string;
   runId: string;

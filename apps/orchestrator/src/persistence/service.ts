@@ -14,6 +14,26 @@ import type {
 
 const nowIso = (): string => new Date().toISOString();
 
+type TaskAttemptMaintenanceRow = {
+  attempt_id: string;
+  task_id: string;
+  run_id: string;
+  agent_name: string;
+  status: TaskAttemptRecord['status'];
+  metadata_json?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type CheckpointRow = {
+  checkpoint_id: string;
+  task_id: string;
+  run_id: string;
+  attempt_id?: string | null;
+  payload_json?: string | null;
+  created_at: string;
+};
+
 export class OrchestratorPersistenceService {
   constructor(
     private readonly persistence: PersistenceClient,
@@ -139,7 +159,7 @@ export class OrchestratorPersistenceService {
     return this.persistence.database
       .prepare('SELECT * FROM task_attempts WHERE task_id = ?')
       .all(taskId)
-      .map((row: TaskAttemptRecord & { metadata_json?: string }) => ({
+      .map((row: TaskAttemptMaintenanceRow) => ({
         attemptId: row.attempt_id,
         taskId: row.task_id,
         runId: row.run_id,
@@ -154,7 +174,7 @@ export class OrchestratorPersistenceService {
   getAttempt(attemptId: string): TaskAttemptRecord | undefined {
     const row = this.persistence.database
       .prepare('SELECT * FROM task_attempts WHERE attempt_id = ?')
-      .get(attemptId) as TaskAttemptRecord & { metadata_json?: string } | undefined;
+      .get(attemptId) as TaskAttemptMaintenanceRow | undefined;
     if (!row) {
       return undefined;
     }
@@ -215,7 +235,7 @@ export class OrchestratorPersistenceService {
   getLatestCheckpoint(taskId: string): CheckpointRecord | undefined {
     const row = this.persistence.database
       .prepare('SELECT * FROM checkpoints WHERE task_id = ? ORDER BY created_at DESC LIMIT 1')
-      .get(taskId) as CheckpointRecord & { payload_json?: string } | undefined;
+      .get(taskId) as CheckpointRow | undefined;
     if (!row) {
       return undefined;
     }

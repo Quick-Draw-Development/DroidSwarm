@@ -54,27 +54,27 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
     const isTaskChannel = source === 'task';
 
     if (isTaskChannel && message.type === 'artifact_created') {
-      this.persistArtifact(message);
+      this.persistArtifact(message as MessageEnvelope<'artifact_created'>);
       return;
     }
 
     if (!isTaskChannel && message.type === 'status_update' && message.room_id === 'operator') {
-      this.handleOperatorStatusMessage(message);
+      const statusMessage = message as MessageEnvelope<'status_update'>;
+      if (isCancellationMessage(statusMessage)) {
+        this.handleCancellation(statusMessage);
+        return;
+      }
+      this.handleOperatorStatusMessage(statusMessage);
       return;
     }
 
     if (!isTaskChannel && message.type === 'task_created') {
-      this.handleTaskCreated(message);
-      return;
-    }
-
-    if (!isTaskChannel && isCancellationMessage(message)) {
-      this.handleCancellation(message);
+      this.handleTaskCreated(message as MessageEnvelope<'task_created'>);
       return;
     }
 
     if (message.type === 'chat' && message.room_id === 'operator') {
-      await this.handleOperatorChat(message);
+      await this.handleOperatorChat(message as MessageEnvelope<'chat'>);
     }
   }
 
@@ -117,7 +117,7 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
     this.sendStatusUpdate(taskId, taskId, 'execution', 'agent_communication', content);
   }
 
-  private async handleTaskCreated(message: MessageEnvelope): Promise<void> {
+  private async handleTaskCreated(message: MessageEnvelope<'task_created'>): Promise<void> {
     const task = resolveTaskFromMessage(message);
     if (!task) {
       return;
@@ -142,7 +142,7 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
     this.scheduleTask(persisted.taskId);
   }
 
-  private handleCancellation(message: MessageEnvelope): void {
+  private handleCancellation(message: MessageEnvelope<'status_update'>): void {
     const task = resolveTaskFromMessage(message);
     if (!task) {
       return;
@@ -166,14 +166,15 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
     );
   }
 
-  private async handleOperatorChat(message: MessageEnvelope): Promise<void> {
-    const content = typeof message.payload.content === 'string' ? message.payload.content : '';
+  private async handleOperatorChat(message: MessageEnvelope<'chat'>): Promise<void> {
+    const payload = message.payload as unknown as Record<string, unknown>;
+    const content = typeof payload.content === 'string' ? payload.content : '';
     if (!content) {
       return;
     }
 
-    const metadataTaskId = typeof message.payload.metadata === 'object' && message.payload.metadata !== null
-      ? (message.payload.metadata as Record<string, unknown>).task_id
+    const metadataTaskId = typeof payload.metadata === 'object' && payload.metadata !== null
+      ? (payload.metadata as Record<string, unknown>).task_id
       : undefined;
     const resolvedTaskId = message.task_id ?? (typeof metadataTaskId === 'string' ? metadataTaskId : undefined);
     const intent = parseOperatorIntent(content, resolvedTaskId);
@@ -182,6 +183,7 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
       'operator',
       undefined,
       'operator_instruction',
+      'processing_operator_instruction',
       'Processing operator instruction.',
     );
 
@@ -203,7 +205,7 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
     await this.handleOperatorCommand(intent.action, message, intent.referencedTaskId ?? resolvedTaskId);
   }
 
-  private handleOperatorStatusMessage(message: MessageEnvelope): void {
+  private handleOperatorStatusMessage(message: MessageEnvelope<'status_update'>): void {
     const metadata = typeof message.payload.metadata === 'object' && message.payload.metadata !== null
       ? (message.payload.metadata as Record<string, unknown>)
       : undefined;
@@ -214,7 +216,13 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
 
     const status = typeof metadata?.status === 'string' ? metadata.status : undefined;
     if (status === 'review') {
-      this.sendStatusUpdate('operator', taskId, 'operator_review', buildReviewAnnouncement(message.from.actor_name));
+      this.sendStatusUpdate(
+        'operator',
+        taskId,
+        'operator_review',
+        'operator_review_notice',
+        buildReviewAnnouncement(message.from.actor_name),
+      );
     }
   }
 
@@ -276,7 +284,7 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
 
   private async handleOperatorCommand(
     action: OperatorControlAction,
-    message: MessageEnvelope,
+    message: MessageEnvelope<'chat'>,
     taskId?: string,
   ): Promise<void> {
     if (!taskId) {
@@ -309,7 +317,7 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
     }
 
     if (outcome.reviewRequested) {
-      this.handleVerificationRequested(taskId, 'operator_review', message.from.actor_name, detail);
+      this.onVerificationRequested(taskId, 'operator_review', message.from.actor_name, detail);
     }
 
     if (outcome.priority) {
@@ -336,7 +344,7 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
     console.log(this.prefix, ...items);
   }
 
-  handlePlanProposed = (
+  onPlanProposed = (
     taskId: string,
     planId: string,
     summary: string,
@@ -355,7 +363,7 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
     );
   };
 
-  handleCheckpointCreated = (
+  onCheckpointCreated = (
     taskId: string,
     checkpointId: string,
     summary: string,
@@ -373,7 +381,7 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
     );
   };
 
-  handleVerificationRequested = (
+  onVerificationRequested = (
     taskId: string,
     verificationType: string,
     requestedBy: string,
@@ -398,7 +406,7 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
     );
   };
 
-  handleVerificationOutcome = (
+  onVerificationOutcome = (
     taskId: string,
     stage: 'verification' | 'review',
     status: 'passed' | 'failed' | 'blocked',

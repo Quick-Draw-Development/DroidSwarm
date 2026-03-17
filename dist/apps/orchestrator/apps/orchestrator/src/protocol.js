@@ -22,29 +22,12 @@ __export(protocol_exports, {
   buildRoomAuthMessage: () => buildRoomAuthMessage,
   buildRoomHeartbeatMessage: () => buildRoomHeartbeatMessage,
   buildTaskIntakeAccepted: () => buildTaskIntakeAccepted,
-  messageEnvelopeSchema: () => messageEnvelopeSchema,
   parseEnvelope: () => parseEnvelope
 });
 module.exports = __toCommonJS(protocol_exports);
 var import_node_crypto = require("node:crypto");
-var import_zod = require("zod");
-const isoTimestampSchema = import_zod.z.string().datetime({ offset: true });
-const actorRefSchema = import_zod.z.object({
-  actor_type: import_zod.z.enum(["agent", "orchestrator", "human", "system", "tool"]),
-  actor_id: import_zod.z.string().min(1),
-  actor_name: import_zod.z.string().min(1)
-});
-const messageEnvelopeSchema = import_zod.z.object({
-  message_id: import_zod.z.string().min(1),
-  project_id: import_zod.z.string().min(1),
-  room_id: import_zod.z.string().min(1),
-  task_id: import_zod.z.string().min(1).optional(),
-  type: import_zod.z.enum(["status_update", "task_created", "task_intake_accepted", "chat", "heartbeat"]),
-  from: actorRefSchema,
-  timestamp: isoTimestampSchema,
-  payload: import_zod.z.record(import_zod.z.string(), import_zod.z.unknown())
-});
-const parseEnvelope = (raw) => messageEnvelopeSchema.parse(JSON.parse(raw));
+var import_src = require("../../../libs/protocol/src");
+const parseEnvelope = (raw) => import_src.messageEnvelopeSchema.parse(JSON.parse(raw));
 const nowIso = () => (/* @__PURE__ */ new Date()).toISOString();
 const buildAuthMessage = (config) => buildRoomAuthMessage(config, "operator", config.agentName, "orchestrator", config.agentRole);
 const buildRoomAuthMessage = (config, roomId, agentName, clientType, agentRole = config.agentRole) => ({
@@ -99,6 +82,5 @@ const buildTaskIntakeAccepted = (config, taskId) => ({
   buildRoomAuthMessage,
   buildRoomHeartbeatMessage,
   buildTaskIntakeAccepted,
-  messageEnvelopeSchema,
   parseEnvelope
 });

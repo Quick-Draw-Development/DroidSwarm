@@ -12,6 +12,7 @@ import {
   RunRecord,
   TaskAttemptRecord,
   TaskDependencyRecord,
+  VerificationOutcomeRecord,
 } from '../types';
 
 const nowIso = (): string => new Date().toISOString();
@@ -27,6 +28,58 @@ const parseJson = <T>(value: string | null | undefined): T | undefined => {
     return undefined;
   }
 };
+
+type RunRow = {
+  run_id: string;
+  project_id: string;
+  status: RunRecord['status'];
+  metadata_json?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type TaskRow = {
+  task_id: string;
+  run_id: string;
+  parent_task_id?: string | null;
+  name: string;
+  status: PersistedTask['status'];
+  priority: PersistedTask['priority'];
+  metadata_json?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type TaskAttemptRow = {
+  attempt_id: string;
+  task_id: string;
+  run_id: string;
+  agent_name: string;
+  status: TaskAttemptRecord['status'];
+  metadata_json?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type ArtifactRow = {
+  artifact_id: string;
+  attempt_id: string;
+  task_id: string;
+  run_id: string;
+  kind: string;
+  summary: string;
+  content: string;
+  metadata_json?: string | null;
+  created_at: string;
+};
+
+type TaskDependencyRow = {
+  dependency_id: string;
+  task_id: string;
+  depends_on_task_id: string;
+  created_at?: string;
+};
+
 
 export class RunRepository {
   constructor(private readonly database: Database.Database) {}
@@ -53,7 +106,7 @@ export class RunRepository {
   get(runId: string): RunRecord | null {
     const row = this.database
       .prepare('SELECT * FROM runs WHERE run_id = ?')
-      .get(runId) as RunRecord & { metadata_json?: string } | undefined;
+      .get(runId) as RunRow | undefined;
     if (!row) {
       return null;
     }
@@ -72,7 +125,7 @@ export class RunRepository {
     return this.database
       .prepare('SELECT * FROM runs WHERE project_id = ? ORDER BY updated_at DESC')
       .all(projectId)
-      .map((row: RunRecord & { metadata_json?: string }) => ({
+      .map((row: RunRow) => ({
         runId: row.run_id,
         projectId: row.project_id,
         status: row.status,
@@ -112,7 +165,7 @@ export class TaskRepository {
     return this.database
       .prepare('SELECT * FROM tasks WHERE run_id = ? ORDER BY created_at ASC')
       .all(runId)
-      .map((row: PersistedTask & { metadata_json?: string }) => ({
+      .map((row: TaskRow) => ({
         taskId: row.task_id,
         runId: row.run_id,
         parentTaskId: row.parent_task_id ?? undefined,
@@ -128,7 +181,7 @@ export class TaskRepository {
   get(taskId: string): PersistedTask | null {
     const row = this.database
       .prepare('SELECT * FROM tasks WHERE task_id = ?')
-      .get(taskId) as PersistedTask & { metadata_json?: string } | undefined;
+      .get(taskId) as TaskRow | undefined;
     if (!row) {
       return null;
     }
@@ -241,7 +294,7 @@ export class ArtifactRepository {
     return this.database
       .prepare('SELECT * FROM artifacts WHERE task_id = ? ORDER BY created_at ASC')
       .all(taskId)
-      .map((row: ArtifactRecord & { metadata_json?: string }) => ({
+      .map((row: ArtifactRow) => ({
         artifactId: row.artifact_id,
         attemptId: row.attempt_id,
         taskId: row.task_id,
@@ -349,7 +402,7 @@ export class TaskDependencyRepository {
     return this.database
       .prepare('SELECT * FROM task_dependencies WHERE task_id = ? ORDER BY created_at ASC')
       .all(taskId)
-      .map((row: TaskDependencyRecord & { created_at?: string }) => ({
+      .map((row: TaskDependencyRow) => ({
         dependencyId: row.dependency_id,
         taskId: row.task_id,
         dependsOnTaskId: row.depends_on_task_id,
@@ -361,7 +414,7 @@ export class TaskDependencyRepository {
     return this.database
       .prepare('SELECT * FROM task_dependencies WHERE depends_on_task_id = ? ORDER BY created_at ASC')
       .all(taskId)
-      .map((row: TaskDependencyRecord & { created_at?: string }) => ({
+      .map((row: TaskDependencyRow) => ({
         dependencyId: row.dependency_id,
         taskId: row.task_id,
         dependsOnTaskId: row.depends_on_task_id,

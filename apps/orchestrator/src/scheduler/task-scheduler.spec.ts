@@ -21,10 +21,10 @@ describe('TaskScheduler', () => {
     const persistence = PersistenceClient.fromDatabase(database);
     const service = new OrchestratorPersistenceService(persistence, persistence.createRun('droidswarm'));
 
-    const spawnLog: Array<{ taskId: string; role: string; attemptId: string }> = [];
+    const spawnLog: Array<{ taskId: string; role: string; attemptId: string; agentName: string }> = [];
     const supervisorStub = {
       startAgentForTask(task, role, attemptId) {
-        spawnLog.push({ taskId: task.taskId, role, attemptId });
+        spawnLog.push({ taskId: task.taskId, role, attemptId, agentName: `test-${attemptId}` });
         return {
           agentName: `test-${attemptId}`,
           taskId: task.taskId,
@@ -65,6 +65,9 @@ describe('TaskScheduler', () => {
       schedulerMaxTaskDepth: 4,
       schedulerMaxFanOut: 3,
       schedulerRetryIntervalMs: 1000,
+      maxConcurrentCodeAgents: 2,
+      sideEffectActionsBeforeReview: 1,
+      allowedTools: [],
     };
     const scheduler = new TaskScheduler(service, supervisorStub, config);
     const rootTask = service.createTask({
@@ -130,10 +133,10 @@ describe('TaskScheduler', () => {
     const persistence = PersistenceClient.fromDatabase(database);
     const service = new OrchestratorPersistenceService(persistence, persistence.createRun('droidswarm'));
 
-    const spawnLog: Array<{ taskId: string; role: string; attemptId: string }> = [];
+    const spawnLog: Array<{ taskId: string; role: string; attemptId: string; agentName: string }> = [];
     const supervisorStub = {
       startAgentForTask(task, role, attemptId) {
-        spawnLog.push({ taskId: task.taskId, role, attemptId });
+        spawnLog.push({ taskId: task.taskId, role, attemptId, agentName: `test-${attemptId}` });
         return {
           agentName: `test-${attemptId}`,
           taskId: task.taskId,
@@ -174,6 +177,9 @@ describe('TaskScheduler', () => {
       schedulerMaxTaskDepth: 4,
       schedulerMaxFanOut: 3,
       schedulerRetryIntervalMs: 1000,
+      maxConcurrentCodeAgents: 2,
+      sideEffectActionsBeforeReview: 1,
+      allowedTools: [],
     };
     const scheduler = new TaskScheduler(service, supervisorStub, config);
     const policyTask = service.createTask({
@@ -216,7 +222,7 @@ describe('TaskScheduler', () => {
     assert.equal(spawnLog.length, 1);
     const budgetEvent = database
       .prepare('SELECT detail FROM budget_events WHERE task_id = ? ORDER BY created_at DESC LIMIT 1')
-      .get(policyTask.taskId);
+      .get(policyTask.taskId) as { detail: string } | undefined;
     assert.ok(budgetEvent);
     assert.ok(typeof budgetEvent.detail === 'string' && budgetEvent.detail.includes('max tokens'));
 

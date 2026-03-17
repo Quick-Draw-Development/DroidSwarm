@@ -52,12 +52,15 @@ const baseMessage = {
     import_strict.default.equal(task?.createdByUserId, "alice");
   });
   (0, import_node_test.it)("detects cancellation messages", () => {
-    import_strict.default.equal((0, import_task_events.isCancellationMessage)({
+    const cancellationMessage = {
       ...baseMessage,
       type: "status_update",
       payload: {
-        status_code: "task_cancelled"
+        phase: "cancelled",
+        status_code: "task_cancelled",
+        content: "operator cancelled the task"
       }
-    }), true);
+    };
+    import_strict.default.equal((0, import_task_events.isCancellationMessage)(cancellationMessage), true);
   });
 });

@@ -1,10 +1,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { isCancellationMessage, resolveTaskFromMessage } from './task-events';
-import type { MessageEnvelope } from './types';
+import { isCancellationMessage, resolveTaskFromMessage, StatusUpdateMessage, TaskRelatedMessage } from './task-events';
 
-const baseMessage: MessageEnvelope = {
+const baseMessage: TaskRelatedMessage = {
   message_id: 'msg-1',
   project_id: 'proj-1',
   room_id: 'operator',
@@ -35,12 +34,15 @@ describe('task-events', () => {
   });
 
   it('detects cancellation messages', () => {
-    assert.equal(isCancellationMessage({
+    const cancellationMessage: StatusUpdateMessage = {
       ...baseMessage,
       type: 'status_update',
       payload: {
+        phase: 'cancelled',
         status_code: 'task_cancelled',
+        content: 'operator cancelled the task',
       },
-    }), true);
+    };
+    assert.equal(isCancellationMessage(cancellationMessage), true);
   });
 });

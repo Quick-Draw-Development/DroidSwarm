@@ -17,7 +17,8 @@ var __copyProps = (to, from, except, desc) => {
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 var AgentSupervisor_exports = {};
 __export(AgentSupervisor_exports, {
-  AgentSupervisor: () => AgentSupervisor
+  AgentSupervisor: () => AgentSupervisor,
+  defaultRoleInstructions: () => defaultRoleInstructions
 });
 module.exports = __toCommonJS(AgentSupervisor_exports);
 var import_node_crypto = require("node:crypto");
@@ -43,71 +44,66 @@ class AgentSupervisor {
     this.config = config;
     this.registry = registry;
     this.entryScript = entryScript;
-    this.callbacks = callbacks;
     this.agents = /* @__PURE__ */ new Map();
     this.roleCounters = /* @__PURE__ */ new Map();
+    this.callbacks = callbacks;
   }
-  startInitialAgents(task) {
-    const existing = this.registry.get(task.taskId);
-    if (existing?.activeAgents.length) {
-      return [];
-    }
-    return this.spawnRequests(task, defaultRoleInstructions(task));
+  setCallbacks(callbacks) {
+    this.callbacks = { ...this.callbacks, ...callbacks };
   }
-  spawnRequests(task, requests, parentSummary, parentDroidspeak) {
-    const spawned = [];
-    const taskState = this.registry.get(task.taskId);
-    const activeCount = taskState?.activeAgents.length ?? 0;
-    const availableTaskSlots = Math.max(0, this.config.maxAgentsPerTask - activeCount);
-    const availableGlobalSlots = Math.max(0, this.config.maxConcurrentAgents - this.agents.size);
-    const maxSpawn = Math.min(availableTaskSlots, availableGlobalSlots);
-    for (const request of requests.slice(0, maxSpawn)) {
-      const agentName = this.nextAgentName(request.role);
-      const child = (0, import_node_child_process.fork)(this.entryScript, ["worker", JSON.stringify({
-        task,
-        role: request.role,
-        agentName,
-        parentSummary: parentSummary ?? request.instructions,
-        parentDroidspeak
-      })], {
-        env: process.env,
-        stdio: ["ignore", "pipe", "pipe", "ipc"]
-      });
-      child.stdout?.setEncoding("utf8");
-      child.stdout?.on("data", (chunk) => {
-        const text = chunk.toString();
-        text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).forEach((line) => {
-          console.log("[AgentSupervisor]", agentName, "stdout:", line);
-        });
-      });
-      child.stderr?.setEncoding("utf8");
-      child.stderr?.on("data", (chunk) => {
-        const text = chunk.toString();
-        text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).forEach((line) => {
-          console.error("[AgentSupervisor]", agentName, "stderr:", line);
-        });
-      });
-      const agent = {
-        child,
-        taskId: task.taskId,
-        agentName,
-        role: request.role
-      };
-      this.agents.set(agentName, agent);
-      const currentNames = this.registry.get(task.taskId)?.activeAgents ?? [];
-      this.registry.assignAgents(task.taskId, [...currentNames, agentName]);
-      spawned.push({ agentName, taskId: task.taskId, role: request.role });
-      child.on("message", (message) => {
-        this.handleAgentMessage(task, message);
-      });
-      child.on("exit", () => {
-        this.registry.removeAgent(task.taskId, agentName);
-        this.agents.delete(agentName);
-      });
+  startAgentForTask(task, role, attemptId, parentSummary, parentDroidspeak) {
+    if (!this.canSpawn(task)) {
+      return null;
     }
-    if (spawned.length > 0) {
-      this.callbacks.onAgentsAssigned?.(task.taskId, spawned);
-    }
+    const agentName = this.nextAgentName(role);
+    const child = (0, import_node_child_process.fork)(this.entryScript, ["worker", JSON.stringify({
+      task,
+      role,
+      agentName,
+      parentSummary,
+      parentDroidspeak
+    })], {
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe", "ipc"]
+    });
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk) => {
+      const text = chunk.toString();
+      text.split(/\\r?\\n/).map((line) => line.trim()).filter(Boolean).forEach((line) => {
+        console.log("[AgentSupervisor]", agentName, "stdout:", line);
+      });
+    });
+    child.stderr?.setEncoding("utf8");
+    child.stderr?.on("data", (chunk) => {
+      const text = chunk.toString();
+      text.split(/\\r?\\n/).map((line) => line.trim()).filter(Boolean).forEach((line) => {
+        console.error("[AgentSupervisor]", agentName, "stderr:", line);
+      });
+    });
+    const agent = {
+      child,
+      taskId: task.taskId,
+      agentName,
+      role,
+      attemptId
+    };
+    this.agents.set(agentName, agent);
+    const currentNames = this.registry.get(task.taskId)?.activeAgents ?? [];
+    this.registry.assignAgents(task.taskId, [...currentNames, agentName]);
+    child.on("message", (message) => {
+      this.handleAgentMessage(task, message);
+    });
+    child.on("exit", () => {
+      this.registry.removeAgent(task.taskId, agentName);
+      this.agents.delete(agentName);
+    });
+    const spawned = {
+      agentName,
+      taskId: task.taskId,
+      role,
+      attemptId
+    };
+    this.callbacks.onAgentsAssigned?.(task.taskId, [spawned]);
     return spawned;
   }
   cancelTask(taskId) {
@@ -123,6 +119,21 @@ class AgentSupervisor {
     this.registry.cancel(taskId, (/* @__PURE__ */ new Date()).toISOString());
     return removedAgents;
   }
+  getActiveAgentCount() {
+    return this.agents.size;
+  }
+  countActiveAgents(predicate) {
+    if (!predicate) {
+      return this.agents.size;
+    }
+    let count = 0;
+    for (const agent of this.agents.values()) {
+      if (predicate(agent)) {
+        count += 1;
+      }
+    }
+    return count;
+  }
   handleAgentMessage(task, message) {
     if (message.type !== "agent_result" || message.taskId !== task.taskId) {
       return;
@@ -131,18 +142,28 @@ class AgentSupervisor {
     if (!taskState || taskState.status === "cancelled") {
       return;
     }
+    const agent = this.agents.get(message.agentName);
+    const attemptId = agent?.attemptId ?? "";
     if (message.result.requested_agents.length > 0) {
-      this.spawnRequests(
-        task,
-        message.result.requested_agents,
-        message.result.summary,
-        message.result.compression?.compressed_content
-      );
       this.callbacks.onAgentCommunication?.(
         task.taskId,
         (0, import_operator_notifications.formatAgentRequestContent)(message.agentName, message.result.requested_agents)
       );
     }
+    this.callbacks.onAgentResult?.(
+      task.taskId,
+      attemptId,
+      message.agentName,
+      message.role,
+      message.result
+    );
+  }
+  canSpawn(task) {
+    const taskState = this.registry.get(task.taskId);
+    const activeCount = taskState?.activeAgents.length ?? 0;
+    const availableTaskSlots = Math.max(0, this.config.maxAgentsPerTask - activeCount);
+    const availableGlobalSlots = Math.max(0, this.config.maxConcurrentAgents - this.agents.size);
+    return availableTaskSlots > 0 && availableGlobalSlots > 0;
   }
   nextAgentName(role) {
     const prefix = role.split(/[^a-zA-Z0-9]+/).filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join("-") || "Agent";
@@ -153,5 +174,6 @@ class AgentSupervisor {
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
-  AgentSupervisor
+  AgentSupervisor,
+  defaultRoleInstructions
 });

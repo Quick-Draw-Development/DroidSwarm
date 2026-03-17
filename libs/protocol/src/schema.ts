@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type {
   AuthMessage,
   AuthPayload,
+  MessageEnvelope,
   MessagePayloadMap,
   MessageType,
 } from './types';
@@ -208,8 +209,7 @@ const envelopeSchemas = (Object.keys(payloadSchemas) as MessageType[]).map((type
   }),
 );
 
-const messageEnvelopeSchema = z.discriminatedUnion('type', envelopeSchemas);
-
+const messageEnvelopeSchema = z.union(envelopeSchemas) as z.ZodType<MessageEnvelope>;
 const clientTypeEnum = z.enum(['agent', 'orchestrator', 'human', 'dashboard', 'system'] as const);
 const authPayloadSchema: z.ZodType<AuthPayload> = z.object({
   room_id: z.string().min(1),
@@ -219,7 +219,7 @@ const authPayloadSchema: z.ZodType<AuthPayload> = z.object({
   token: z.string().min(1).optional(),
 });
 
-const authMessageSchema = z.object<Required<AuthMessage>>({
+const authMessageSchema: z.ZodType<AuthMessage> = z.object({
   type: z.literal('auth'),
   project_id: z.string().min(1),
   timestamp: isoTimestampSchema,
@@ -227,4 +227,3 @@ const authMessageSchema = z.object<Required<AuthMessage>>({
 });
 
 export { messageEnvelopeSchema, authMessageSchema };
-export type { MessageEnvelope, AuthMessage, MessageType };

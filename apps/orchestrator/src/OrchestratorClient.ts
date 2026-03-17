@@ -55,10 +55,10 @@ export class DroidSwarmOrchestratorClient {
     });
 
     this.scheduler.setEvents({
-      onPlanProposed: this.engine.handlePlanProposed,
-      onCheckpointCreated: this.engine.handleCheckpointCreated,
-      onVerificationRequested: this.engine.handleVerificationRequested,
-      onVerificationOutcome: this.engine.handleVerificationOutcome,
+      onPlanProposed: this.engine.onPlanProposed,
+      onCheckpointCreated: this.engine.onCheckpointCreated,
+      onVerificationRequested: this.engine.onVerificationRequested,
+      onVerificationOutcome: this.engine.onVerificationOutcome,
     });
 
     this.supervisor.setCallbacks({

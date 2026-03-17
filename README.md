@@ -73,3 +73,13 @@ This is a lifecycle scaffold for the upcoming implementation. `setup` initialize
 - `apps/dashboard`: Next.js dashboard application scaffold
 - `apps/socket-server`: Node.js socket server scaffold
 - `packages/bootstrap`: install/setup scripts, CLI assets, and system specs
+
+## Architecture docs
+
+- `docs/orchestrator-architecture.md` describes the final control-plane flow (durable runs/tasks, scheduler decisions, supervisor lifecycle, and the dashboard insights that read them).
+- `docs/orchestrator-protocol-migration.md` details the execution-centered event schema (`plan_proposed`, `verification_requested`, `artifact_created`, etc.) and how clients should emit/persist those events when the orchestrator restarts.
+
+## Testing
+
+- `npx nx test orchestrator` runs the Phase 10 end-to-end coverage (intake → decomposition → scheduling → verification/review → cancellation → restart/resume).
+- `npx nx typecheck dashboard` exercises the new insights panel that now surfaces runs, tasks, artifacts, checkpoints, budgets, assignments, verifications, and timeline events from the persistent datastore.

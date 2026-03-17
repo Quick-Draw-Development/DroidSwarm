@@ -23,28 +23,32 @@ __export(task_events_exports, {
 });
 module.exports = __toCommonJS(task_events_exports);
 var import_node_crypto = require("node:crypto");
+const asString = (value) => typeof value === "string" ? value : void 0;
 const resolveTaskFromMessage = (message) => {
-  const taskId = message.task_id ?? (typeof message.payload.task_id === "string" ? message.payload.task_id : void 0);
+  const payload = message.payload;
+  const metadata = typeof payload.metadata === "object" && payload.metadata !== null ? payload.metadata : void 0;
+  const taskId = message.task_id ?? asString(payload.task_id) ?? asString(metadata?.task_id);
   if (!taskId) {
     return void 0;
   }
   return {
     taskId,
-    title: typeof message.payload.title === "string" ? message.payload.title : taskId,
-    description: typeof message.payload.description === "string" ? message.payload.description : "",
-    taskType: typeof message.payload.task_type === "string" ? message.payload.task_type : "task",
-    priority: typeof message.payload.priority === "string" ? message.payload.priority : "medium",
-    createdByUserId: typeof message.payload.created_by === "string" ? message.payload.created_by : typeof message.payload.created_by_user_id === "string" ? message.payload.created_by_user_id : void 0,
+    title: asString(payload.title) ?? taskId,
+    description: asString(payload.description) ?? "",
+    taskType: asString(payload.task_type) ?? "task",
+    priority: asString(payload.priority) ?? "medium",
+    createdByUserId: asString(payload.created_by) ?? asString(payload.created_by_user_id),
     createdAt: message.timestamp,
-    branchName: typeof message.payload.branch_name === "string" ? message.payload.branch_name : void 0
+    branchName: asString(payload.branch_name)
   };
 };
 const isCancellationMessage = (message) => {
-  if (message.type !== "status_update" || message.room_id !== "operator") {
+  if (message.room_id !== "operator") {
     return false;
   }
-  const statusCode = typeof message.payload.status_code === "string" ? message.payload.status_code : "";
-  const metadata = typeof message.payload.metadata === "object" && message.payload.metadata !== null ? message.payload.metadata : void 0;
+  const payload = message.payload;
+  const statusCode = asString(payload.status_code) ?? "";
+  const metadata = typeof payload.metadata === "object" && payload.metadata !== null ? payload.metadata : void 0;
   return statusCode === "task_cancelled" || metadata?.status === "cancelled";
 };
 const buildTaskCancellationAcknowledged = (projectId, orchestratorName, taskId, removedAgents) => ({

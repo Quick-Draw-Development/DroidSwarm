@@ -70,7 +70,14 @@ EOF
       specDir: process.cwd(),
       orchestratorRules: "",
       droidspeakRules: "",
-      agentRules: ""
+      agentRules: "",
+      dbPath: import_node_path.default.join(process.cwd(), "state.db"),
+      schedulerMaxTaskDepth: 4,
+      schedulerMaxFanOut: 3,
+      schedulerRetryIntervalMs: 1e3,
+      maxConcurrentCodeAgents: 2,
+      sideEffectActionsBeforeReview: 0,
+      allowedTools: []
     };
     try {
       const result = await (0, import_codex_runner.runCodexPrompt)({

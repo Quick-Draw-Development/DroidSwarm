@@ -30,300 +30,68 @@ __export(OrchestratorClient_exports, {
   DroidSwarmOrchestratorClient: () => DroidSwarmOrchestratorClient
 });
 module.exports = __toCommonJS(OrchestratorClient_exports);
-var import_ws = __toESM(require("ws"));
 var import_node_path = __toESM(require("node:path"));
 var import_AgentSupervisor = require("./AgentSupervisor");
 var import_config = require("./config");
-var import_codex_runner = require("./codex-runner");
-var import_messages = require("./messages");
-var import_protocol = require("./protocol");
+var import_OrchestratorEngine = require("./engine/OrchestratorEngine");
+var import_OperatorActionService = require("./operator/OperatorActionService");
+var import_OperatorChatResponder = require("./operator/OperatorChatResponder");
 var import_task_registry = require("./task-registry");
-var import_task_events = require("./task-events");
-var import_operator_notifications = require("./operator-notifications");
+var import_TaskScheduler = require("./scheduler/TaskScheduler");
+var import_SocketGateway = require("./socket/SocketGateway");
+var import_database = require("./persistence/database");
+var import_repositories = require("./persistence/repositories");
+var import_service = require("./persistence/service");
 class DroidSwarmOrchestratorClient {
   constructor(config = (0, import_config.loadConfig)()) {
     this.config = config;
-    this.stopped = false;
     this.registry = new import_task_registry.TaskRegistry();
     this.prefix = "[OrchestratorClient]";
-    this.channelSockets = /* @__PURE__ */ new Map();
-    this.channelHeartbeats = /* @__PURE__ */ new Map();
-    this.channelReconnects = /* @__PURE__ */ new Map();
+    this.database = (0, import_database.openPersistenceDatabase)(this.config.dbPath);
+    this.persistence = import_repositories.PersistenceClient.fromDatabase(this.database);
+    this.gateway = new import_SocketGateway.SocketGateway(this.config);
     this.supervisor = new import_AgentSupervisor.AgentSupervisor(
       config,
       this.registry,
-      import_node_path.default.resolve(__dirname, "main.js"),
-      {
-        onAgentsAssigned: (taskId, agents) => this.reportAgentAssignment(taskId, agents),
-        onAgentCommunication: (taskId, message) => this.reportAgentCommunication(taskId, message)
-      }
+      import_node_path.default.resolve(__dirname, "main.js")
     );
   }
   start() {
     this.log("starting orchestrator");
-    this.connect();
+    this.currentRun = this.persistence.createRun(this.config.projectId);
+    this.persistenceService = new import_service.OrchestratorPersistenceService(this.persistence, this.currentRun);
+    this.scheduler = new import_TaskScheduler.TaskScheduler(this.persistenceService, this.supervisor, this.config);
+    this.engine = new import_OrchestratorEngine.OrchestratorEngine({
+      config: this.config,
+      persistenceService: this.persistenceService,
+      scheduler: this.scheduler,
+      supervisor: this.supervisor,
+      gateway: this.gateway,
+      chatResponder: new import_OperatorChatResponder.OperatorChatResponder(this.config),
+      controlService: new import_OperatorActionService.OperatorActionService(this.persistenceService, this.supervisor),
+      registry: this.registry
+    });
+    this.scheduler.setEvents({
+      onPlanProposed: this.engine.onPlanProposed,
+      onCheckpointCreated: this.engine.onCheckpointCreated,
+      onVerificationRequested: this.engine.onVerificationRequested,
+      onVerificationOutcome: this.engine.onVerificationOutcome
+    });
+    this.supervisor.setCallbacks({
+      onAgentsAssigned: this.engine.handleAgentAssignment.bind(this.engine),
+      onAgentCommunication: this.engine.handleAgentCommunication.bind(this.engine),
+      onAgentResult: this.scheduler.handleAgentResult.bind(this.scheduler)
+    });
+    this.gateway.setMessageHandler(this.engine.handleMessage.bind(this.engine));
+    this.log("created run", this.currentRun.runId);
+    this.gateway.start();
+  }
+  stop() {
+    this.gateway.stop();
+    this.database.close();
   }
   log(...args) {
     console.log(this.prefix, ...args);
-  }
-  summarizeMessage(message) {
-    const actor = message.from?.actor_name ?? "unknown_actor";
-    return `${message.type}@${message.room_id ?? "unknown"} task=${message.task_id ?? "unknown"} from=${actor}`;
-  }
-  stop() {
-    this.stopped = true;
-    if (this.heartbeatTimer) {
-      clearInterval(this.heartbeatTimer);
-      this.heartbeatTimer = void 0;
-    }
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = void 0;
-    }
-    for (const timer of this.channelReconnects.values()) {
-      clearTimeout(timer);
-    }
-    this.channelReconnects.clear();
-    for (const [taskId, socket] of this.channelSockets.entries()) {
-      socket.close();
-      this.clearChannelHeartbeat(taskId);
-    }
-    this.channelSockets.clear();
-    this.socket?.close();
-  }
-  connect() {
-    const socket = new import_ws.default(this.config.socketUrl);
-    this.socket = socket;
-    console.log("Connecting to socket server at", this.config.socketUrl);
-    socket.on("open", () => {
-      this.sendRaw((0, import_protocol.buildAuthMessage)(this.config));
-      this.startHeartbeat();
-      console.log("Orchestrator connection established.");
-    });
-    socket.on("message", (raw) => {
-      void this.handleMessage(raw.toString(), "operator");
-    });
-    socket.on("close", () => {
-      this.clearHeartbeat();
-      if (!this.stopped) {
-        this.reconnectTimer = setTimeout(() => {
-          this.connect();
-        }, this.config.reconnectMs);
-      }
-    });
-    socket.on("error", () => {
-      socket.close();
-    });
-  }
-  watchTaskChannel(taskId) {
-    if (this.stopped || this.channelSockets.has(taskId)) {
-      return;
-    }
-    const agentName = `${this.config.agentName}-${taskId}`;
-    const channelSocket = new import_ws.default(this.config.socketUrl);
-    this.channelSockets.set(taskId, channelSocket);
-    this.log("connecting to task channel", taskId);
-    channelSocket.on("open", () => {
-      this.clearChannelReconnect(taskId);
-      this.sendToSocket(channelSocket, (0, import_protocol.buildRoomAuthMessage)(this.config, taskId, agentName, "orchestrator"));
-      this.startChannelHeartbeat(taskId, channelSocket, agentName);
-    });
-    channelSocket.on("message", (raw) => {
-      void this.handleMessage(raw.toString(), "task");
-    });
-    channelSocket.on("close", () => {
-      this.clearChannelHeartbeat(taskId);
-      this.channelSockets.delete(taskId);
-      if (!this.stopped) {
-        this.scheduleTaskChannelReconnect(taskId);
-      }
-    });
-    channelSocket.on("error", () => {
-      channelSocket.close();
-    });
-  }
-  scheduleTaskChannelReconnect(taskId) {
-    this.clearChannelReconnect(taskId);
-    const timer = setTimeout(() => {
-      this.channelReconnects.delete(taskId);
-      this.watchTaskChannel(taskId);
-    }, this.config.reconnectMs);
-    this.channelReconnects.set(taskId, timer);
-  }
-  clearChannelReconnect(taskId) {
-    const timer = this.channelReconnects.get(taskId);
-    if (!timer) {
-      return;
-    }
-    clearTimeout(timer);
-    this.channelReconnects.delete(taskId);
-  }
-  startChannelHeartbeat(taskId, socket, agentName) {
-    this.clearChannelHeartbeat(taskId);
-    const timer = setInterval(() => {
-      this.sendToSocket(socket, (0, import_protocol.buildRoomHeartbeatMessage)(this.config, taskId, agentName));
-    }, this.config.heartbeatMs);
-    this.channelHeartbeats.set(taskId, timer);
-  }
-  clearChannelHeartbeat(taskId) {
-    const timer = this.channelHeartbeats.get(taskId);
-    if (!timer) {
-      return;
-    }
-    clearInterval(timer);
-    this.channelHeartbeats.delete(taskId);
-  }
-  async handleMessage(raw, source = "operator") {
-    let message;
-    try {
-      message = (0, import_protocol.parseEnvelope)(raw);
-    } catch {
-      return;
-    }
-    const isTaskChannel = source === "task";
-    if (message.project_id !== this.config.projectId) {
-      this.log("ignoring message from other project", this.summarizeMessage(message));
-      return;
-    }
-    if (message.from.actor_name === this.config.agentName) {
-      this.log("ignoring self-generated message", this.summarizeMessage(message));
-      return;
-    }
-    this.log("received message", this.summarizeMessage(message));
-    if (message.type === "status_update" && message.room_id === "operator") {
-      this.handleOperatorStatusMessage(message);
-      return;
-    }
-    if (!isTaskChannel && message.type === "task_created") {
-      const task = (0, import_task_events.resolveTaskFromMessage)(message);
-      if (!task) {
-        this.log("failed to resolve task from task_created event", this.summarizeMessage(message));
-        return;
-      }
-      this.registry.register(task);
-      this.watchTaskChannel(task.taskId);
-      this.sendRaw((0, import_protocol.buildTaskIntakeAccepted)(this.config, task.taskId));
-      this.log("registered task and accepted intake", task.taskId, task.title ?? "untitled");
-      this.supervisor.startInitialAgents(task);
-      this.log("started initial agents for task", task.taskId);
-      return;
-    }
-    if (!isTaskChannel && (0, import_task_events.isCancellationMessage)(message)) {
-      const task = (0, import_task_events.resolveTaskFromMessage)(message);
-      if (!task) {
-        this.log("failed to resolve task from cancellation event", this.summarizeMessage(message));
-        return;
-      }
-      const removedAgents = this.supervisor.cancelTask(task.taskId);
-      this.sendRaw(
-        (0, import_task_events.buildTaskCancellationAcknowledged)(
-          this.config.projectId,
-          this.config.agentName,
-          task.taskId,
-          removedAgents
-        )
-      );
-      return;
-    }
-    if (message.type === "chat" && message.room_id === "operator") {
-      const content = typeof message.payload.content === "string" ? message.payload.content : "";
-      if (!content) {
-        this.log("received empty operator chat message", this.summarizeMessage(message));
-        return;
-      }
-      this.sendRaw(
-        (0, import_messages.buildOrchestratorStatusUpdate)(
-          this.config,
-          "operator",
-          "operator_instruction",
-          "processing_instruction",
-          "Processing operator instruction."
-        )
-      );
-      try {
-        const instructionSections = [
-          this.config.orchestratorRules ? `Orchestrator rules:
-${this.config.orchestratorRules}
-` : void 0,
-          this.config.droidspeakRules ? `Droidspeak reference (droidspeak-v1):
-${this.config.droidspeakRules}
-` : void 0
-        ].filter(Boolean);
-        const promptParts = [
-          ...instructionSections,
-          `You are ${this.config.agentName}, the DroidSwarm orchestrator for project ${this.config.projectName}.`,
-          "Respond to the human operator message succinctly.",
-          "If the message is an instruction, acknowledge it and state the next orchestration action.",
-          "Do not fabricate task state or claim work that has not happened.",
-          "Return a structured result with no spawned agents unless the operator explicitly asks for a new task workflow.",
-          "",
-          `Operator message: ${content}`
-        ];
-        const result = await (0, import_codex_runner.runCodexPrompt)({
-          config: this.config,
-          projectRoot: this.config.projectRoot,
-          prompt: promptParts.join("\n")
-        });
-        this.sendRaw((0, import_messages.buildOperatorChatResponse)(this.config, result.summary));
-      } catch (error) {
-        this.sendRaw(
-          (0, import_messages.buildOperatorChatResponse)(
-            this.config,
-            error instanceof Error ? error.message : "Failed to process operator instruction."
-          )
-        );
-      }
-    }
-  }
-  handleOperatorStatusMessage(message) {
-    const metadata = typeof message.payload.metadata === "object" && message.payload.metadata !== null ? message.payload.metadata : void 0;
-    const taskId = message.task_id ?? (typeof metadata?.task_id === "string" ? metadata.task_id : void 0);
-    if (!taskId) {
-      return;
-    }
-    const status = typeof metadata?.status === "string" ? metadata.status : void 0;
-    if (status === "review") {
-      this.sendTaskChannelUpdate(
-        taskId,
-        "operator",
-        "operator_review",
-        (0, import_operator_notifications.buildReviewAnnouncement)(message.from.actor_name)
-      );
-    }
-  }
-  reportAgentAssignment(taskId, agents) {
-    if (!agents.length) {
-      return;
-    }
-    const details = agents.map((agent) => `${agent.agentName} (${agent.role})`).join(", ");
-    this.sendTaskChannelUpdate(taskId, "execution", "agent_assigned", `Assigned agents: ${details}.`);
-  }
-  reportAgentCommunication(taskId, content) {
-    this.sendTaskChannelUpdate(taskId, "execution", "agent_communication", content);
-  }
-  sendTaskChannelUpdate(taskId, phase, statusCode, content) {
-    this.sendRaw((0, import_messages.buildOrchestratorStatusUpdate)(this.config, taskId, phase, statusCode, content, taskId));
-  }
-  startHeartbeat() {
-    this.clearHeartbeat();
-    this.heartbeatTimer = setInterval(() => {
-      this.sendRaw((0, import_protocol.buildHeartbeatMessage)(this.config));
-    }, this.config.heartbeatMs);
-  }
-  clearHeartbeat() {
-    if (this.heartbeatTimer) {
-      clearInterval(this.heartbeatTimer);
-      this.heartbeatTimer = void 0;
-    }
-  }
-  sendToSocket(socket, message) {
-    if (!socket || socket.readyState !== import_ws.default.OPEN) {
-      return;
-    }
-    socket.send(JSON.stringify(message));
-  }
-  sendRaw(message) {
-    this.sendToSocket(this.socket, message);
   }
 }
 // Annotate the CommonJS export names for ESM import in node:

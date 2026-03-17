@@ -39,6 +39,12 @@ const toPositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
+const parseCommaList = (value) => {
+  if (!value) {
+    return [];
+  }
+  return value.split(",").map((part) => part.trim()).filter(Boolean);
+};
 const loadConfig = () => {
   const environment = process.env.NODE_ENV ?? "development";
   const host = process.env.DROIDSWARM_SOCKET_HOST ?? "127.0.0.1";
@@ -64,7 +70,17 @@ const loadConfig = () => {
     specDir,
     orchestratorRules: specs.orchestrator,
     droidspeakRules: specs.droidspeak,
-    agentRules: specs.agent
+    agentRules: specs.agent,
+    dbPath: process.env.DROIDSWARM_DB_PATH ?? import_node_path.default.resolve(process.cwd(), "data", "droidswarm.db"),
+    schedulerMaxTaskDepth: toPositiveInt(process.env.DROIDSWARM_SCHEDULER_MAX_TASK_DEPTH, 4),
+    schedulerMaxFanOut: toPositiveInt(process.env.DROIDSWARM_SCHEDULER_MAX_FAN_OUT, 3),
+    schedulerRetryIntervalMs: toPositiveInt(process.env.DROIDSWARM_SCHEDULER_RETRY_INTERVAL_MS, 3e4),
+    maxConcurrentCodeAgents: toPositiveInt(process.env.DROIDSWARM_MAX_CONCURRENT_CODE_AGENTS, 6),
+    sideEffectActionsBeforeReview: toPositiveInt(
+      process.env.DROIDSWARM_SIDE_EFFECT_ACTIONS_BEFORE_REVIEW,
+      5
+    ),
+    allowedTools: parseCommaList(process.env.DROIDSWARM_ALLOWED_TOOLS)
   };
 };
 // Annotate the CommonJS export names for ESM import in node:

@@ -44,7 +44,7 @@ const waitForAuthReady = (socket) => new Promise((resolve, reject) => {
   socket.on("message", (raw) => {
     try {
       const message = (0, import_protocol.parseEnvelope)(raw.toString());
-      const statusCode = typeof message.payload.status_code === "string" ? message.payload.status_code : "";
+      const statusCode = message.payload.hasOwnProperty("status_code") && typeof message.payload.status_code === "string" ? message.payload.status_code : "";
       if (message.type === "status_update" && statusCode === "ready") {
         clearTimeout(timeout);
         resolve();
@@ -142,10 +142,16 @@ const runWorker = async () => {
   }
   console.log(`[Worker ${options.agentName}] Codex completed with status ${result.status}`);
   for (const artifact of result.artifacts) {
-    sendMessage(socket, (0, import_messages.buildAgentArtifactMessage)(config, options.task.taskId, options.task.taskId, options.agentName, artifact));
+    sendMessage(
+      socket,
+      (0, import_messages.buildArtifactCreatedMessage)(config, options.task.taskId, options.task.taskId, options.agentName, artifact)
+    );
   }
   for (const request of result.requested_agents) {
-    sendMessage(socket, (0, import_messages.buildAgentRequestHelp)(config, options.task.taskId, options.task.taskId, options.agentName, request));
+    sendMessage(
+      socket,
+      (0, import_messages.buildSpawnRequestedMessage)(config, options.task.taskId, options.task.taskId, options.agentName, request)
+    );
   }
   if (result.clarification_question) {
     sendMessage(

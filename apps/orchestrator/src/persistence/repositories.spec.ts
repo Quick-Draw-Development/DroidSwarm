@@ -8,7 +8,7 @@ import path from 'node:path';
 import { openPersistenceDatabase } from './database';
 import { PersistenceClient } from './repositories';
 import { OrchestratorPersistenceService } from './service';
-import { PersistedTask } from '../types';
+import { PersistedTask, TaskAttemptRecord } from '../types';
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -37,7 +37,7 @@ describe('Orchestrator persistence repositories', () => {
     assert.equal(tasks.length, 1);
     assert.equal(tasks[0].name, 'phase-one');
 
-    const attempt = {
+    const attempt: TaskAttemptRecord = {
       attemptId: 'attempt-1',
       taskId: task.taskId,
       runId: run.runId,
@@ -110,7 +110,7 @@ describe('Orchestrator persistence repositories', () => {
     assert.equal(dependents.length, 1);
     assert.equal(dependencies[0].dependsOnTaskId, parent.taskId);
 
-    const attempt = {
+    const attempt: TaskAttemptRecord = {
       attemptId: 'attempt-2',
       taskId: parent.taskId,
       runId: run.runId,
@@ -124,7 +124,7 @@ describe('Orchestrator persistence repositories', () => {
 
     const updated = db
       .prepare('SELECT status FROM task_attempts WHERE attempt_id = ?')
-      .get(attempt.attemptId);
+      .get(attempt.attemptId) as { status: TaskAttemptRecord['status'] } | undefined;
     assert.equal(updated?.status, 'completed');
 
     db.close();
@@ -150,7 +150,7 @@ describe('Orchestrator persistence repositories', () => {
     };
     persistence.tasks.create(task);
 
-    const attempt = {
+    const attempt: TaskAttemptRecord = {
       attemptId: 'attempt-checkpoint',
       taskId: task.taskId,
       runId: task.runId,
@@ -207,7 +207,9 @@ describe('Orchestrator persistence repositories', () => {
 
     service.recordBudgetEvent('task-limit', 'test limit hit', 1);
 
-    const event = db.prepare('SELECT detail, consumed FROM budget_events WHERE task_id = ?').get('task-limit');
+    const event = db
+      .prepare('SELECT detail, consumed FROM budget_events WHERE task_id = ?')
+      .get('task-limit') as { detail: string; consumed: number } | undefined;
     assert.equal(event?.detail, 'test limit hit');
     assert.equal(event?.consumed, 1);
 
@@ -280,7 +282,7 @@ describe('Orchestrator persistence repositories', () => {
 
     const stored = db
       .prepare('SELECT status, reviewer, details FROM verification_reviews WHERE task_id = ?')
-      .get(task.taskId);
+      .get(task.taskId) as { status: string; reviewer: string; details: string } | undefined;
     assert.equal(stored?.status, 'passed');
     assert.equal(stored?.reviewer, 'Tester');
     assert.equal(stored?.details, 'all good');

@@ -2,36 +2,43 @@ import { randomUUID } from 'node:crypto';
 
 import type { MessageEnvelope, TaskRecord } from './types';
 
-export const resolveTaskFromMessage = (message: MessageEnvelope): TaskRecord | undefined => {
-  const taskId = message.task_id ?? (typeof message.payload.task_id === 'string' ? message.payload.task_id : undefined);
+export type TaskRelatedMessage = MessageEnvelope<'task_created' | 'task_intake_accepted' | 'status_update'>;
+export type StatusUpdateMessage = MessageEnvelope<'status_update'>;
+
+const asString = (value: unknown): string | undefined => typeof value === 'string' ? value : undefined;
+
+export const resolveTaskFromMessage = (message: TaskRelatedMessage): TaskRecord | undefined => {
+  const payload = message.payload as unknown as Record<string, unknown>;
+  const metadata = typeof payload.metadata === 'object' && payload.metadata !== null
+    ? (payload.metadata as Record<string, unknown>)
+    : undefined;
+  const taskId = message.task_id ?? asString(payload.task_id) ?? asString(metadata?.task_id);
+
   if (!taskId) {
     return undefined;
   }
 
   return {
     taskId,
-    title: typeof message.payload.title === 'string' ? message.payload.title : taskId,
-    description: typeof message.payload.description === 'string' ? message.payload.description : '',
-    taskType: typeof message.payload.task_type === 'string' ? message.payload.task_type : 'task',
-    priority: typeof message.payload.priority === 'string' ? message.payload.priority : 'medium',
-    createdByUserId: typeof message.payload.created_by === 'string'
-      ? message.payload.created_by
-      : typeof message.payload.created_by_user_id === 'string'
-        ? message.payload.created_by_user_id
-        : undefined,
+    title: asString(payload.title) ?? taskId,
+    description: asString(payload.description) ?? '',
+    taskType: asString(payload.task_type) ?? 'task',
+    priority: asString(payload.priority) ?? 'medium',
+    createdByUserId: asString(payload.created_by) ?? asString(payload.created_by_user_id),
     createdAt: message.timestamp,
-    branchName: typeof message.payload.branch_name === 'string' ? message.payload.branch_name : undefined,
+    branchName: asString(payload.branch_name),
   };
 };
 
-export const isCancellationMessage = (message: MessageEnvelope): boolean => {
-  if (message.type !== 'status_update' || message.room_id !== 'operator') {
+export const isCancellationMessage = (message: StatusUpdateMessage): boolean => {
+  if (message.room_id !== 'operator') {
     return false;
   }
 
-  const statusCode = typeof message.payload.status_code === 'string' ? message.payload.status_code : '';
-  const metadata = typeof message.payload.metadata === 'object' && message.payload.metadata !== null
-    ? (message.payload.metadata as Record<string, unknown>)
+  const payload = message.payload as unknown as Record<string, unknown>;
+  const statusCode = asString(payload.status_code) ?? '';
+  const metadata = typeof payload.metadata === 'object' && payload.metadata !== null
+    ? (payload.metadata as Record<string, unknown>)
     : undefined;
 
   return statusCode === 'task_cancelled' || metadata?.status === 'cancelled';
@@ -42,7 +49,7 @@ export const buildTaskCancellationAcknowledged = (
   orchestratorName: string,
   taskId: string,
   removedAgents: string[],
-): MessageEnvelope => ({
+): MessageEnvelope<'status_update'> => ({
   message_id: randomUUID(),
   project_id: projectId,
   room_id: 'operator',

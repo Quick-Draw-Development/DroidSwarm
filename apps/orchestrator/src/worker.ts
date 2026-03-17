@@ -11,6 +11,7 @@ import {
 } from './messages';
 import { buildAuthMessage, parseEnvelope } from './protocol';
 import type { CodexAgentResult, MessageEnvelope, OrchestratorConfig, TaskRecord } from './types';
+import { CompressionShape, StatusUpdatePayload } from 'libs/protocol/src';
 
 interface WorkerOptions {
   task: TaskRecord;
@@ -44,7 +45,7 @@ const waitForAuthReady = (socket: WebSocket): Promise<void> =>
     socket.on('message', (raw) => {
       try {
         const message = parseEnvelope(raw.toString());
-        const statusCode = typeof message.payload.status_code === 'string' ? message.payload.status_code : '';
+        const statusCode = message.payload.hasOwnProperty('status_code') && typeof (message.payload as StatusUpdatePayload).status_code === 'string' ? (message.payload as StatusUpdatePayload).status_code : '';
         if (message.type === 'status_update' && statusCode === 'ready') {
           clearTimeout(timeout);
           resolve();
@@ -190,7 +191,7 @@ const runWorker = async (): Promise<void> => {
       'execution',
       result.status === 'completed' ? 'agent_completed' : 'agent_blocked',
       result.summary,
-      result.compression as unknown as string,
+      result.compression as unknown as CompressionShape,
     ),
   );
 

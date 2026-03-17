@@ -55,6 +55,13 @@ describe('runCodexPrompt', () => {
       orchestratorRules: '',
       droidspeakRules: '',
       agentRules: '',
+      dbPath: path.join(process.cwd(), 'state.db'),
+      schedulerMaxTaskDepth: 4,
+      schedulerMaxFanOut: 3,
+      schedulerRetryIntervalMs: 1_000,
+      maxConcurrentCodeAgents: 2,
+      sideEffectActionsBeforeReview: 0,
+      allowedTools: [],
     };
 
     try {

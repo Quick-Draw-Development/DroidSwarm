@@ -218,6 +218,29 @@ export const buildVerificationRequestedMessage = (
   },
 });
 
+export const buildVerificationCompletedMessage = (
+  config: OrchestratorConfig,
+  taskId: string,
+  stage: 'verification' | 'review',
+  status: 'passed' | 'failed' | 'blocked',
+  reviewer: string,
+  details?: string,
+): MessageEnvelope => ({
+  message_id: randomUUID(),
+  project_id: config.projectId,
+  room_id: 'operator',
+  task_id: taskId,
+  type: 'verification_completed',
+  from: buildActor(config.agentName, 'orchestrator'),
+  timestamp: nowIso(),
+  payload: {
+    task_id: taskId,
+    status,
+    reviewer,
+    details: [`stage=${stage}`, details].filter(Boolean).join(' | '),
+  },
+});
+
 export const buildCheckpointCreatedMessage = (
   config: OrchestratorConfig,
   taskId: string,

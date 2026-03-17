@@ -249,4 +249,43 @@ describe('Orchestrator persistence repositories', () => {
     db.close();
     rmSync(tempDir, { recursive: true, force: true });
   });
+
+  it('records verification outcomes for tasks', () => {
+    const tempDir = mkdtempSync(path.join(tmpdir(), 'droidswarm-persistence-'));
+    const dbPath = path.join(tempDir, 'state.db');
+    const db = openPersistenceDatabase(dbPath);
+    const persistence = PersistenceClient.fromDatabase(db);
+    const run = persistence.createRun('droidswarm');
+    const service = new OrchestratorPersistenceService(persistence, run);
+
+    const task: PersistedTask = {
+      taskId: 'task-verification',
+      runId: run.runId,
+      name: 'verify-task',
+      status: 'queued',
+      priority: 'high',
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    };
+    persistence.tasks.create(task);
+
+    service.recordVerificationOutcome({
+      taskId: task.taskId,
+      stage: 'verification',
+      status: 'passed',
+      summary: 'tests passed',
+      reviewer: 'Tester',
+      details: 'all good',
+    });
+
+    const stored = db
+      .prepare('SELECT status, reviewer, details FROM verification_reviews WHERE task_id = ?')
+      .get(task.taskId);
+    assert.equal(stored?.status, 'passed');
+    assert.equal(stored?.reviewer, 'Tester');
+    assert.equal(stored?.details, 'all good');
+
+    db.close();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
 });

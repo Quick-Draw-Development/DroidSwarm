@@ -10,6 +10,7 @@ import type {
   RequestedAgent,
   TaskPolicy,
   TaskRecord,
+  VerificationOutcomeRecord,
 } from '../types';
 
 const buildTaskRecord = (task: PersistedTask): TaskRecord => ({
@@ -51,6 +52,14 @@ export interface TaskSchedulerEvents {
     verificationType: string,
     requestedBy: string,
     detail?: string,
+  ) => void;
+  onVerificationOutcome?: (
+    taskId: string,
+    stage: 'verification' | 'review',
+    status: 'passed' | 'failed' | 'blocked',
+    summary?: string,
+    attemptId?: string,
+    reviewer?: string,
   ) => void;
 }
 
@@ -100,12 +109,12 @@ export class TaskScheduler {
 
     const stage = typeof task.metadata?.stage === 'string' ? task.metadata.stage : undefined;
     if (stage === 'verification') {
-      this.handleVerificationResult(task, attemptId, result);
+      this.handleVerificationResult(task, attemptId, agentName, result);
       return;
     }
 
     if (stage === 'review') {
-      this.handleReviewResult(task, attemptId, result);
+      this.handleReviewResult(task, attemptId, agentName, result);
       return;
     }
 
@@ -401,41 +410,95 @@ export class TaskScheduler {
     this.retryTimers.delete(taskId);
   }
 
-  private handleVerificationResult(task: PersistedTask, attemptId: string, result: CodexAgentResult): void {
+  private handleVerificationResult(
+    task: PersistedTask,
+    attemptId: string,
+    agentName: string,
+    result: CodexAgentResult,
+  ): void {
     const parentId = task.parentTaskId;
     if (!parentId) {
       return;
     }
 
+    const parent = this.persistenceService.getTask(parentId);
+    if (!parent) {
+      return;
+    }
+
+    const normalizedStatus = this.mapResultToOutcomeStatus(result.status);
+    this.persistenceService.recordVerificationOutcome({
+      taskId: parent.taskId,
+      attemptId,
+      stage: 'verification',
+      status: normalizedStatus,
+      summary: result.summary,
+      details: this.buildOutcomeDetails(result),
+      reviewer: agentName,
+    });
+    this.events?.onVerificationOutcome?.(
+      parent.taskId,
+      'verification',
+      normalizedStatus,
+      result.summary,
+      attemptId,
+      agentName,
+    );
+
     if (result.status === 'completed') {
       this.persistenceService.setTaskStatus(task.taskId, 'completed');
-      const parent = this.persistenceService.getTask(parentId);
-      if (!parent) {
-        return;
-      }
       this.persistenceService.setTaskStatus(parent.taskId, 'verified');
       this.startReview(parent, result.summary);
     } else {
       this.persistenceService.setTaskStatus(task.taskId, 'failed');
-      this.persistenceService.setTaskStatus(parentId, 'waiting_on_human');
+      this.persistenceService.setTaskStatus(parent.taskId, 'waiting_on_human');
       this.scheduleRetry(task.taskId);
     }
 
     this.resolveParentIfReady(task);
   }
 
-  private handleReviewResult(task: PersistedTask, attemptId: string, result: CodexAgentResult): void {
+  private handleReviewResult(
+    task: PersistedTask,
+    attemptId: string,
+    agentName: string,
+    result: CodexAgentResult,
+  ): void {
     const parentId = task.parentTaskId;
     if (!parentId) {
       return;
     }
 
+    const parent = this.persistenceService.getTask(parentId);
+    if (!parent) {
+      return;
+    }
+
+    const normalizedStatus = this.mapResultToOutcomeStatus(result.status);
+    this.persistenceService.recordVerificationOutcome({
+      taskId: parent.taskId,
+      attemptId,
+      stage: 'review',
+      status: normalizedStatus,
+      summary: result.summary,
+      details: this.buildOutcomeDetails(result),
+      reviewer: agentName,
+    });
+    this.events?.onVerificationOutcome?.(
+      parent.taskId,
+      'review',
+      normalizedStatus,
+      result.summary,
+      attemptId,
+      agentName,
+    );
+
     if (result.status === 'completed') {
       this.persistenceService.setTaskStatus(task.taskId, 'completed');
-      this.persistenceService.setTaskStatus(parentId, 'verified');
+      this.persistenceService.setTaskStatus(parent.taskId, 'verified');
     } else {
       this.persistenceService.setTaskStatus(task.taskId, 'failed');
-      this.persistenceService.setTaskStatus(parentId, 'waiting_on_human');
+      this.persistenceService.setTaskStatus(parent.taskId, 'waiting_on_human');
       this.scheduleRetry(task.taskId);
     }
 
@@ -447,7 +510,7 @@ export class TaskScheduler {
       return;
     }
 
-    const child = this.createStageTask(parent, 'verification', 'reviewer', 'Verification pass for implementation', summary);
+    const child = this.createStageTask(parent, 'verification', 'tester', 'Verification pass for implementation', summary);
     this.readyQueue.add(child.taskId);
     this.persistenceService.setTaskStatus(parent.taskId, 'in_review');
     this.events?.onVerificationRequested?.(
@@ -712,6 +775,27 @@ export class TaskScheduler {
     }
 
     return true;
+  }
+
+  private mapResultToOutcomeStatus(status: CodexAgentResult['status']): VerificationOutcomeRecord['status'] {
+    if (status === 'completed') {
+      return 'passed';
+    }
+    if (status === 'blocked') {
+      return 'blocked';
+    }
+    return 'failed';
+  }
+
+  private buildOutcomeDetails(result: CodexAgentResult): string | undefined {
+    const fragments: string[] = [];
+    if (result.reason_code) {
+      fragments.push(result.reason_code);
+    }
+    if (result.clarification_question) {
+      fragments.push(`clarification: ${result.clarification_question}`);
+    }
+    return fragments.length > 0 ? fragments.join(' | ') : undefined;
   }
 
   private recordPolicyViolation(task: PersistedTask, detail: string, consumed: number): void {

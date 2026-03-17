@@ -370,6 +370,33 @@ export class TaskDependencyRepository {
   }
 }
 
+export class VerificationOutcomeRepository {
+  constructor(private readonly database: Database.Database) {}
+
+  record(outcome: VerificationOutcomeRecord): void {
+    this.database
+      .prepare(`
+        INSERT INTO verification_reviews (
+          review_id, run_id, task_id, attempt_id, stage, status, summary, details, reviewer, created_at
+        ) VALUES (
+          @reviewId, @runId, @taskId, @attemptId, @stage, @status, @summary, @details, @reviewer, @createdAt
+        )
+      `)
+      .run({
+        reviewId: outcome.reviewId,
+        runId: outcome.runId,
+        taskId: outcome.taskId,
+        attemptId: outcome.attemptId ?? null,
+        stage: outcome.stage,
+        status: outcome.status,
+        summary: outcome.summary ?? null,
+        details: outcome.details ?? null,
+        reviewer: outcome.reviewer ?? null,
+        createdAt: outcome.createdAt,
+      });
+  }
+}
+
 export class PersistenceClient {
   constructor(
     public readonly database: Database.Database,
@@ -382,6 +409,7 @@ export class PersistenceClient {
     public readonly budgets: BudgetEventRepository,
     public readonly actions: OperatorActionRepository,
     public readonly dependencies: TaskDependencyRepository,
+    public readonly verifications: VerificationOutcomeRepository,
   ) {}
 
   static fromDatabase(database: Database.Database): PersistenceClient {
@@ -391,12 +419,13 @@ export class PersistenceClient {
       new TaskRepository(database),
       new TaskAttemptRepository(database),
       new AgentAssignmentRepository(database),
-    new ArtifactRepository(database),
-    new CheckpointRepository(database),
-    new BudgetEventRepository(database),
-    new OperatorActionRepository(database),
-    new TaskDependencyRepository(database),
-  );
+      new ArtifactRepository(database),
+      new CheckpointRepository(database),
+      new BudgetEventRepository(database),
+      new OperatorActionRepository(database),
+      new TaskDependencyRepository(database),
+      new VerificationOutcomeRepository(database),
+    );
   }
 
   createRun(projectId: string): RunRecord {

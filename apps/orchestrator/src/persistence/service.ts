@@ -9,6 +9,7 @@ import type {
   RunRecord,
   TaskAttemptRecord,
   TaskDependencyRecord,
+  VerificationOutcomeRecord,
 } from '../types';
 
 const nowIso = (): string => new Date().toISOString();
@@ -230,6 +231,29 @@ export class OrchestratorPersistenceService {
 
   getArtifactsForTask(taskId: string): ArtifactRecord[] {
     return this.persistence.artifacts.listByTask(taskId);
+  }
+
+  recordVerificationOutcome(params: {
+    taskId: string;
+    attemptId?: string;
+    stage: 'verification' | 'review';
+    status: 'passed' | 'failed' | 'blocked';
+    summary?: string;
+    details?: string;
+    reviewer?: string;
+  }): void {
+    this.persistence.verifications.record({
+      reviewId: randomUUID(),
+      runId: this.run.runId,
+      taskId: params.taskId,
+      attemptId: params.attemptId,
+      stage: params.stage,
+      status: params.status,
+      summary: params.summary,
+      details: params.details,
+      reviewer: params.reviewer,
+      createdAt: nowIso(),
+    });
   }
 
   recordBudgetEvent(taskId: string | undefined, detail: string, consumed: number): void {

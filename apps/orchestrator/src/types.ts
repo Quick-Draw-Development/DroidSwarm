@@ -189,6 +189,19 @@ export interface TaskDependencyRecord {
   createdAt: string;
 }
 
+export interface VerificationOutcomeRecord {
+  reviewId: string;
+  runId: string;
+  taskId: string;
+  attemptId?: string;
+  stage: 'verification' | 'review';
+  status: 'passed' | 'failed' | 'blocked';
+  summary?: string;
+  details?: string;
+  reviewer?: string;
+  createdAt: string;
+}
+
 export interface OperatorControlActionRecord {
   actionId: string;
   runId: string;

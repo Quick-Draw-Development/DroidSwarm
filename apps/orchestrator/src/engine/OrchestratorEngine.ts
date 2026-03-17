@@ -6,6 +6,7 @@ import {
   buildOrchestratorStatusUpdate,
   buildPlanProposedMessage,
   buildTaskAssignedMessage,
+  buildVerificationCompletedMessage,
   buildVerificationRequestedMessage,
 } from '../messages';
 import { buildTaskIntakeAccepted } from '../protocol';
@@ -394,6 +395,40 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
       'verification_requested',
       'Verification requested for task.',
       { verification_type: verificationType, detail },
+    );
+  };
+
+  handleVerificationOutcome = (
+    taskId: string,
+    stage: 'verification' | 'review',
+    status: 'passed' | 'failed' | 'blocked',
+    summary?: string,
+    attemptId?: string,
+    reviewer?: string,
+  ): void => {
+    this.options.gateway.send(
+      buildVerificationCompletedMessage(
+        this.options.config,
+        taskId,
+        stage,
+        status,
+        reviewer ?? this.options.config.agentName,
+        summary,
+      ),
+    );
+
+    this.sendStatusUpdate(
+      'operator',
+      taskId,
+      'operator_review',
+      stage === 'verification' ? 'verification_completed' : 'review_completed',
+      `${stage} ${status}`,
+      {
+        stage,
+        status,
+        attempt_id: attemptId,
+        reviewer,
+      },
     );
   };
 }

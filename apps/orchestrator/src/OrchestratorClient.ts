@@ -58,6 +58,7 @@ export class DroidSwarmOrchestratorClient {
       onPlanProposed: this.engine.handlePlanProposed,
       onCheckpointCreated: this.engine.handleCheckpointCreated,
       onVerificationRequested: this.engine.handleVerificationRequested,
+      onVerificationOutcome: this.engine.handleVerificationOutcome,
     });
 
     this.supervisor.setCallbacks({

@@ -724,20 +724,53 @@ export const getTaskDetails = (taskId: string): TaskDetails | null => {
     ).map(mapMessageRecord);
 
     const activeAgents = task.status === 'cancelled' ? [] : buildActiveAgents(database, taskId);
+    const dependencyRows = database
+      .prepare('SELECT depends_on_task_id FROM task_dependencies WHERE task_id = ? ORDER BY created_at DESC')
+      .all(taskId) as Array<{ depends_on_task_id: string }>;
+    const planEvents = database
+      .prepare(`
+        SELECT detail
+        FROM execution_events
+        WHERE task_id = ? AND event_type = ?
+        ORDER BY created_at DESC
+        LIMIT 3
+      `)
+      .all(taskId, 'plan_proposed') as Array<{ detail: string }>;
+    const budgetEvents = database
+      .prepare(`
+        SELECT detail, consumed
+        FROM budget_events
+        WHERE task_id = ?
+        ORDER BY created_at DESC
+        LIMIT 2
+      `)
+      .all(taskId) as Array<{ detail: string; consumed: number }>;
+    const operatorActions = database
+      .prepare(`
+        SELECT action_type, detail
+        FROM operator_actions
+        WHERE task_id = ?
+        ORDER BY created_at DESC
+        LIMIT 2
+      `)
+      .all(taskId) as Array<{ action_type: string; detail: string }>;
 
     return {
       task,
       messages,
       activeAgents,
-      handoffs: ['Planner-Alpha -> Architect-Beta: planning summary attached'],
-      guardrails: [
-        task.status === 'cancelled'
-          ? 'Task cancelled. Orchestrator should stop and remove assigned agents.'
-          : task.needsClarification
-            ? 'Waiting on creator clarification before branch creation'
-            : `Current stage: ${task.stage ?? 'planning'}`,
-        `Priority guardrails: ${task.priority}`,
-      ],
+      handoffs: buildTaskHandoffs(
+        dependencyRows.map((row) => row.depends_on_task_id),
+        planEvents.map((row) => row.detail),
+      ),
+      guardrails: buildTaskGuardrails(
+        task.needsClarification,
+        budgetEvents,
+        operatorActions.map((action) => ({
+          actionType: action.action_type,
+          detail: action.detail,
+        })),
+      ),
       limits: [
         `Agents assigned: ${task.agentCount}`,
         `Latest update: ${new Date(task.updatedAt).toLocaleString()}`,
@@ -746,6 +779,34 @@ export const getTaskDetails = (taskId: string): TaskDetails | null => {
   } catch {
     return null;
   }
+};
+
+export const buildTaskHandoffs = (dependencies: string[], planDetails: string[]): string[] => {
+  const handoffs = [
+    ...dependencies.map((id) => `Depends on ${id}`),
+    ...planDetails,
+  ];
+  if (handoffs.length === 0) {
+    handoffs.push('No handoffs recorded for this task yet.');
+  }
+  return handoffs;
+};
+
+export const buildTaskGuardrails = (
+  needsClarification: boolean,
+  budgets: Array<{ detail: string; consumed: number }>,
+  operatorActions: Array<{ actionType: string; detail: string }>,
+): string[] => {
+  const guardrails: string[] = [];
+  if (needsClarification) {
+    guardrails.push('Clarification requested by the creator.');
+  }
+  guardrails.push(...budgets.map((event) => `Budget: ${event.detail} (consumed ${event.consumed})`));
+  guardrails.push(...operatorActions.map((action) => `Operator ${action.actionType}: ${action.detail}`));
+  if (guardrails.length === 0) {
+    guardrails.push('No guardrail events recorded yet.');
+  }
+  return guardrails;
 };
 
 export type TaskDispatchStatus = 'accepted' | 'queued' | 'offline';

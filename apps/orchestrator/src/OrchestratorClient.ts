@@ -14,6 +14,7 @@ import { OrchestratorPersistenceService } from './persistence/service';
 import { RunLifecycleService } from './run-lifecycle';
 import type { Database } from 'better-sqlite3';
 import type { OrchestratorConfig, RunRecord } from './types';
+import { finalizeRunOnShutdown } from './run-shutdown';
 
 export class DroidSwarmOrchestratorClient {
   private readonly registry = new WorkerRegistry();
@@ -80,7 +81,6 @@ export class DroidSwarmOrchestratorClient {
     this.supervisor.setCallbacks({
       onAgentsAssigned: this.engine.handleAgentAssignment.bind(this.engine),
       onAgentCommunication: this.engine.handleAgentCommunication.bind(this.engine),
-      onAgentResult: this.engine.handleAgentResultFromSupervisor,
     });
 
     this.gateway.setMessageHandler(this.engine.handleMessage.bind(this.engine));
@@ -108,7 +108,7 @@ export class DroidSwarmOrchestratorClient {
 
   stop(): void {
     if (this.currentRun) {
-      this.runLifecycle.completeRunById(this.currentRun.runId);
+      finalizeRunOnShutdown(this.persistence, this.runLifecycle, this.currentRun.runId);
     }
     this.gateway.stop();
     this.database.close();

@@ -6,8 +6,8 @@ import type {
 } from './types';
 
 const nowIso = (): string => new Date().toISOString();
-const terminalRunStatuses: RunRecord['status'][] = ['completed', 'failed', 'cancelled'];
-const terminalTaskStatuses: PersistedTask['status'][] = ['completed', 'verified', 'failed', 'cancelled'];
+export const terminalRunStatuses: RunRecord['status'][] = ['completed', 'failed', 'cancelled'];
+export const terminalTaskStatuses: PersistedTask['status'][] = ['completed', 'verified', 'failed', 'cancelled'];
 const runningAttemptStatus: TaskAttemptRecord['status'] = 'running';
 
 export interface RunRecoverySummary {

@@ -25,6 +25,7 @@ export const buildAgentStatusUpdate = (
   statusCode: string,
   content: string,
   compression?: MessageEnvelope['compression'],
+  payloadExtras?: Record<string, unknown>,
 ): MessageEnvelope => ({
   message_id: randomUUID(),
   project_id: config.projectId,
@@ -37,6 +38,7 @@ export const buildAgentStatusUpdate = (
     phase,
     status_code: statusCode,
     content,
+    ...payloadExtras,
   },
   compression,
 });

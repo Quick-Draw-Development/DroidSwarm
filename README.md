@@ -70,8 +70,9 @@ This is a lifecycle scaffold for the upcoming implementation. `setup` initialize
 
 ## Workspace Layout
 
-- `apps/dashboard`: Next.js dashboard application scaffold
-- `apps/socket-server`: Node.js socket server scaffold
+- `apps/orchestrator`: durable control-plane service that ingests operator/channel events, persists runs/tasks/checkpoints, schedules Codex workers, and feeds the dashboard timeline.
+- `apps/dashboard`: Next.js dashboard application scaffold that now reads from the orchestrator datastore for runs, tasks, artifacts, checkpoints, budgets, and verifications.
+- `apps/socket-server`: Node.js socket server scaffold that routes authenticated operator/agent traffic.
 - `packages/bootstrap`: install/setup scripts, CLI assets, and system specs
 
 ## Architecture docs

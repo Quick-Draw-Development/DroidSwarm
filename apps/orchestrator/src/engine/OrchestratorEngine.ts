@@ -45,7 +45,7 @@ export interface OrchestratorEngineOptions {
 
 export class OrchestratorEngine implements TaskSchedulerEvents {
   private readonly prefix = '[OrchestratorEngine]';
-  private readonly agentAttemptMap = new Map<string, string>();
+  private readonly agentAttemptMap = new Map<string, { attemptId: string; role: string }>();
 
   constructor(
     private readonly options: OrchestratorEngineOptions,
@@ -61,6 +61,11 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
     }
 
     const isTaskChannel = source === 'task';
+
+    if (isTaskChannel && message.type === 'status_update') {
+      this.handleAgentStatusUpdate(message as MessageEnvelope<'status_update'>);
+      return;
+    }
 
     if (isTaskChannel && message.type === 'artifact_created') {
       this.persistArtifact(message as MessageEnvelope<'artifact_created'>);
@@ -117,7 +122,10 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
     }
 
     for (const agent of agents) {
-      this.agentAttemptMap.set(agent.agentName, agent.attemptId);
+      this.agentAttemptMap.set(agent.agentName, {
+        attemptId: agent.attemptId,
+        role: agent.role,
+      });
     }
 
     const details = agents.map((agent) => `${agent.agentName} (${agent.role})`).join(', ');
@@ -146,16 +154,40 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
     );
   }
 
-  handleAgentResultFromSupervisor = (
-    taskId: string,
-    attemptId: string,
-    agentName: string,
-    role: string,
-    result: CodexAgentResult,
-  ): void => {
+  handleAgentCommunication(taskId: string, content: string): void {
+    this.sendStatusUpdate(taskId, taskId, 'execution', 'agent_communication', content);
+  }
+
+  private handleAgentStatusUpdate(message: MessageEnvelope<'status_update'>): void {
+    const taskId = message.task_id;
+    if (!taskId) {
+      console.warn('[OrchestratorEngine] received status update without task_id');
+      return;
+    }
+
+    const payload = message.payload as unknown as Record<string, unknown>;
+    const agentName = message.from.actor_name;
+    const attemptMeta = this.agentAttemptMap.get(agentName);
+    const attemptId = attemptMeta?.attemptId ?? '';
+    const role = attemptMeta?.role ?? 'agent';
+
+    const statusCode = this.asString(payload.status_code) ?? 'agent_unknown';
+    const summary = this.asString(payload.content) ?? '';
+    const payloadResult = typeof payload.result === 'object' && payload.result !== null
+      ? (payload.result as CodexAgentResult)
+      : undefined;
+    const result: CodexAgentResult = payloadResult ?? {
+      status: this.mapStatusFromCode(statusCode),
+      summary,
+      requested_agents: [],
+      artifacts: [],
+      doc_updates: [],
+      branch_actions: [],
+    };
+
     this.recordExecutionEvent(
       'agent_result',
-      `Agent ${agentName} reported ${result.status}`,
+      `Agent ${agentName} reported ${statusCode}`,
       {
         taskId,
         attemptId,
@@ -165,11 +197,8 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
         summary: result.summary,
       },
     );
-    this.options.scheduler.handleAgentResult(taskId, attemptId, agentName, role, result);
-  };
 
-  handleAgentCommunication(taskId: string, content: string): void {
-    this.sendStatusUpdate(taskId, taskId, 'execution', 'agent_communication', content);
+    this.options.scheduler.handleAgentResult(taskId, attemptId, agentName, role, result);
   }
 
   private async handleTaskCreated(message: MessageEnvelope<'task_created'>): Promise<void> {
@@ -309,8 +338,8 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
   }
 
   private persistArtifact(message: MessageEnvelope<'artifact_created'>): void {
-    const attemptId = this.agentAttemptMap.get(message.from.actor_name);
-    if (!attemptId) {
+    const attemptMeta = this.agentAttemptMap.get(message.from.actor_name);
+    if (!attemptMeta) {
       console.warn('[OrchestratorEngine] missing attempt for artifact', message.payload.artifact_id);
       return;
     }
@@ -332,7 +361,7 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
 
     this.options.persistenceService.recordArtifact({
       artifactId: message.payload.artifact_id,
-      attemptId,
+      attemptId: attemptMeta.attemptId,
       taskId: message.payload.task_id,
       kind: message.payload.kind,
       summary: message.payload.summary,
@@ -343,7 +372,7 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
 
     this.options.scheduler.handleArtifactRecorded(
       message.payload.task_id,
-      attemptId,
+      attemptMeta.attemptId,
       message.payload.kind,
       message.payload.summary,
     );
@@ -368,6 +397,23 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
         extraPayload,
       ),
     );
+  }
+
+  private asString(value: unknown): string | undefined {
+    return typeof value === 'string' ? value : undefined;
+  }
+
+  private mapStatusFromCode(code: string): CodexAgentResult['status'] {
+    if (code === 'agent_completed') {
+      return 'completed';
+    }
+    if (code === 'agent_failed') {
+      return 'blocked';
+    }
+    if (code === 'agent_blocked') {
+      return 'blocked';
+    }
+    return 'blocked';
   }
 
   private recordExecutionEvent(

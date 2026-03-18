@@ -3,32 +3,15 @@ import { ChildProcess, fork } from 'node:child_process';
 
 import { WorkerRegistry } from './worker-registry';
 import type {
-  CodexAgentResult,
   OrchestratorConfig,
   RequestedAgent,
   SpawnedAgent,
   TaskRecord,
 } from './types';
-import { formatAgentRequestContent } from './operator-notifications';
-
-interface AgentResultMessage {
-  type: 'agent_result';
-  taskId: string;
-  agentName: string;
-  role: string;
-  result: CodexAgentResult;
-}
 
 interface AgentSupervisorCallbacks {
   onAgentsAssigned?: (taskId: string, agents: SpawnedAgent[]) => void;
   onAgentCommunication?: (taskId: string, message: string) => void;
-  onAgentResult?: (
-    taskId: string,
-    attemptId: string,
-    agentName: string,
-    role: string,
-    result: CodexAgentResult,
-  ) => void;
 }
 
 interface ActiveAgent {
@@ -132,10 +115,6 @@ export class AgentSupervisor {
     const currentNames = this.registry.get(task.taskId)?.activeAgents ?? [];
     this.registry.assignAgents(task.taskId, [...currentNames, agentName]);
 
-    child.on('message', (message) => {
-      this.handleAgentMessage(task, message as AgentResultMessage);
-    });
-
     child.on('exit', () => {
       this.registry.removeAgent(task.taskId, agentName);
       this.agents.delete(agentName);
@@ -184,35 +163,6 @@ export class AgentSupervisor {
     }
 
     return count;
-  }
-
-  private handleAgentMessage(task: TaskRecord, message: AgentResultMessage): void {
-    if (message.type !== 'agent_result' || message.taskId !== task.taskId) {
-      return;
-    }
-
-    const taskState = this.registry.get(task.taskId);
-    if (!taskState) {
-      return;
-    }
-
-    const agent = this.agents.get(message.agentName);
-    const attemptId = agent?.attemptId ?? '';
-
-    if (message.result.requested_agents.length > 0) {
-      this.callbacks.onAgentCommunication?.(
-        task.taskId,
-        formatAgentRequestContent(message.agentName, message.result.requested_agents),
-      );
-    }
-
-    this.callbacks.onAgentResult?.(
-      task.taskId,
-      attemptId,
-      message.agentName,
-      message.role,
-      message.result,
-    );
   }
 
   private canSpawn(task: TaskRecord): boolean {

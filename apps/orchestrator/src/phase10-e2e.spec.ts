@@ -131,6 +131,8 @@ type Environment = {
   supervisor: StubSupervisor;
   gateway: StubGateway;
   database: ReturnType<typeof openPersistenceDatabase>;
+  persistence: ReturnType<typeof PersistenceClient.fromDatabase>;
+  runLifecycle: RunLifecycleService;
   run: RunRecord;
   dbPath: string;
   workspace: string;
@@ -149,6 +151,8 @@ const createEnvironment = (options?: { dbPath?: string; run?: RunRecord }): Envi
   const database = openPersistenceDatabase(dbPath);
   const persistence = PersistenceClient.fromDatabase(database);
   const run = options?.run ?? persistence.createRun(DEFAULT_CONFIG.projectId);
+  const runLifecycle = new RunLifecycleService(persistence);
+  runLifecycle.startRun(run);
   const service = new OrchestratorPersistenceService(persistence, run);
   const supervisor = new StubSupervisor();
   const gateway = new StubGateway();
@@ -187,6 +191,8 @@ const createEnvironment = (options?: { dbPath?: string; run?: RunRecord }): Envi
     supervisor,
     gateway,
     database,
+    persistence,
+    runLifecycle,
     run,
     dbPath,
     workspace,
@@ -358,6 +364,79 @@ describe('Phase 10 orchestrator flows', () => {
     env2.scheduler.handleNewTask(childTaskId);
     assert.equal(env2.supervisor.assigned.length, 1);
     assert.equal(env2.service.getTask(childTaskId)?.status, 'running');
+    env2.destroy();
+  });
+
+  it('recovers running work after restart and finalizes the run', async () => {
+    const env1 = createEnvironment();
+    const message = buildTaskCreatedMessage('phase10-finalize');
+
+    await env1.engine.handleMessage(message, 'operator');
+    const rootSpawn = env1.supervisor.assigned[0];
+
+    env1.scheduler.handleAgentResult(
+      rootSpawn.taskId,
+      rootSpawn.attemptId,
+      rootSpawn.agentName,
+      rootSpawn.role,
+      planResult,
+    );
+
+    const childSpawn = env1.supervisor.assigned[1];
+    env1.service.recordCheckpoint(childSpawn.taskId, childSpawn.attemptId, {
+      summary: 'checkpoint-before-restart',
+    });
+
+    env1.close();
+    const env2 = createEnvironment({ dbPath: env1.dbPath, run: env1.run });
+    const summaries = env2.runLifecycle.recoverInterruptedRuns();
+    assert.equal(summaries.length, 1);
+    assert.deepEqual(summaries[0].resumedTasks, [childSpawn.taskId]);
+
+    summaries[0].resumedTasks.forEach((taskId) => {
+      env2.scheduler.handleNewTask(taskId);
+    });
+
+    const resumedSpawn = env2.supervisor.assigned[0];
+    assert.ok(resumedSpawn);
+
+    env2.scheduler.handleAgentResult(
+      resumedSpawn.taskId,
+      resumedSpawn.attemptId,
+      resumedSpawn.agentName,
+      resumedSpawn.role,
+      simpleResult('completed', 'child done after restart'),
+    );
+
+    const verificationSpawn = env2.supervisor.assigned[1];
+    assert.ok(verificationSpawn);
+    env2.scheduler.handleAgentResult(
+      verificationSpawn.taskId,
+      verificationSpawn.attemptId,
+      verificationSpawn.agentName,
+      verificationSpawn.role,
+      simpleResult('completed', 'verification passed after restart'),
+    );
+
+    const reviewSpawn = env2.supervisor.assigned[2];
+    assert.ok(reviewSpawn);
+    env2.scheduler.handleAgentResult(
+      reviewSpawn.taskId,
+      reviewSpawn.attemptId,
+      reviewSpawn.agentName,
+      reviewSpawn.role,
+      simpleResult('completed', 'review passed after restart'),
+    );
+
+    const finalRoot = env2.service.getTask(rootSpawn.taskId);
+    assert.equal(finalRoot?.status, 'verified');
+    const runBefore = env2.persistence.runs.get(env2.run.runId);
+    assert.equal(runBefore?.status, 'running');
+
+    env2.runLifecycle.completeRun(env2.run, 'recovery complete');
+    const runAfter = env2.persistence.runs.get(env2.run.runId);
+    assert.equal(runAfter?.status, 'completed');
+
     env2.destroy();
   });
 });

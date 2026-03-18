@@ -43,7 +43,17 @@ export class DroidSwarmOrchestratorClient {
   start(): void {
     this.log('starting orchestrator');
     this.runLifecycle.recoverInterruptedRuns();
-    this.currentRun = this.persistence.createRun(this.config.projectId);
+    const activeRuns = this.persistence.runs.listActiveRuns();
+    if (activeRuns.length === 0) {
+      this.currentRun = this.persistence.createRun(this.config.projectId);
+      this.log('created run', this.currentRun.runId);
+    } else {
+      if (activeRuns.length > 1) {
+        this.log('multiple active runs detected', activeRuns.map((run) => run.runId));
+      }
+      this.currentRun = activeRuns[0];
+      this.log('resuming run', this.currentRun.runId);
+    }
     this.runLifecycle.startRun(this.currentRun);
     this.persistenceService = new OrchestratorPersistenceService(this.persistence, this.currentRun);
     this.scheduler = new TaskScheduler(this.persistenceService, this.supervisor, this.config);
@@ -75,7 +85,24 @@ export class DroidSwarmOrchestratorClient {
 
     this.gateway.setMessageHandler(this.engine.handleMessage.bind(this.engine));
 
-    this.log('created run', this.currentRun.runId);
+    const recoveredSummaries = this.runLifecycle.getRecoverySummaries();
+    for (const summary of recoveredSummaries) {
+      for (const taskId of summary.resumedTasks) {
+        this.scheduler.handleNewTask(taskId);
+      }
+    }
+    if (recoveredSummaries.length > 0) {
+      this.log(
+        'recovery summary',
+        recoveredSummaries.map((summary) => ({
+          run: summary.runId,
+          resumed: summary.resumedTasks.length,
+          failed: summary.failedTasks.length,
+        })),
+      );
+    }
+
+    this.log('run ready', this.currentRun.runId);
     this.gateway.start();
   }
 

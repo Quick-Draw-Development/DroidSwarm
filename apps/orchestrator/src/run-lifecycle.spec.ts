@@ -57,22 +57,65 @@ describe('RunLifecycleService', () => {
     });
     const attempt = service.createAttempt('attempt-1', task, 'Agent', 'worker');
 
-    lifecycle.recoverInterruptedRuns();
+    const summaries = lifecycle.recoverInterruptedRuns();
 
     const runRow = persistence.runs.get(run.runId);
     assert.equal(runRow?.status, 'failed');
 
     const updatedTask = persistence.tasks.get(task.taskId);
     assert.equal(updatedTask?.status, 'failed');
-    assert.equal(updatedTask?.metadata?.recovery_reason, 'unexpected orchestrator restart');
+    assert.equal(
+      updatedTask?.metadata?.recovery_reason,
+      `Task ${task.taskId} in status running cannot resume after restart`,
+    );
 
     const attemptRow = service.getAttempt(attempt.attemptId);
     assert.equal(attemptRow?.status, 'failed');
+
+    assert.equal(summaries.length, 1);
+    assert.equal(summaries[0].resumedTasks.length, 0);
+    assert.equal(summaries[0].failedTasks[0]?.taskId, task.taskId);
 
     const events = database
       .prepare('SELECT event_type FROM execution_events WHERE run_id = ?')
       .all(run.runId) as Array<{ event_type: string }>;
     assert.ok(events.some((row) => row.event_type === 'run_recovered'));
+
+    database.close();
+    rmSync(workspace, { recursive: true, force: true });
+  });
+
+  it('requeues interrupted tasks with checkpoints', () => {
+    const workspace = mkdtempSync(path.join(tmpdir(), 'droidswarm-runlifecycles-'));
+    const dbPath = path.join(workspace, 'state.db');
+    const database = openPersistenceDatabase(dbPath);
+    const persistence = PersistenceClient.fromDatabase(database);
+    const lifecycle = new RunLifecycleService(persistence);
+    const run = persistence.createRun('droidswarm');
+    const service = new OrchestratorPersistenceService(persistence, run);
+
+    const task = service.createTask({
+      taskId: 'task-resume',
+      name: 'task',
+      priority: 'medium',
+      status: 'running',
+    });
+    const attempt = service.createAttempt('attempt-2', task, 'Agent', 'worker');
+    service.recordCheckpoint(task.taskId, attempt.attemptId, {
+      summary: 'checkpoint',
+    });
+
+    const summaries = lifecycle.recoverInterruptedRuns();
+
+    const updatedTask = persistence.tasks.get(task.taskId);
+    assert.equal(updatedTask?.status, 'queued');
+    assert.equal(updatedTask?.metadata?.recovery_reason, 'requeued_after_restart');
+
+    const runRow = persistence.runs.get(run.runId);
+    assert.equal(runRow?.status, 'running');
+    assert.equal(summaries.length, 1);
+    assert.deepEqual(summaries[0].resumedTasks, [task.taskId]);
+    assert.equal(summaries[0].failedTasks.length, 0);
 
     database.close();
     rmSync(workspace, { recursive: true, force: true });

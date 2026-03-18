@@ -161,7 +161,7 @@ export class RunRepository {
 
   listActiveRuns(): RunRecord[] {
     return this.database
-      .prepare('SELECT * FROM runs WHERE status NOT IN (?, ?, ?)')
+      .prepare('SELECT * FROM runs WHERE status NOT IN (?, ?, ?) ORDER BY updated_at DESC')
       .all('completed', 'failed', 'cancelled')
       .map((row: RunRow) => ({
         runId: row.run_id,

@@ -29,6 +29,12 @@ This project now relies on `apps/orchestrator` as the durable control plane: it 
    - Emits execution events (`plan_proposed`, `task_assigned`, `verification_requested`, `verification_completed`, etc.) via the engine gateway and the `task_events` table to keep the dashboard timeline accurate.
 5. Operator intents (cancel, review, reprioritize) are parsed, stored via `OperatorActionService`, and sent through explicit control actions rather than direct chat replies.
 
+## Run recovery
+
+The orchestrator starts by calling `RunLifecycleService.recoverInterruptedRuns()` before creating or resuming a run. Each non-terminal run on disk is reconciled: running attempts are marked failed, tasks lacking checkpoints are failed with a recorded reason, and tasks that can resume (queued/planning/waiting states or running tasks with checkpoints) are requeued and promoted back into the scheduler’s ready queues. Recovery emits `run_recovered` events describing how many tasks were resumed versus failed so the dashboard timeline stays honest.
+
+Recovered runs only stay active when work actually resumes; otherwise the run is failed and a clear explanation persists. Every terminal transition (`run_completed`, `run_failed`, `run_cancelled`) goes through `RunLifecycleService`, so runs cannot remain implicitly running forever and the persisted events can be replayed to explain what happened after restart. Phase 10’s end-to-end tests (`apps/orchestrator/src/phase10-e2e.spec.ts`) now include restart/resume/finalization scenarios against the same SQLite database to validate these guarantees.
+
 ## Persistence Schema
 
 The following tables are now the orchestrator’s ground truth (indexes on run/task/attempt columns keep lookups fast, and each schema migration is recorded in `schema_versions` for deterministic upgrades):

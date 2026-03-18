@@ -78,6 +78,7 @@ This is a lifecycle scaffold for the upcoming implementation. `setup` initialize
 
 - `docs/orchestrator-architecture.md` describes the final control-plane flow (durable runs/tasks, scheduler decisions, supervisor lifecycle, and the dashboard insights that read them).
 - `docs/orchestrator-protocol-migration.md` details the execution-centered event schema (`plan_proposed`, `verification_requested`, `artifact_created`, etc.) and how clients should emit/persist those events when the orchestrator restarts.
+- `docs/orchestrator-runlife-guide.md` explains the explicit run lifecycle, dependency semantics, durable event flow, policy enforcement, operator command model, and restart/recovery guarantees that now drive the control plane.
 
 ## Testing
 

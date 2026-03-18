@@ -227,7 +227,7 @@ export interface OperatorControlActionRecord {
   actionId: string;
   runId: string;
   taskId?: string;
-  actionType: 'cancel_task' | 'request_review' | 'reprioritize';
+  actionType: 'cancel_task' | 'request_review' | 'reprioritize' | 'invalid_command';
   detail: string;
   metadataJson?: string;
   createdAt: string;

@@ -246,6 +246,17 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
       'Processing operator instruction.',
     );
 
+    if (intent.category === 'command_error') {
+      this.options.controlService.recordRejectedCommand(
+        intent.referencedTaskId,
+        content,
+        message.from.actor_name,
+        intent.message,
+      );
+      this.options.gateway.send(buildOperatorChatResponse(this.options.config, intent.message));
+      return;
+    }
+
     if (intent.category === 'note') {
       try {
         const response = await this.options.chatResponder.respond(content);

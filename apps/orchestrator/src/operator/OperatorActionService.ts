@@ -63,4 +63,16 @@ export class OperatorActionService {
       detail,
     };
   }
+
+  recordRejectedCommand(taskId: string | undefined, operatorName: string, command: string, reason: string): void {
+    this.persistenceService.recordOperatorAction({
+      taskId,
+      actionType: 'invalid_command',
+      detail: reason,
+      metadata: {
+        operator: operatorName,
+        command,
+      },
+    });
+  }
 }

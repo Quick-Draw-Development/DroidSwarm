@@ -18,7 +18,7 @@
 3. **Durable events**: worker messages are handled directly via IPC (`AgentSupervisor`) and scheduler reactions mutate state before any event persistence, leaving replay or restart impossible.
 4. **Registry responsibilities**: the runtime `WorkerRegistry` now only tracks live agent handles and assignments; the `tasks` table is the single source of truth for task metadata, status, and lifecycle.
 5. **Policy resolution**: `TaskScheduler` now merges per-task metadata with the global `policyDefaults` configuration, enforces the combined limits, and persists each attempt’s `effective_policy` so enforcement decisions survive restarts.
-6. **Side-effects**: rules exist for gating review upon hitting side-effect counts, but there is no explicit operator feedback, review insertion event, or checkpoint-based gating for cross-run actions.
+6. **Side-effects**: side-effect artifacts now increment per-attempt counters, and reaching `sideEffectActionsBeforeReview` records a budget event, blocks the attempt, triggers a review stage, and emits a review request so operators can see why execution paused.
 7. **Operator commands**: natural-language parsing easily interprets non-destructive chatter as destructive commands. There is no command syntax, confirmation, or auditable action log tied to structured operator input.
 8. **Dashboard realism**: while the dashboard already queries persisted tables, sections such as “task events” and “solver messages” mirror synthetic channel logs; they must be tied to the new execution event stream.
 9. **Recovery**: orchestrator restart does not inspect runs, attempts, or checkpoints, leading to orphaned tasks and untracked budgets, which conflicts with phase goals.

@@ -167,6 +167,46 @@ export class TaskScheduler {
     this.schedule();
   }
 
+  handleArtifactRecorded(taskId: string, attemptId: string, kind: string, summary?: string): void {
+    if (this.config.sideEffectActionsBeforeReview <= 0 || kind !== 'side_effect') {
+      return;
+    }
+
+    const task = this.persistenceService.getTask(taskId);
+    if (!task || this.isSideEffectReviewTriggered(task)) {
+      return;
+    }
+
+    const count = this.persistenceService.incrementAttemptSideEffectCount(attemptId);
+    if (count < this.config.sideEffectActionsBeforeReview) {
+      return;
+    }
+
+    const detail = `Side-effect limit (${this.config.sideEffectActionsBeforeReview}) reached after ${count} actions`;
+    const attempt = this.persistenceService.getAttempt(attemptId);
+    this.persistenceService.updateAttemptStatus(attemptId, 'blocked', {
+      ...(attempt?.metadata ?? {}),
+      reason_code: 'side_effect_limit',
+      summary: detail,
+    });
+    this.recordBudgetLimit(taskId, detail, count);
+    this.persistenceService.updateTaskMetadata(task.taskId, {
+      ...(task.metadata ?? {}),
+      side_effect_review: {
+        triggered_at: new Date().toISOString(),
+        count,
+        detail,
+      },
+    });
+    this.events?.onVerificationRequested?.(
+      task.taskId,
+      'review',
+      this.config.agentName,
+      detail,
+    );
+    this.startReview(task, summary ?? 'Side-effect review triggered');
+  }
+
   private schedule(): void {
     const pending = Array.from(this.readyQueue);
     if (pending.length === 0) {
@@ -598,6 +638,10 @@ export class TaskScheduler {
       }
     }
     return false;
+  }
+
+  private isSideEffectReviewTriggered(task: PersistedTask): boolean {
+    return Boolean(task.metadata?.side_effect_review);
   }
 
 

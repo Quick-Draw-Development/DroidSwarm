@@ -416,4 +416,107 @@ describe('TaskScheduler', () => {
     database.close();
     rmSync(workspace, { recursive: true, force: true });
   });
+
+  it('triggers review gating when side-effect limits are reached', () => {
+    const workspace = mkdtempSync(path.join(tmpdir(), 'droidswarm-scheduler-side-effects-'));
+    const dbPath = path.join(workspace, 'state.db');
+    const database = openPersistenceDatabase(dbPath);
+    const persistence = PersistenceClient.fromDatabase(database);
+    const service = new OrchestratorPersistenceService(persistence, persistence.createRun('droidswarm'));
+
+    const spawnLog: Array<{ taskId: string; role: string; attemptId: string; agentName: string }> = [];
+    const supervisorStub = {
+      startAgentForTask(task, role, attemptId) {
+        spawnLog.push({ taskId: task.taskId, role, attemptId, agentName: `test-${attemptId}` });
+        return {
+          agentName: `test-${attemptId}`,
+          taskId: task.taskId,
+          role,
+          attemptId,
+        };
+      },
+      setCallbacks() {
+        return;
+      },
+      getActiveAgentCount() {
+        return 0;
+      },
+      countActiveAgents(_predicate?: (agent: unknown) => boolean) {
+        return 0;
+      },
+    } as unknown as AgentSupervisor;
+
+    const reviewNotifications: Array<{ taskId: string; detail?: string }> = [];
+    const config: OrchestratorConfig = {
+      environment: 'test',
+      projectId: 'droidswarm',
+      projectName: 'DroidSwarm',
+      projectRoot: '/',
+      agentName: 'Orchestrator',
+      agentRole: 'control-plane',
+      socketUrl: 'ws://localhost:8765',
+      heartbeatMs: 1000,
+      reconnectMs: 1000,
+      codexBin: 'codex',
+      codexSandboxMode: 'workspace-write',
+      maxAgentsPerTask: 4,
+      maxConcurrentAgents: 4,
+      specDir: '',
+      orchestratorRules: '',
+      droidspeakRules: '',
+      agentRules: '',
+      dbPath: '',
+      schedulerMaxTaskDepth: 4,
+      schedulerMaxFanOut: 3,
+      schedulerRetryIntervalMs: 1000,
+      maxConcurrentCodeAgents: 2,
+      sideEffectActionsBeforeReview: 2,
+      allowedTools: [],
+    };
+    const scheduler = new TaskScheduler(service, supervisorStub, config);
+    scheduler.setEvents({
+      onVerificationRequested: (taskId, _type, _requestedBy, detail) => {
+        reviewNotifications.push({ taskId, detail });
+      },
+    });
+
+    const task = service.createTask({
+      taskId: 'side-effect-task',
+      name: 'Side Effect Task',
+      priority: 'medium',
+      metadata: {
+        description: 'Limit side effects',
+        task_type: 'plan',
+      },
+    });
+
+    scheduler.handleNewTask(task.taskId);
+    assert.equal(spawnLog.length, 1);
+
+    scheduler.handleArtifactRecorded(task.taskId, spawnLog[0].attemptId, 'side_effect', 'write file 1');
+    assert.equal(service.getAttempt(spawnLog[0].attemptId)?.metadata?.side_effect_count, 1);
+
+    scheduler.handleArtifactRecorded(task.taskId, spawnLog[0].attemptId, 'side_effect', 'write file 2');
+    assert.equal(service.getAttempt(spawnLog[0].attemptId)?.metadata?.side_effect_count, 2);
+
+    const parent = service.getTask(task.taskId);
+    assert.equal(parent?.status, 'waiting_on_dependency');
+    assert.equal(reviewNotifications.length, 1);
+    assert.ok(reviewNotifications[0].detail?.includes('Side-effect limit'));
+
+    const dependencies = service.listDependencies(task.taskId);
+    const reviewChild = dependencies
+      .map((dependency) => service.getTask(dependency.dependsOnTaskId))
+      .find((child) => child?.metadata?.stage === 'review');
+    assert.ok(reviewChild);
+
+    const budgetEvent = database
+      .prepare('SELECT detail FROM budget_events WHERE task_id = ? ORDER BY created_at DESC LIMIT 1')
+      .get(task.taskId) as { detail: string } | undefined;
+    assert.ok(budgetEvent);
+    assert.ok(budgetEvent.detail.includes('Side-effect limit'));
+
+    database.close();
+    rmSync(workspace, { recursive: true, force: true });
+  });
 });

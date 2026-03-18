@@ -8,7 +8,7 @@ This project now relies on `apps/orchestrator` as the durable control plane: it 
    - The persistence service (`OrchestratorPersistenceService`) offers a repository-style API for runs, tasks, attempts, dependencies, artifacts, checkpoints, budgets, operator actions, and verification reviews so no business logic touches raw SQL directly.
 
 2. **Scheduler and state management**
-   - `TaskScheduler` owns the task graph: it tracks queued workloads, enforces depth/fan-out limits, launches verified workers through the supervisor, starts verification/review stages, records checkpoints/artifacts, and emits policy/budget events.
+    - `TaskScheduler` owns the task graph: it tracks queued workloads, enforces depth/fan-out limits, launches verified workers through the supervisor, starts verification/review stages, records checkpoints/artifacts, and emits policy/budget events. When side-effect-heavy artifacts are emitted, the scheduler blocks the attempt, records a budget event, and injects an explicit review task before allowing further work.
     - The scheduler now resolves each task’s policy by merging metadata overrides with the global `policyDefaults` from configuration and persists that `effective_policy` on every attempt, ensuring auditability and consistent enforcement after restarts.
    - `OrchestratorEngine` wires the scheduler to the `AgentSupervisor`, operator commands, and the gateway. It also keeps an agent→attempt map and forwards structured events such as plan proposals, checkpoint creation, and verification outcomes to both the socket channel and the dashboard timeline.
    - `WorkerRegistry` is now a small helper for broadcasting agent presence; the durable persistence layer is the canonical source of truth.

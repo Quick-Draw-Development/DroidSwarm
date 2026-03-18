@@ -329,6 +329,13 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
       metadata,
       createdAt: message.timestamp,
     });
+
+    this.options.scheduler.handleArtifactRecorded(
+      message.payload.task_id,
+      attemptId,
+      message.payload.kind,
+      message.payload.summary,
+    );
   }
 
   private sendStatusUpdate(

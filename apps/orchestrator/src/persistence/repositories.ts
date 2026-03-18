@@ -303,6 +303,20 @@ export class TaskAttemptRepository {
         updatedAt: nowIso(),
       });
   }
+
+  updateMetadata(attemptId: string, metadata?: Record<string, unknown>): void {
+    this.database
+      .prepare(`
+        UPDATE task_attempts
+        SET metadata_json = @metadataJson, updated_at = @updatedAt
+        WHERE attempt_id = @attemptId
+      `)
+      .run({
+        attemptId,
+        metadataJson: metadata ? JSON.stringify(metadata) : null,
+        updatedAt: nowIso(),
+      });
+  }
 }
 
 export class AgentAssignmentRepository {
@@ -526,6 +540,10 @@ export class PersistenceClient {
     public readonly verifications: VerificationOutcomeRepository,
     public readonly executionEvents: ExecutionEventRepository,
   ) {}
+
+  updateAttemptMetadata(attemptId: string, metadata?: Record<string, unknown>): void {
+    this.attempts.updateMetadata(attemptId, metadata);
+  }
 
   static fromDatabase(database: Database.Database): PersistenceClient {
     return new PersistenceClient(

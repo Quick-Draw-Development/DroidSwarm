@@ -156,6 +156,10 @@ export class OrchestratorPersistenceService {
     this.persistence.attempts.updateStatus(attemptId, status, metadata);
   }
 
+  updateAttemptMetadata(attemptId: string, metadata?: Record<string, unknown>): void {
+    this.persistence.updateAttemptMetadata(attemptId, metadata);
+  }
+
   listAttemptsForTask(taskId: string): TaskAttemptRecord[] {
     return this.persistence.database
       .prepare('SELECT * FROM task_attempts WHERE task_id = ?')
@@ -218,6 +222,17 @@ export class OrchestratorPersistenceService {
       metadata: input.metadata,
       createdAt: input.createdAt,
     });
+  }
+
+  incrementAttemptSideEffectCount(attemptId: string): number {
+    const attempt = this.getAttempt(attemptId);
+    const existingCount = (attempt?.metadata?.side_effect_count as number | undefined) ?? 0;
+    const nextCount = existingCount + 1;
+    this.updateAttemptMetadata(attemptId, {
+      ...(attempt?.metadata ?? {}),
+      side_effect_count: nextCount,
+    });
+    return nextCount;
   }
 
   recordCheckpoint(taskId: string, attemptId: string | undefined, payload: Record<string, unknown>): string {

@@ -31,7 +31,7 @@ This project now relies on `apps/orchestrator` as the durable control plane: it 
 
 ## Persistence Schema
 
-The following tables are now the orchestrator’s ground truth:
+The following tables are now the orchestrator’s ground truth (indexes on run/task/attempt columns keep lookups fast, and each schema migration is recorded in `schema_versions` for deterministic upgrades):
 
 - `runs`: correlation for each user request.
 - `tasks`: schedulable units with statuses (`queued`, `planning`, `running`, `waiting_on_dependency`, `waiting_on_human`, `in_review`, `verified`, `completed`, `failed`, `cancelled`).

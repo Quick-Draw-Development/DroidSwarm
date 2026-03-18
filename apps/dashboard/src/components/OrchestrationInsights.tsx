@@ -136,12 +136,33 @@ const renderDependencyEntry = (entry: DependencySummary, index: number) => (
   </li>
 );
 
+const schedulerEventTypes = new Set([
+  'run_started',
+  'run_recovered',
+  'plan_proposed',
+  'spawn_requested',
+  'task_assigned',
+  'checkpoint_created',
+  'verification_requested',
+  'verification_completed',
+  'artifact_created',
+  'agent_result',
+]);
+
+const renderSchedulerEntry = (entry: RunTimelineEntry, index: number) => (
+  <li key={`${entry.eventId}-${index}`} className="insight-item">
+    <strong>{entry.eventType}</strong>
+    <span>{entry.detail}</span>
+  </li>
+);
+
 export function OrchestrationInsights({ data }: { data: OrchestrationInsightsData }) {
   const latestRun = data.runs[0];
   const runList = data.runs.slice(0, 4);
   const timeline = data.timeline.slice(0, 6);
   const graphEntries = buildTaskGraphEntries(data.tasks);
   const uniqueAgents = new Set(data.assignments.map((assignment) => assignment.agentName));
+  const schedulerEvents = data.timeline.filter((entry) => schedulerEventTypes.has(entry.eventType));
   const runSummary = (() => {
     if (!latestRun?.metadata) {
       return undefined;
@@ -213,6 +234,14 @@ export function OrchestrationInsights({ data }: { data: OrchestrationInsightsDat
           ) : (
             <p className="empty-copy">No execution events captured yet.</p>
           )}
+        </article>
+        <article className="insight-card">
+          <p className="section-title">Scheduler events</p>
+          <ul className="insight-list">
+            {schedulerEvents.length > 0
+              ? schedulerEvents.slice(0, 4).map(renderSchedulerEntry)
+              : <li className="insight-empty">No scheduler events captured yet.</li>}
+          </ul>
         </article>
       </div>
 

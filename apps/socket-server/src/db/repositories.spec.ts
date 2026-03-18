@@ -39,6 +39,7 @@ test('sqlite persistence stores messages and extracted mentions', () => {
       target_user_id: 'alice_dev',
       reason_code: 'needs_human_clarification',
       question: 'Which API should be used?',
+      content: 'Please clarify which API is required.',
     },
   };
 

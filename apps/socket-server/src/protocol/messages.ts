@@ -1,15 +1,15 @@
 import { randomUUID } from 'node:crypto';
 
-import type { ConnectedClient, MessageEnvelope } from '../types';
+import type { ConnectedClient, MessageEnvelope, MessagePayloadMap, MessageType } from '../types';
 
 const nowIso = (): string => new Date().toISOString();
 
-export const buildSystemMessage = (
+export const buildSystemMessage = <T extends MessageType>(
   projectId: string,
   roomId: string,
-  type: MessageEnvelope['type'],
-  payload: Record<string, unknown>,
-): MessageEnvelope => ({
+  type: T,
+  payload: MessagePayloadMap[T],
+): MessageEnvelope<T> => ({
   message_id: randomUUID(),
   project_id: projectId,
   room_id: roomId,
@@ -21,7 +21,7 @@ export const buildSystemMessage = (
   },
   timestamp: nowIso(),
   payload,
-});
+}) as MessageEnvelope<T>;
 
 export const buildAuthSuccessMessage = (
   projectId: string,

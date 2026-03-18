@@ -1,4 +1,15 @@
 import type WebSocket from 'ws';
+import type {
+  ActorRef,
+  ActorType,
+  AuthMessage,
+  ClientType,
+  CompressionShape,
+  MessageEnvelope,
+  MessagePayloadMap,
+  MessageType,
+  UsageShape,
+} from '../../../libs/protocol/src';
 export type {
   ActorRef,
   ActorType,
@@ -9,7 +20,7 @@ export type {
   MessagePayloadMap,
   MessageType,
   UsageShape,
-} from '../../../../libs/protocol/src';
+} from '../../../libs/protocol/src';
 
 export interface ConnectedClient {
   connectionId: string;

@@ -255,7 +255,7 @@ export class DroidSwarmSocketServer {
         eventType: 'task_created',
         actorType: message.from.actor_type,
         actorId: message.from.actor_id,
-        payload: message.payload,
+        payload: message.payload as unknown as Record<string, unknown>,
         createdAt: message.timestamp,
       });
       writeAuditEvent(this.persistence, {
@@ -286,7 +286,7 @@ export class DroidSwarmSocketServer {
         eventType: 'task_intake_accepted',
         actorType: message.from.actor_type,
         actorId: message.from.actor_id,
-        payload: message.payload,
+        payload: message.payload as unknown as Record<string, unknown>,
         createdAt: message.timestamp,
       });
       return;
@@ -305,7 +305,7 @@ export class DroidSwarmSocketServer {
         eventType: statusCode,
         actorType: message.from.actor_type,
         actorId: message.from.actor_id,
-        payload: message.payload,
+        payload: message.payload as unknown as Record<string, unknown>,
         createdAt: message.timestamp,
       });
       writeAuditEvent(this.persistence, {

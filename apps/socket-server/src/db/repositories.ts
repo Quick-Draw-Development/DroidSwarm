@@ -5,14 +5,15 @@ import type { ConnectionAuditRecord, MessageEnvelope, PersistencePort } from '..
 const asJson = (value: unknown): string => JSON.stringify(value ?? {});
 
 const extractMentions = (message: MessageEnvelope): Array<{ mentionedType: string; mentionedId: string; mentionedName: string }> => {
+  const payload = message.payload as Record<string, unknown>;
   if (message.type === 'clarification_request') {
-    const targetUserId = typeof message.payload.target_user_id === 'string' ? message.payload.target_user_id : undefined;
+    const targetUserId = typeof payload.target_user_id === 'string' ? payload.target_user_id : undefined;
     if (targetUserId) {
       return [{ mentionedType: 'human', mentionedId: targetUserId, mentionedName: targetUserId }];
     }
   }
 
-  const mentions = message.payload.mentions;
+  const mentions = payload.mentions;
   if (!Array.isArray(mentions)) {
     return [];
   }
@@ -111,7 +112,8 @@ export class SqlitePersistence implements PersistencePort {
   }
 
   recordMessage(message: MessageEnvelope): void {
-    const content = typeof message.payload.content === 'string' ? message.payload.content : null;
+    const payload = message.payload as Record<string, unknown>;
+    const content = typeof payload.content === 'string' ? payload.content : null;
     this.database
       .prepare(`
         INSERT INTO messages (
@@ -137,7 +139,7 @@ export class SqlitePersistence implements PersistencePort {
         sender_name: message.from.actor_name,
         content,
         payload_json: asJson({
-          payload: message.payload,
+          payload,
           usage: message.usage,
           compression: message.compression,
         }),

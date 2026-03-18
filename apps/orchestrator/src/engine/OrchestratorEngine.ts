@@ -68,7 +68,7 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
     }
 
     if (isTaskChannel && message.type === 'spawn_requested') {
-      const payload = message.payload as Record<string, unknown>;
+    const payload = message.payload as unknown as Record<string, unknown>;
       this.recordChannelEvent(
         'spawn_requested',
         `Spawn requested for ${payload.needed_role ?? 'agent'}`,
@@ -82,7 +82,7 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
     }
 
     if (isTaskChannel && message.type === 'clarification_request') {
-      const payload = message.payload as Record<string, unknown>;
+    const payload = message.payload as unknown as Record<string, unknown>;
       this.recordChannelEvent(
         'clarification_requested',
         `Clarification requested: ${payload.question ?? payload.content ?? 'question'}`,

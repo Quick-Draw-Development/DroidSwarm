@@ -103,6 +103,8 @@ const clarificationRequestPayloadSchema = z.object({
   target_user_id: z.string().min(1).optional(),
   question: z.string().min(1),
   content: z.string().min(1),
+  question_id: z.string().min(1).optional(),
+  reason_code: z.string().min(1).optional(),
 });
 
 const planProposedPayloadSchema = z.object({
@@ -174,6 +176,52 @@ const checkpointCreatedPayloadSchema = z.object({
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
+const handoffEventPayloadSchema = z.object({
+  handoff_id: z.string().min(1).optional(),
+  to_actor_type: z.string().min(1).optional(),
+  to_actor_id: z.string().min(1).optional(),
+  reason_code: z.string().min(1).optional(),
+  context_ref: z.string().min(1).optional(),
+  expected_outcome: z.string().min(1).optional(),
+}).passthrough();
+
+const guardrailEventPayloadSchema = z.object({
+  guardrail_name: z.string().min(1).optional(),
+  phase: z.string().min(1).optional(),
+  result: z.string().min(1).optional(),
+  details: z.record(z.string(), z.unknown()).optional(),
+  content: z.string().optional(),
+}).passthrough();
+
+const traceEventPayloadSchema = z.object({
+  trace_id: z.string().min(1).optional(),
+  event_name: z.string().min(1).optional(),
+  status: z.string().min(1).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+}).passthrough();
+
+const limitEventPayloadSchema = z.object({
+  limit_event_id: z.string().min(1).optional(),
+  limit_type: z.string().min(1).optional(),
+  scope_type: z.string().min(1).optional(),
+  scope_id: z.string().min(1).optional(),
+  status: z.string().min(1).optional(),
+  threshold_name: z.string().min(1).optional(),
+  current_value: z.number().optional(),
+  threshold_value: z.number().optional(),
+  retry_after_ms: z.number().optional(),
+  degraded_mode: z.string().min(1).optional(),
+  details: z.record(z.string(), z.unknown()).optional(),
+}).passthrough();
+
+const checkpointEventPayloadSchema = z.object({
+  checkpoint_id: z.string().min(1).optional(),
+  session_id: z.string().min(1).optional(),
+  checkpoint_type: z.string().min(1).optional(),
+  content: z.string().optional(),
+  summary_ref: z.string().optional(),
+}).passthrough();
+
 const runCompletedPayloadSchema = z.object({
   run_id: z.string().min(1),
   status: z.enum(['completed', 'failed', 'cancelled']),
@@ -200,6 +248,11 @@ const payloadSchemas: { [K in MessageType]: z.ZodType<MessagePayloadMap[K]> } = 
   verification_completed: verificationCompletedPayloadSchema,
   checkpoint_created: checkpointCreatedPayloadSchema,
   run_completed: runCompletedPayloadSchema,
+  handoff_event: handoffEventPayloadSchema,
+  guardrail_event: guardrailEventPayloadSchema,
+  trace_event: traceEventPayloadSchema,
+  limit_event: limitEventPayloadSchema,
+  checkpoint_event: checkpointEventPayloadSchema,
 };
 
 const envelopeSchemas = (Object.keys(payloadSchemas) as MessageType[]).map((type) =>

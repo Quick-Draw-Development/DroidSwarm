@@ -3,6 +3,7 @@ import type {
   ArtifactSummary,
   BudgetEventSummary,
   CheckpointSummary,
+  DependencySummary,
   OrchestrationInsightsData,
   RunSummary,
   RunTimelineEntry,
@@ -79,16 +80,19 @@ const renderTaskGraphEntry = (entry: TaskGraphEntry, index: number) => (
   </li>
 );
 
-const renderTimelineEntry = (entry: RunTimelineEntry, index: number) => (
-  <li key={`${entry.eventId}-${index}`} className="timeline-entry">
-    <div className="timeline-row">
-      <strong>{entry.taskName ?? entry.taskId}</strong>
-      <span className="timeline-meta">{displayDate(entry.createdAt)}</span>
-    </div>
-    <p className="timeline-detail">{entry.detail}</p>
-    <span className="timeline-tag">{entry.eventType}</span>
-  </li>
-);
+const renderTimelineEntry = (entry: RunTimelineEntry, index: number) => {
+  const subject = entry.taskName ?? entry.taskId ?? entry.eventType;
+  return (
+    <li key={`${entry.eventId}-${index}`} className="timeline-entry">
+      <div className="timeline-row">
+        <strong>{subject}</strong>
+        <span className="timeline-meta">{displayDate(entry.createdAt)}</span>
+      </div>
+      <p className="timeline-detail">{entry.detail}</p>
+      <span className="timeline-tag">{entry.eventType}</span>
+    </li>
+  );
+};
 
 const renderArtifactEntry = (artifact: ArtifactSummary, index: number) => (
   <li key={`${artifact.artifactId}-${index}`} className="insight-item">
@@ -122,6 +126,13 @@ const renderVerificationEntry = (entry: VerificationTaskSummary, index: number) 
   <li key={`${entry.taskId}-${index}`} className="insight-item">
     <strong>{entry.name}</strong>
     <span>{entry.stage} · {entry.status}</span>
+  </li>
+);
+
+const renderDependencyEntry = (entry: DependencySummary, index: number) => (
+  <li key={`${entry.dependencyId}-${index}`} className="insight-item">
+    <strong>{entry.taskId}</strong>
+    <span>{`depends on ${entry.dependsOnTaskId}`}</span>
   </li>
 );
 
@@ -270,6 +281,14 @@ export function OrchestrationInsights({ data }: { data: OrchestrationInsightsDat
             {data.verifications.length > 0
               ? data.verifications.slice(0, 4).map(renderVerificationEntry)
               : <li className="insight-empty">Awaiting verification outcomes.</li>}
+          </ul>
+        </article>
+        <article className="insight-card">
+          <p className="section-title">Dependencies</p>
+          <ul className="insight-list">
+            {data.dependencies.length > 0
+              ? data.dependencies.slice(0, 4).map(renderDependencyEntry)
+              : <li className="insight-empty">No dependencies recorded yet.</li>}
           </ul>
         </article>
       </div>

@@ -319,6 +319,8 @@ describe('Phase 10 orchestrator flows', () => {
       timestamp: new Date().toISOString(),
       payload: {
         status_code: 'task_cancelled',
+        phase: 'operator',
+        content: 'Operator cancelled the task.',
         metadata: {
           task_id: 'phase10-cancel',
           status: 'cancelled',

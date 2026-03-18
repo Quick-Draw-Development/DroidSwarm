@@ -67,7 +67,7 @@ export interface TaskNode {
 
 export interface RunTimelineEntry {
   eventId: string;
-  taskId: string;
+  taskId?: string;
   taskName?: string;
   eventType: string;
   detail: string;
@@ -116,6 +116,13 @@ export interface VerificationTaskSummary {
   updatedAt: string;
 }
 
+export interface DependencySummary {
+  dependencyId: string;
+  taskId: string;
+  dependsOnTaskId: string;
+  createdAt: string;
+}
+
 export interface OrchestrationInsightsData {
   runs: RunSummary[];
   tasks: TaskNode[];
@@ -124,6 +131,7 @@ export interface OrchestrationInsightsData {
   budgets: BudgetEventSummary[];
   assignments: AgentAssignmentSummary[];
   verifications: VerificationTaskSummary[];
+  dependencies: DependencySummary[];
   timeline: RunTimelineEntry[];
 }
 export interface ProjectIdentity {

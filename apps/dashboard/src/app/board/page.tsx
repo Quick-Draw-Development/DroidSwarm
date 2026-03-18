@@ -12,6 +12,7 @@ import {
   listCheckpointsForRun,
   listOperatorMessages,
   listRuns,
+  listTaskDependenciesForRun,
   listTaskNodesForRun,
   listBoardTasksForRun,
   listVerificationOutcomesForRun,
@@ -37,6 +38,7 @@ export default async function BoardPage() {
     checkpoints: listCheckpointsForRun(latestRunId),
     budgets: listBudgetEventsForRun(latestRunId),
     assignments: listAgentAssignmentsForRun(latestRunId),
+    dependencies: listTaskDependenciesForRun(latestRunId),
     verifications: listVerificationOutcomesForRun(latestRunId),
     timeline: listRunTimelineEvents(latestRunId),
   };

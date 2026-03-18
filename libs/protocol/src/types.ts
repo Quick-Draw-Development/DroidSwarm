@@ -78,6 +78,8 @@ export interface ClarificationRequestPayload {
   target_user_id?: string;
   question: string;
   content: string;
+  question_id?: string;
+  reason_code?: string;
 }
 
 export interface PlanProposedPayload {
@@ -155,6 +157,51 @@ export interface RunCompletedPayload {
   summary?: string;
 }
 
+export interface HandoffEventPayload {
+  handoff_id?: string;
+  to_actor_type?: string;
+  to_actor_id?: string;
+  reason_code?: string;
+  context_ref?: string;
+  expected_outcome?: string;
+}
+
+export interface GuardrailEventPayload {
+  guardrail_name?: string;
+  phase?: string;
+  result?: string;
+  details?: Record<string, unknown>;
+  content?: string;
+}
+
+export interface TraceEventPayload {
+  trace_id?: string;
+  event_name?: string;
+  status?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface LimitEventPayload {
+  limit_event_id?: string;
+  limit_type?: string;
+  scope_type?: string;
+  scope_id?: string;
+  status?: string;
+  threshold_name?: string;
+  current_value?: number;
+  threshold_value?: number;
+  retry_after_ms?: number;
+  degraded_mode?: string;
+}
+
+export interface CheckpointEventPayload {
+  checkpoint_id?: string;
+  session_id?: string;
+  checkpoint_type?: string;
+  content?: string;
+  summary_ref?: string;
+}
+
 export interface MessagePayloadMap {
   status_update: StatusUpdatePayload;
   task_created: TaskCreatedPayload;
@@ -175,11 +222,16 @@ export interface MessagePayloadMap {
   verification_completed: VerificationCompletedPayload;
   checkpoint_created: CheckpointCreatedPayload;
   run_completed: RunCompletedPayload;
+  handoff_event: HandoffEventPayload;
+  guardrail_event: GuardrailEventPayload;
+  trace_event: TraceEventPayload;
+  limit_event: LimitEventPayload;
+  checkpoint_event: CheckpointEventPayload;
 }
 
 export type MessageType = keyof MessagePayloadMap;
 
-export interface MessageEnvelope<T extends MessageType = MessageType> {
+type MessageEnvelopeBase<T extends MessageType> = {
   message_id: string;
   project_id: string;
   room_id: string;
@@ -194,7 +246,11 @@ export interface MessageEnvelope<T extends MessageType = MessageType> {
   session_id?: string;
   usage?: UsageShape;
   compression?: CompressionShape;
-}
+};
+
+export type MessageEnvelope<T extends MessageType = MessageType> = T extends MessageType
+  ? MessageEnvelopeBase<T>
+  : never;
 
 export interface AuthPayload {
   room_id: string;

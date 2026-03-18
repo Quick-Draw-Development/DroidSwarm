@@ -20,7 +20,12 @@
         "main": "apps/socket-server/src/main.ts",
         "tsConfig": "apps/socket-server/tsconfig.app.json",
         "assets": [
-          "apps/socket-server/src/assets"
+          "apps/socket-server/src/assets",
+          {
+            "glob": "**/*",
+            "input": "libs/protocol/src",
+            "output": "libs/protocol/src"
+          }
         ],
         "generatePackageJson": true,
         "esbuildOptions": {

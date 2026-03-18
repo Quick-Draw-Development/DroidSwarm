@@ -69,6 +69,17 @@ class OperatorActionService {
       detail
     };
   }
+  recordRejectedCommand(taskId, operatorName, command, reason) {
+    this.persistenceService.recordOperatorAction({
+      taskId,
+      actionType: "invalid_command",
+      detail: reason,
+      metadata: {
+        operator: operatorName,
+        command
+      }
+    });
+  }
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {

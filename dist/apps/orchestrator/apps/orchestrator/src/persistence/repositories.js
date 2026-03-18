@@ -21,6 +21,7 @@ __export(repositories_exports, {
   ArtifactRepository: () => ArtifactRepository,
   BudgetEventRepository: () => BudgetEventRepository,
   CheckpointRepository: () => CheckpointRepository,
+  ExecutionEventRepository: () => ExecutionEventRepository,
   OperatorActionRepository: () => OperatorActionRepository,
   PersistenceClient: () => PersistenceClient,
   RunRepository: () => RunRepository,
@@ -85,6 +86,50 @@ class RunRepository {
       createdAt: row.created_at,
       updatedAt: row.updated_at
     }));
+  }
+  updateStatus(runId, status, metadata) {
+    const existing = this.get(runId);
+    if (!existing) {
+      return;
+    }
+    const updated = {
+      ...existing,
+      status,
+      metadata: metadata ?? existing.metadata,
+      updatedAt: nowIso()
+    };
+    this.create(updated);
+  }
+  listActiveRuns() {
+    return this.database.prepare("SELECT * FROM runs WHERE status NOT IN (?, ?, ?) ORDER BY updated_at DESC").all("completed", "failed", "cancelled").map((row) => ({
+      runId: row.run_id,
+      projectId: row.project_id,
+      status: row.status,
+      metadata: parseJson(row.metadata_json),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    }));
+  }
+}
+class ExecutionEventRepository {
+  constructor(database) {
+    this.database = database;
+  }
+  record(event) {
+    this.database.prepare(`
+        INSERT INTO execution_events (
+          event_id, run_id, event_type, detail, metadata_json, created_at
+        ) VALUES (
+          @eventId, @runId, @eventType, @detail, @metadataJson, @createdAt
+        )
+      `).run({
+      eventId: event.eventId,
+      runId: event.runId,
+      eventType: event.eventType,
+      detail: event.detail,
+      metadataJson: event.metadata ? JSON.stringify(event.metadata) : null,
+      createdAt: event.createdAt
+    });
   }
 }
 class TaskRepository {
@@ -171,6 +216,17 @@ class TaskAttemptRepository {
       `).run({
       attemptId,
       status,
+      metadataJson: metadata ? JSON.stringify(metadata) : null,
+      updatedAt: nowIso()
+    });
+  }
+  updateMetadata(attemptId, metadata) {
+    this.database.prepare(`
+        UPDATE task_attempts
+        SET metadata_json = @metadataJson, updated_at = @updatedAt
+        WHERE attempt_id = @attemptId
+      `).run({
+      attemptId,
       metadataJson: metadata ? JSON.stringify(metadata) : null,
       updatedAt: nowIso()
     });
@@ -357,7 +413,7 @@ class VerificationOutcomeRepository {
   }
 }
 class PersistenceClient {
-  constructor(database, runs, tasks, attempts, assignments, artifacts, checkpoints, budgets, actions, dependencies, verifications) {
+  constructor(database, runs, tasks, attempts, assignments, artifacts, checkpoints, budgets, actions, dependencies, verifications, executionEvents) {
     this.database = database;
     this.runs = runs;
     this.tasks = tasks;
@@ -369,6 +425,10 @@ class PersistenceClient {
     this.actions = actions;
     this.dependencies = dependencies;
     this.verifications = verifications;
+    this.executionEvents = executionEvents;
+  }
+  updateAttemptMetadata(attemptId, metadata) {
+    this.attempts.updateMetadata(attemptId, metadata);
   }
   static fromDatabase(database) {
     return new PersistenceClient(
@@ -382,7 +442,8 @@ class PersistenceClient {
       new BudgetEventRepository(database),
       new OperatorActionRepository(database),
       new TaskDependencyRepository(database),
-      new VerificationOutcomeRepository(database)
+      new VerificationOutcomeRepository(database),
+      new ExecutionEventRepository(database)
     );
   }
   createRun(projectId) {
@@ -397,6 +458,16 @@ class PersistenceClient {
     this.runs.create(run);
     return run;
   }
+  recordExecutionEvent(runId, eventType, detail, metadata) {
+    this.executionEvents.record({
+      eventId: (0, import_node_crypto.randomUUID)(),
+      runId,
+      eventType,
+      detail,
+      metadata,
+      createdAt: nowIso()
+    });
+  }
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
@@ -404,6 +475,7 @@ class PersistenceClient {
   ArtifactRepository,
   BudgetEventRepository,
   CheckpointRepository,
+  ExecutionEventRepository,
   OperatorActionRepository,
   PersistenceClient,
   RunRepository,

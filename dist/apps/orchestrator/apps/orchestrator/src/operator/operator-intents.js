@@ -20,65 +20,117 @@ __export(operator_intents_exports, {
   parseOperatorIntent: () => parseOperatorIntent
 });
 module.exports = __toCommonJS(operator_intents_exports);
-const CANCEL_KEYWORDS = ["cancel", "stop", "abort"];
-const REVIEW_KEYWORDS = ["review", "verify", "inspection", "approval"];
-const REPRIORITIZE_KEYWORDS = ["priority", "reprioritize", "urgent", "urgentize"];
-const findTaskId = (text, fallback) => {
-  if (fallback) {
-    return fallback;
-  }
-  const match = text.match(/task\s+([A-Za-z0-9-_]+)/i);
-  return match ? match[1] : void 0;
-};
-const detectPriorityLevel = (text) => {
-  if (/urgent/i.test(text)) {
-    return "urgent";
-  }
-  if (/high/i.test(text)) {
-    return "high";
-  }
-  if (/low/i.test(text)) {
-    return "low";
-  }
-  return "medium";
+const PRIORITY_LEVELS = ["low", "medium", "high", "urgent"];
+const FALLBACK_COMMAND_HELP = "Usage: /cancel <task-id> [reason], /review <task-id> [reason], /priority <task-id> <level> [reason].";
+const sanitizeReason = (tokens) => {
+  const content = tokens.join(" ").trim();
+  return content.length > 0 ? content : void 0;
 };
 const parseOperatorIntent = (text, taskId) => {
-  const normalized = text.toLowerCase();
-  if (CANCEL_KEYWORDS.some((keyword) => normalized.includes(keyword))) {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("/") || trimmed.length === 1) {
     return {
-      category: "command",
-      referencedTaskId: findTaskId(text, taskId),
-      action: {
-        type: "cancel_task",
-        taskId: findTaskId(text, taskId),
-        reason: text
-      }
+      category: "note",
+      raw: text,
+      referencedTaskId: taskId
     };
   }
-  if (REVIEW_KEYWORDS.some((keyword) => normalized.includes(keyword))) {
+  const commandBody = trimmed.slice(1).trim();
+  if (!commandBody) {
     return {
-      category: "command",
-      referencedTaskId: findTaskId(text, taskId),
-      action: {
-        type: "request_review",
-        taskId: findTaskId(text, taskId),
-        reason: text
-      }
+      category: "command_error",
+      referencedTaskId: taskId,
+      message: `Command not recognized. ${FALLBACK_COMMAND_HELP}`
     };
   }
-  if (REPRIORITIZE_KEYWORDS.some((keyword) => normalized.includes(keyword))) {
-    return {
-      category: "command",
-      referencedTaskId: findTaskId(text, taskId),
-      action: {
-        type: "reprioritize",
-        taskId: findTaskId(text, taskId),
-        priority: detectPriorityLevel(text),
-        reason: text
+  const segments = commandBody.split(/\s+/);
+  const command = segments[0].toLowerCase();
+  const args = segments.slice(1);
+  const fallbackTaskId = taskId;
+  const targetTaskId = args[0] ?? fallbackTaskId;
+  switch (command) {
+    case "cancel": {
+      if (!targetTaskId) {
+        return {
+          category: "command_error",
+          referencedTaskId: fallbackTaskId,
+          message: `Missing task identifier. ${FALLBACK_COMMAND_HELP}`
+        };
       }
-    };
+      const reason = sanitizeReason(args.slice(1));
+      return {
+        category: "command",
+        referencedTaskId: targetTaskId,
+        action: {
+          type: "cancel_task",
+          taskId: targetTaskId,
+          reason
+        }
+      };
+    }
+    case "review": {
+      if (!targetTaskId) {
+        return {
+          category: "command_error",
+          referencedTaskId: fallbackTaskId,
+          message: `Missing task identifier. ${FALLBACK_COMMAND_HELP}`
+        };
+      }
+      const reason = sanitizeReason(args.slice(1));
+      return {
+        category: "command",
+        referencedTaskId: targetTaskId,
+        action: {
+          type: "request_review",
+          taskId: targetTaskId,
+          reason
+        }
+      };
+    }
+    case "priority": {
+      if (!targetTaskId) {
+        return {
+          category: "command_error",
+          referencedTaskId: fallbackTaskId,
+          message: `Missing task identifier. ${FALLBACK_COMMAND_HELP}`
+        };
+      }
+      const priorityCandidate = args[1];
+      if (!priorityCandidate) {
+        return {
+          category: "command_error",
+          referencedTaskId: targetTaskId,
+          message: `Missing priority level. ${FALLBACK_COMMAND_HELP}`
+        };
+      }
+      const normalizedPriority = priorityCandidate.toLowerCase();
+      if (!PRIORITY_LEVELS.includes(normalizedPriority)) {
+        return {
+          category: "command_error",
+          referencedTaskId: targetTaskId,
+          message: `Priority must be one of ${PRIORITY_LEVELS.join(", ")}.`
+        };
+      }
+      const reason = sanitizeReason(args.slice(2));
+      return {
+        category: "command",
+        referencedTaskId: targetTaskId,
+        action: {
+          type: "reprioritize",
+          taskId: targetTaskId,
+          priority: normalizedPriority,
+          reason
+        }
+      };
+    }
+    default: {
+      return {
+        category: "command_error",
+        referencedTaskId: fallbackTaskId,
+        message: `Unknown command "/${command}". ${FALLBACK_COMMAND_HELP}`
+      };
+    }
   }
-  return { category: "note", raw: text, referencedTaskId: taskId };
 };
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {

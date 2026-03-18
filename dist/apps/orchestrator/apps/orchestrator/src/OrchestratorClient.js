@@ -36,19 +36,21 @@ var import_config = require("./config");
 var import_OrchestratorEngine = require("./engine/OrchestratorEngine");
 var import_OperatorActionService = require("./operator/OperatorActionService");
 var import_OperatorChatResponder = require("./operator/OperatorChatResponder");
-var import_task_registry = require("./task-registry");
+var import_worker_registry = require("./worker-registry");
 var import_TaskScheduler = require("./scheduler/TaskScheduler");
 var import_SocketGateway = require("./socket/SocketGateway");
 var import_database = require("./persistence/database");
 var import_repositories = require("./persistence/repositories");
 var import_service = require("./persistence/service");
+var import_run_lifecycle = require("./run-lifecycle");
 class DroidSwarmOrchestratorClient {
   constructor(config = (0, import_config.loadConfig)()) {
     this.config = config;
-    this.registry = new import_task_registry.TaskRegistry();
+    this.registry = new import_worker_registry.WorkerRegistry();
     this.prefix = "[OrchestratorClient]";
     this.database = (0, import_database.openPersistenceDatabase)(this.config.dbPath);
     this.persistence = import_repositories.PersistenceClient.fromDatabase(this.database);
+    this.runLifecycle = new import_run_lifecycle.RunLifecycleService(this.persistence);
     this.gateway = new import_SocketGateway.SocketGateway(this.config);
     this.supervisor = new import_AgentSupervisor.AgentSupervisor(
       config,
@@ -58,7 +60,19 @@ class DroidSwarmOrchestratorClient {
   }
   start() {
     this.log("starting orchestrator");
-    this.currentRun = this.persistence.createRun(this.config.projectId);
+    this.runLifecycle.recoverInterruptedRuns();
+    const activeRuns = this.persistence.runs.listActiveRuns();
+    if (activeRuns.length === 0) {
+      this.currentRun = this.persistence.createRun(this.config.projectId);
+      this.log("created run", this.currentRun.runId);
+    } else {
+      if (activeRuns.length > 1) {
+        this.log("multiple active runs detected", activeRuns.map((run) => run.runId));
+      }
+      this.currentRun = activeRuns[0];
+      this.log("resuming run", this.currentRun.runId);
+    }
+    this.runLifecycle.startRun(this.currentRun);
     this.persistenceService = new import_service.OrchestratorPersistenceService(this.persistence, this.currentRun);
     this.scheduler = new import_TaskScheduler.TaskScheduler(this.persistenceService, this.supervisor, this.config);
     this.engine = new import_OrchestratorEngine.OrchestratorEngine({
@@ -69,7 +83,8 @@ class DroidSwarmOrchestratorClient {
       gateway: this.gateway,
       chatResponder: new import_OperatorChatResponder.OperatorChatResponder(this.config),
       controlService: new import_OperatorActionService.OperatorActionService(this.persistenceService, this.supervisor),
-      registry: this.registry
+      registry: this.registry,
+      runLifecycle: this.runLifecycle
     });
     this.scheduler.setEvents({
       onPlanProposed: this.engine.onPlanProposed,
@@ -80,13 +95,32 @@ class DroidSwarmOrchestratorClient {
     this.supervisor.setCallbacks({
       onAgentsAssigned: this.engine.handleAgentAssignment.bind(this.engine),
       onAgentCommunication: this.engine.handleAgentCommunication.bind(this.engine),
-      onAgentResult: this.scheduler.handleAgentResult.bind(this.scheduler)
+      onAgentResult: this.engine.handleAgentResultFromSupervisor
     });
     this.gateway.setMessageHandler(this.engine.handleMessage.bind(this.engine));
-    this.log("created run", this.currentRun.runId);
+    const recoveredSummaries = this.runLifecycle.getRecoverySummaries();
+    for (const summary of recoveredSummaries) {
+      for (const taskId of summary.resumedTasks) {
+        this.scheduler.handleNewTask(taskId);
+      }
+    }
+    if (recoveredSummaries.length > 0) {
+      this.log(
+        "recovery summary",
+        recoveredSummaries.map((summary) => ({
+          run: summary.runId,
+          resumed: summary.resumedTasks.length,
+          failed: summary.failedTasks.length
+        }))
+      );
+    }
+    this.log("run ready", this.currentRun.runId);
     this.gateway.start();
   }
   stop() {
+    if (this.currentRun) {
+      this.runLifecycle.completeRunById(this.currentRun.runId);
+    }
     this.gateway.stop();
     this.database.close();
   }

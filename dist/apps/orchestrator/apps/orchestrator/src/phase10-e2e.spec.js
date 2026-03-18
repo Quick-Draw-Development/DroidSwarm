@@ -30,9 +30,10 @@ var import_repositories = require("./persistence/repositories");
 var import_service = require("./persistence/service");
 var import_TaskScheduler = require("./scheduler/TaskScheduler");
 var import_OrchestratorEngine = require("./engine/OrchestratorEngine");
-var import_task_registry = require("./task-registry");
+var import_worker_registry = require("./worker-registry");
 var import_OperatorActionService = require("./operator/OperatorActionService");
 var import_OperatorChatResponder = require("./operator/OperatorChatResponder");
+var import_run_lifecycle = require("./run-lifecycle");
 const DEFAULT_CONFIG = {
   environment: "test",
   projectId: "droidswarm",
@@ -129,6 +130,8 @@ const createEnvironment = (options) => {
   const database = (0, import_database.openPersistenceDatabase)(dbPath);
   const persistence = import_repositories.PersistenceClient.fromDatabase(database);
   const run = options?.run ?? persistence.createRun(DEFAULT_CONFIG.projectId);
+  const runLifecycle = new import_run_lifecycle.RunLifecycleService(persistence);
+  runLifecycle.startRun(run);
   const service = new import_service.OrchestratorPersistenceService(persistence, run);
   const supervisor = new StubSupervisor();
   const gateway = new StubGateway();
@@ -136,7 +139,7 @@ const createEnvironment = (options) => {
   const scheduler = new import_TaskScheduler.TaskScheduler(service, supervisor, schedulerConfig);
   const chatResponder = new StubChatResponder(schedulerConfig);
   const controlService = new import_OperatorActionService.OperatorActionService(service, supervisor);
-  const registry = new import_task_registry.TaskRegistry();
+  const registry = new import_worker_registry.WorkerRegistry();
   const engine = new import_OrchestratorEngine.OrchestratorEngine({
     config: schedulerConfig,
     persistenceService: service,
@@ -145,7 +148,8 @@ const createEnvironment = (options) => {
     gateway,
     chatResponder,
     controlService,
-    registry
+    registry,
+    runLifecycle: new import_run_lifecycle.RunLifecycleService(persistence)
   });
   scheduler.setEvents({
     onPlanProposed: engine.onPlanProposed,
@@ -165,6 +169,8 @@ const createEnvironment = (options) => {
     supervisor,
     gateway,
     database,
+    persistence,
+    runLifecycle,
     run,
     dbPath,
     workspace,
@@ -283,6 +289,8 @@ const simpleResult = (status, summary) => ({
       timestamp: (/* @__PURE__ */ new Date()).toISOString(),
       payload: {
         status_code: "task_cancelled",
+        phase: "operator",
+        content: "Operator cancelled the task.",
         metadata: {
           task_id: "phase10-cancel",
           status: "cancelled"
@@ -315,6 +323,66 @@ const simpleResult = (status, summary) => ({
     env2.scheduler.handleNewTask(childTaskId);
     import_strict.default.equal(env2.supervisor.assigned.length, 1);
     import_strict.default.equal(env2.service.getTask(childTaskId)?.status, "running");
+    env2.destroy();
+  });
+  (0, import_node_test.it)("recovers running work after restart and finalizes the run", async () => {
+    const env1 = createEnvironment();
+    const message = buildTaskCreatedMessage("phase10-finalize");
+    await env1.engine.handleMessage(message, "operator");
+    const rootSpawn = env1.supervisor.assigned[0];
+    env1.scheduler.handleAgentResult(
+      rootSpawn.taskId,
+      rootSpawn.attemptId,
+      rootSpawn.agentName,
+      rootSpawn.role,
+      planResult
+    );
+    const childSpawn = env1.supervisor.assigned[1];
+    env1.service.recordCheckpoint(childSpawn.taskId, childSpawn.attemptId, {
+      summary: "checkpoint-before-restart"
+    });
+    env1.close();
+    const env2 = createEnvironment({ dbPath: env1.dbPath, run: env1.run });
+    const summaries = env2.runLifecycle.recoverInterruptedRuns();
+    import_strict.default.equal(summaries.length, 1);
+    import_strict.default.deepEqual(summaries[0].resumedTasks, [childSpawn.taskId]);
+    summaries[0].resumedTasks.forEach((taskId) => {
+      env2.scheduler.handleNewTask(taskId);
+    });
+    const resumedSpawn = env2.supervisor.assigned[0];
+    import_strict.default.ok(resumedSpawn);
+    env2.scheduler.handleAgentResult(
+      resumedSpawn.taskId,
+      resumedSpawn.attemptId,
+      resumedSpawn.agentName,
+      resumedSpawn.role,
+      simpleResult("completed", "child done after restart")
+    );
+    const verificationSpawn = env2.supervisor.assigned[1];
+    import_strict.default.ok(verificationSpawn);
+    env2.scheduler.handleAgentResult(
+      verificationSpawn.taskId,
+      verificationSpawn.attemptId,
+      verificationSpawn.agentName,
+      verificationSpawn.role,
+      simpleResult("completed", "verification passed after restart")
+    );
+    const reviewSpawn = env2.supervisor.assigned[2];
+    import_strict.default.ok(reviewSpawn);
+    env2.scheduler.handleAgentResult(
+      reviewSpawn.taskId,
+      reviewSpawn.attemptId,
+      reviewSpawn.agentName,
+      reviewSpawn.role,
+      simpleResult("completed", "review passed after restart")
+    );
+    const finalRoot = env2.service.getTask(rootSpawn.taskId);
+    import_strict.default.equal(finalRoot?.status, "verified");
+    const runBefore = env2.persistence.runs.get(env2.run.runId);
+    import_strict.default.equal(runBefore?.status, "running");
+    env2.runLifecycle.completeRun(env2.run, "recovery complete");
+    const runAfter = env2.persistence.runs.get(env2.run.runId);
+    import_strict.default.equal(runAfter?.status, "completed");
     env2.destroy();
   });
 });

@@ -24,25 +24,39 @@ var import_strict = __toESM(require("node:assert/strict"));
 var import_node_test = require("node:test");
 var import_operator_intents = require("./operator-intents");
 (0, import_node_test.describe)("operator intents", () => {
-  (0, import_node_test.it)("categorizes notes when no keywords found", () => {
+  (0, import_node_test.it)("treats plain text as a note", () => {
     const intent = (0, import_operator_intents.parseOperatorIntent)("Let me know when this is ready");
     import_strict.default.equal(intent.category, "note");
   });
-  (0, import_node_test.it)("detects cancel commands", () => {
-    const intent = (0, import_operator_intents.parseOperatorIntent)("Please cancel task abc123");
+  (0, import_node_test.it)("parses /cancel commands with task ids", () => {
+    const intent = (0, import_operator_intents.parseOperatorIntent)("/cancel abc123 please stop");
     import_strict.default.equal(intent.category, "command");
     import_strict.default.equal(intent.action.type, "cancel_task");
     import_strict.default.equal(intent.action.taskId, "abc123");
+    import_strict.default.equal(intent.action.reason, "please stop");
   });
-  (0, import_node_test.it)("detects review keywords", () => {
-    const intent = (0, import_operator_intents.parseOperatorIntent)("Request a review for task X");
+  (0, import_node_test.it)("uses fallback task id when the command omits it", () => {
+    const intent = (0, import_operator_intents.parseOperatorIntent)("/review", "fallback-task");
     import_strict.default.equal(intent.category, "command");
     import_strict.default.equal(intent.action.type, "request_review");
+    import_strict.default.equal(intent.action.taskId, "fallback-task");
   });
-  (0, import_node_test.it)("detects reprioritize priority levels", () => {
-    const intent = (0, import_operator_intents.parseOperatorIntent)("Make task xyz urgent priority");
+  (0, import_node_test.it)("rejects commands missing required parameters", () => {
+    const intent = (0, import_operator_intents.parseOperatorIntent)("/cancel");
+    import_strict.default.equal(intent.category, "command_error");
+    import_strict.default.ok(intent.message.includes("Missing task identifier"));
+  });
+  (0, import_node_test.it)("parses /priority commands with explicit level and reason", () => {
+    const intent = (0, import_operator_intents.parseOperatorIntent)("/priority task-42 urgent adjust schedule");
     import_strict.default.equal(intent.category, "command");
     import_strict.default.equal(intent.action.type, "reprioritize");
+    import_strict.default.equal(intent.action.taskId, "task-42");
     import_strict.default.equal(intent.action.priority, "urgent");
+    import_strict.default.equal(intent.action.reason, "adjust schedule");
+  });
+  (0, import_node_test.it)("rejects priority commands with unknown levels", () => {
+    const intent = (0, import_operator_intents.parseOperatorIntent)("/priority task-42 super urgent");
+    import_strict.default.equal(intent.category, "command_error");
+    import_strict.default.ok(intent.message.includes("Priority must be one of"));
   });
 });

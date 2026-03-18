@@ -22,10 +22,10 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 var import_node_test = require("node:test");
 var import_strict = __toESM(require("node:assert/strict"));
-var import_task_registry = require("./task-registry");
-(0, import_node_test.describe)("TaskRegistry", () => {
-  (0, import_node_test.it)("registers a task and tracks assigned agents", () => {
-    const registry = new import_task_registry.TaskRegistry();
+var import_worker_registry = require("./worker-registry");
+(0, import_node_test.describe)("WorkerRegistry", () => {
+  (0, import_node_test.it)("tracks active agents per task", () => {
+    const registry = new import_worker_registry.WorkerRegistry();
     registry.register({
       taskId: "task-1",
       title: "Add login",
@@ -35,11 +35,10 @@ var import_task_registry = require("./task-registry");
       createdAt: "2026-03-12T12:00:00.000Z"
     });
     registry.assignAgents("task-1", ["Planner-01", "Coder-01"]);
-    import_strict.default.deepEqual(registry.get("task-1")?.activeAgents, ["Planner-01", "Coder-01"]);
-    import_strict.default.equal(registry.get("task-1")?.task.title, "Add login");
+    import_strict.default.deepEqual(registry.getState("task-1").activeAgents, ["Planner-01", "Coder-01"]);
   });
-  (0, import_node_test.it)("cancels a task and removes active agents", () => {
-    const registry = new import_task_registry.TaskRegistry();
+  (0, import_node_test.it)("clears agents when task is cancelled", () => {
+    const registry = new import_worker_registry.WorkerRegistry();
     registry.register({
       taskId: "task-1",
       title: "Add login",
@@ -49,9 +48,22 @@ var import_task_registry = require("./task-registry");
       createdAt: "2026-03-12T12:00:00.000Z"
     });
     registry.assignAgents("task-1", ["Planner-01", "Coder-01"]);
-    const removed = registry.cancel("task-1", "2026-03-12T12:05:00.000Z");
+    const removed = registry.clearAgents("task-1");
     import_strict.default.deepEqual(removed, ["Planner-01", "Coder-01"]);
-    import_strict.default.deepEqual(registry.get("task-1")?.activeAgents, []);
-    import_strict.default.equal(registry.get("task-1")?.status, "cancelled");
+    import_strict.default.deepEqual(registry.getActiveAgents("task-1"), []);
+  });
+  (0, import_node_test.it)("removes a single agent when they exit", () => {
+    const registry = new import_worker_registry.WorkerRegistry();
+    registry.register({
+      taskId: "task-2",
+      title: "Investigate bug",
+      description: "Bug triage",
+      taskType: "bug",
+      priority: "medium",
+      createdAt: "2026-03-12T12:05:00.000Z"
+    });
+    registry.assignAgents("task-2", ["Planner-01", "Coder-02"]);
+    registry.removeAgent("task-2", "Planner-01");
+    import_strict.default.deepEqual(registry.getActiveAgents("task-2"), ["Coder-02"]);
   });
 });

@@ -15,64 +15,76 @@ var __copyProps = (to, from, except, desc) => {
   return to;
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
-var task_registry_exports = {};
-__export(task_registry_exports, {
-  TaskRegistry: () => TaskRegistry
+var worker_registry_exports = {};
+__export(worker_registry_exports, {
+  WorkerRegistry: () => WorkerRegistry
 });
-module.exports = __toCommonJS(task_registry_exports);
-class TaskRegistry {
+module.exports = __toCommonJS(worker_registry_exports);
+class WorkerRegistry {
   constructor() {
     this.tasks = /* @__PURE__ */ new Map();
   }
   register(task) {
     const existing = this.tasks.get(task.taskId);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
     if (existing) {
       existing.task = task;
-      existing.updatedAt = task.createdAt;
+      existing.lastUpdated = now;
       return existing;
     }
     const state = {
       task,
-      status: "pending",
       activeAgents: [],
-      updatedAt: task.createdAt
+      lastUpdated: now
     };
     this.tasks.set(task.taskId, state);
     return state;
   }
   assignAgents(taskId, agentNames) {
-    const state = this.get(taskId);
-    if (!state) {
-      throw new Error(`Unknown task: ${taskId}`);
-    }
+    const state = this.ensureState(taskId);
     state.activeAgents = [...new Set(agentNames)];
-    state.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+    state.lastUpdated = (/* @__PURE__ */ new Date()).toISOString();
     return state;
   }
-  cancel(taskId, updatedAt) {
-    const task = this.get(taskId);
-    if (!task) {
+  clearAgents(taskId) {
+    const state = this.tasks.get(taskId);
+    if (!state) {
       return [];
     }
-    const removedAgents = [...task.activeAgents];
-    task.status = "cancelled";
-    task.activeAgents = [];
-    task.updatedAt = updatedAt;
-    return removedAgents;
+    const removed = [...state.activeAgents];
+    state.activeAgents = [];
+    state.lastUpdated = (/* @__PURE__ */ new Date()).toISOString();
+    return removed;
   }
   get(taskId) {
     return this.tasks.get(taskId);
   }
+  getState(taskId) {
+    return this.ensureState(taskId);
+  }
+  getActiveAgents(taskId) {
+    return [...this.tasks.get(taskId)?.activeAgents ?? []];
+  }
   removeAgent(taskId, agentName) {
-    const task = this.get(taskId);
-    if (!task) {
+    const state = this.tasks.get(taskId);
+    if (!state) {
       return;
     }
-    task.activeAgents = task.activeAgents.filter((candidate) => candidate !== agentName);
-    task.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+    state.activeAgents = state.activeAgents.filter((candidate) => candidate !== agentName);
+    state.lastUpdated = (/* @__PURE__ */ new Date()).toISOString();
+  }
+  hasTask(taskId) {
+    return this.tasks.has(taskId);
+  }
+  ensureState(taskId) {
+    const state = this.tasks.get(taskId);
+    if (!state) {
+      throw new Error(`Unknown task: ${taskId}`);
+    }
+    return state;
   }
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
-  TaskRegistry
+  WorkerRegistry
 });

@@ -116,7 +116,7 @@ class AgentSupervisor {
       agent.child.kill("SIGTERM");
       this.agents.delete(agentName);
     }
-    this.registry.cancel(taskId, (/* @__PURE__ */ new Date()).toISOString());
+    this.registry.clearAgents(taskId);
     return removedAgents;
   }
   getActiveAgentCount() {
@@ -139,7 +139,7 @@ class AgentSupervisor {
       return;
     }
     const taskState = this.registry.get(task.taskId);
-    if (!taskState || taskState.status === "cancelled") {
+    if (!taskState) {
       return;
     }
     const agent = this.agents.get(message.agentName);

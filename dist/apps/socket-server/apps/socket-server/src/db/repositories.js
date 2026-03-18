@@ -22,13 +22,14 @@ __export(repositories_exports, {
 module.exports = __toCommonJS(repositories_exports);
 const asJson = (value) => JSON.stringify(value ?? {});
 const extractMentions = (message) => {
+  const payload = message.payload;
   if (message.type === "clarification_request") {
-    const targetUserId = typeof message.payload.target_user_id === "string" ? message.payload.target_user_id : void 0;
+    const targetUserId = typeof payload.target_user_id === "string" ? payload.target_user_id : void 0;
     if (targetUserId) {
       return [{ mentionedType: "human", mentionedId: targetUserId, mentionedName: targetUserId }];
     }
   }
-  const mentions = message.payload.mentions;
+  const mentions = payload.mentions;
   if (!Array.isArray(mentions)) {
     return [];
   }
@@ -96,7 +97,8 @@ class SqlitePersistence {
       `).run(record);
   }
   recordMessage(message) {
-    const content = typeof message.payload.content === "string" ? message.payload.content : null;
+    const payload = message.payload;
+    const content = typeof payload.content === "string" ? payload.content : null;
     this.database.prepare(`
         INSERT INTO messages (
           message_id, project_id, channel_id, task_id, session_id, trace_id,
@@ -120,7 +122,7 @@ class SqlitePersistence {
       sender_name: message.from.actor_name,
       content,
       payload_json: asJson({
-        payload: message.payload,
+        payload,
         usage: message.usage,
         compression: message.compression
       }),

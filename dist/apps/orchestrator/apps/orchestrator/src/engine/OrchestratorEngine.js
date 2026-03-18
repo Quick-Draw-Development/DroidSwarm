@@ -31,7 +31,32 @@ class OrchestratorEngine {
     this.options = options;
     this.prefix = "[OrchestratorEngine]";
     this.agentAttemptMap = /* @__PURE__ */ new Map();
+    this.handleAgentResultFromSupervisor = (taskId, attemptId, agentName, role, result) => {
+      this.recordExecutionEvent(
+        "agent_result",
+        `Agent ${agentName} reported ${result.status}`,
+        {
+          taskId,
+          attemptId,
+          agentName,
+          role,
+          status: result.status,
+          summary: result.summary
+        }
+      );
+      this.options.scheduler.handleAgentResult(taskId, attemptId, agentName, role, result);
+    };
     this.onPlanProposed = (taskId, planId, summary, plan, dependencies) => {
+      this.recordExecutionEvent(
+        "plan_proposed",
+        `Plan ${planId} proposed for ${taskId}`,
+        {
+          taskId,
+          planId,
+          dependencies,
+          summary
+        }
+      );
       this.options.gateway.send(
         (0, import_messages.buildPlanProposedMessage)(
           this.options.config,
@@ -44,6 +69,15 @@ class OrchestratorEngine {
       );
     };
     this.onCheckpointCreated = (taskId, checkpointId, summary, metadata) => {
+      this.recordExecutionEvent(
+        "checkpoint_created",
+        `Checkpoint ${checkpointId} for ${taskId}`,
+        {
+          taskId,
+          checkpointId,
+          metadata
+        }
+      );
       this.options.gateway.send(
         (0, import_messages.buildCheckpointCreatedMessage)(
           this.options.config,
@@ -56,6 +90,16 @@ class OrchestratorEngine {
       );
     };
     this.onVerificationRequested = (taskId, verificationType, requestedBy, detail) => {
+      this.recordExecutionEvent(
+        "verification_requested",
+        `Verification ${verificationType} requested for ${taskId}`,
+        {
+          taskId,
+          verificationType,
+          requestedBy,
+          detail
+        }
+      );
       this.options.gateway.send(
         (0, import_messages.buildVerificationRequestedMessage)(
           this.options.config,
@@ -110,6 +154,28 @@ class OrchestratorEngine {
     const isTaskChannel = source === "task";
     if (isTaskChannel && message.type === "artifact_created") {
       this.persistArtifact(message);
+      return;
+    }
+    if (isTaskChannel && message.type === "spawn_requested") {
+      const payload = message.payload;
+      this.recordChannelEvent(
+        "spawn_requested",
+        `Spawn requested for ${payload.needed_role ?? "agent"}`,
+        message,
+        {
+          role: payload.needed_role,
+          reason: payload.reason_code
+        }
+      );
+      return;
+    }
+    if (isTaskChannel && message.type === "clarification_request") {
+      const payload = message.payload;
+      this.recordChannelEvent(
+        "clarification_requested",
+        `Clarification requested: ${payload.question ?? payload.content ?? "question"}`,
+        message
+      );
       return;
     }
     if (!isTaskChannel && message.type === "status_update" && message.room_id === "operator") {
@@ -208,6 +274,10 @@ class OrchestratorEngine {
         }
       )
     );
+    const persisted = this.options.persistenceService.getTask(task.taskId);
+    if (persisted) {
+      this.options.runLifecycle.cancelRunById(persisted.runId, "Operator cancelled task");
+    }
   }
   async handleOperatorChat(message) {
     const payload = message.payload;
@@ -225,6 +295,16 @@ class OrchestratorEngine {
       "processing_operator_instruction",
       "Processing operator instruction."
     );
+    if (intent.category === "command_error") {
+      this.options.controlService.recordRejectedCommand(
+        intent.referencedTaskId,
+        content,
+        message.from.actor_name,
+        intent.message
+      );
+      this.options.gateway.send((0, import_messages.buildOperatorChatResponse)(this.options.config, intent.message));
+      return;
+    }
     if (intent.category === "note") {
       try {
         const response = await this.options.chatResponder.respond(content);
@@ -274,6 +354,16 @@ class OrchestratorEngine {
       return;
     }
     const metadata = typeof message.payload.metadata === "object" && message.payload.metadata !== null ? message.payload.metadata : void 0;
+    this.recordChannelEvent(
+      "artifact_created",
+      `Artifact ${message.payload.artifact_id} (${message.payload.kind})`,
+      message,
+      {
+        artifactId: message.payload.artifact_id,
+        kind: message.payload.kind,
+        summary: message.payload.summary
+      }
+    );
     this.options.persistenceService.recordArtifact({
       artifactId: message.payload.artifact_id,
       attemptId,
@@ -284,6 +374,12 @@ class OrchestratorEngine {
       metadata,
       createdAt: message.timestamp
     });
+    this.options.scheduler.handleArtifactRecorded(
+      message.payload.task_id,
+      attemptId,
+      message.payload.kind,
+      message.payload.summary
+    );
   }
   sendStatusUpdate(roomId, taskId, phase, statusCode, content, extraPayload) {
     this.options.gateway.send(
@@ -296,6 +392,22 @@ class OrchestratorEngine {
         taskId,
         extraPayload
       )
+    );
+  }
+  recordExecutionEvent(eventType, detail, metadata) {
+    this.options.persistenceService.recordExecutionEvent(eventType, detail, metadata);
+  }
+  recordChannelEvent(eventType, detail, message, metadata) {
+    this.recordExecutionEvent(
+      eventType,
+      detail,
+      {
+        taskId: message.task_id,
+        actor_type: message.from.actor_type,
+        actor_id: message.from.actor_id,
+        actor_name: message.from.actor_name,
+        ...metadata
+      }
     );
   }
   async handleOperatorCommand(action, message, taskId) {

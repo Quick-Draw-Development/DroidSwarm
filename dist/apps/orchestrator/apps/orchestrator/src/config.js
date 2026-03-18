@@ -45,12 +45,34 @@ const parseCommaList = (value) => {
   }
   return value.split(",").map((part) => part.trim()).filter(Boolean);
 };
+const toPositiveIntOrUndefined = (value) => {
+  if (!value) {
+    return void 0;
+  }
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : void 0;
+};
+const parseOptionalCommaList = (value) => {
+  if (!value) {
+    return void 0;
+  }
+  const list = parseCommaList(value);
+  return list.length > 0 ? list : void 0;
+};
+const parseApprovalPolicy = (value) => {
+  if (value === "auto" || value === "manual") {
+    return value;
+  }
+  return void 0;
+};
 const loadConfig = () => {
   const environment = process.env.NODE_ENV ?? "development";
   const host = process.env.DROIDSWARM_SOCKET_HOST ?? "127.0.0.1";
   const port = toPositiveInt(process.env.DROIDSWARM_SOCKET_PORT, 8765);
   const specDir = process.env.DROIDSWARM_SPECS_DIR ?? import_node_path.default.resolve(__dirname, "..", "..", "..", "packages", "bootstrap", "specs");
   const specs = (0, import_specs.loadSpecCards)(specDir);
+  const allowedTools = parseCommaList(process.env.DROIDSWARM_ALLOWED_TOOLS);
+  const policyAllowedTools = parseOptionalCommaList(process.env.DROIDSWARM_POLICY_ALLOWED_TOOLS) ?? (allowedTools.length > 0 ? allowedTools : void 0);
   return {
     environment,
     projectId: process.env.DROIDSWARM_PROJECT_ID ?? "droidswarm",
@@ -80,7 +102,16 @@ const loadConfig = () => {
       process.env.DROIDSWARM_SIDE_EFFECT_ACTIONS_BEFORE_REVIEW,
       5
     ),
-    allowedTools: parseCommaList(process.env.DROIDSWARM_ALLOWED_TOOLS)
+    allowedTools,
+    policyDefaults: {
+      maxDepth: toPositiveIntOrUndefined(process.env.DROIDSWARM_POLICY_MAX_DEPTH),
+      maxChildren: toPositiveIntOrUndefined(process.env.DROIDSWARM_POLICY_MAX_CHILDREN),
+      maxTokens: toPositiveIntOrUndefined(process.env.DROIDSWARM_POLICY_MAX_TOKENS),
+      maxToolCalls: toPositiveIntOrUndefined(process.env.DROIDSWARM_POLICY_MAX_TOOL_CALLS),
+      timeoutMs: toPositiveIntOrUndefined(process.env.DROIDSWARM_POLICY_TIMEOUT_MS),
+      allowedTools: policyAllowedTools,
+      approvalPolicy: parseApprovalPolicy(process.env.DROIDSWARM_POLICY_APPROVAL_POLICY)
+    }
   };
 };
 // Annotate the CommonJS export names for ESM import in node:

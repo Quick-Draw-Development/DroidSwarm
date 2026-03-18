@@ -32,7 +32,8 @@ const buildTaskRecord = (task) => ({
   createdByUserId: typeof task.metadata?.created_by === "string" ? task.metadata.created_by : void 0,
   branchName: typeof task.metadata?.branch_name === "string" ? task.metadata.branch_name : void 0
 });
-const dependencySatisfiedStatuses = ["completed", "verified", "failed", "cancelled"];
+const dependencySuccessStatuses = ["completed", "verified"];
+const dependencyFailureStatuses = ["failed", "cancelled"];
 class TaskScheduler {
   constructor(persistenceService, supervisor, config) {
     this.persistenceService = persistenceService;
@@ -116,6 +117,42 @@ class TaskScheduler {
     this.resolveParentIfReady(task);
     this.schedule();
   }
+  handleArtifactRecorded(taskId, attemptId, kind, summary) {
+    if (this.config.sideEffectActionsBeforeReview <= 0 || kind !== "side_effect") {
+      return;
+    }
+    const task = this.persistenceService.getTask(taskId);
+    if (!task || this.isSideEffectReviewTriggered(task)) {
+      return;
+    }
+    const count = this.persistenceService.incrementAttemptSideEffectCount(attemptId);
+    if (count < this.config.sideEffectActionsBeforeReview) {
+      return;
+    }
+    const detail = `Side-effect limit (${this.config.sideEffectActionsBeforeReview}) reached after ${count} actions`;
+    const attempt = this.persistenceService.getAttempt(attemptId);
+    this.persistenceService.updateAttemptStatus(attemptId, "blocked", {
+      ...attempt?.metadata ?? {},
+      reason_code: "side_effect_limit",
+      summary: detail
+    });
+    this.recordBudgetLimit(taskId, detail, count);
+    this.persistenceService.updateTaskMetadata(task.taskId, {
+      ...task.metadata ?? {},
+      side_effect_review: {
+        triggered_at: (/* @__PURE__ */ new Date()).toISOString(),
+        count,
+        detail
+      }
+    });
+    this.events?.onVerificationRequested?.(
+      task.taskId,
+      "review",
+      this.config.agentName,
+      detail
+    );
+    this.startReview(task, summary ?? "Side-effect review triggered");
+  }
   schedule() {
     const pending = Array.from(this.readyQueue);
     if (pending.length === 0) {
@@ -170,7 +207,12 @@ class TaskScheduler {
       }
       return task.status === "queued" || task.status === "planning";
     }
-    if (!this.areDependenciesSatisfied(dependencies)) {
+    const evaluation = this.evaluateDependencies(task, dependencies);
+    if (evaluation.blockingDependency) {
+      this.handleDependencyFailure(task, evaluation.blockingDependency);
+      return false;
+    }
+    if (!evaluation.satisfied) {
       if (task.status !== "waiting_on_dependency") {
         this.persistenceService.setTaskStatus(task.taskId, "waiting_on_dependency");
       }
@@ -181,14 +223,30 @@ class TaskScheduler {
     }
     return true;
   }
-  areDependenciesSatisfied(dependencies) {
+  evaluateDependencies(task, dependencies) {
     for (const dependency of dependencies) {
       const candidate = this.persistenceService.getTask(dependency.dependsOnTaskId);
-      if (!candidate || !dependencySatisfiedStatuses.includes(candidate.status)) {
-        return false;
+      if (!candidate) {
+        return { satisfied: false };
       }
+      if (dependencySuccessStatuses.includes(candidate.status)) {
+        continue;
+      }
+      if (dependencyFailureStatuses.includes(candidate.status)) {
+        return { satisfied: false, blockingDependency: candidate };
+      }
+      return { satisfied: false };
     }
-    return true;
+    return { satisfied: true };
+  }
+  handleDependencyFailure(task, dependency) {
+    const reason = `Dependency ${dependency.taskId} ${dependency.status}`;
+    this.persistenceService.updateTaskMetadata(task.taskId, {
+      ...task.metadata ?? {},
+      blocked_reason: reason
+    });
+    this.persistenceService.setTaskStatus(task.taskId, "failed");
+    this.recordBudgetLimit(task.taskId, reason, 0);
   }
   launch(task) {
     const record = buildTaskRecord(task);
@@ -212,6 +270,7 @@ class TaskScheduler {
       this.readyQueue.add(task.taskId);
       return;
     }
+    const effectivePolicy = this.resolveTaskPolicy(task);
     this.persistenceService.createAttempt(
       attemptId,
       task,
@@ -220,7 +279,8 @@ class TaskScheduler {
       {
         instructions,
         parent_summary: parentSummary,
-        parent_droidspeak: parentDroidspeak
+        parent_droidspeak: parentDroidspeak,
+        effective_policy: effectivePolicy
       }
     );
     this.persistenceService.recordAssignment(spawned.agentName, attemptId);
@@ -281,13 +341,15 @@ class TaskScheduler {
       return;
     }
     const dependencies = this.persistenceService.listDependencies(parent.taskId);
-    const incomplete = dependencies.some((dependency) => {
-      const child = this.persistenceService.getTask(dependency.dependsOnTaskId);
-      return !child || !dependencySatisfiedStatuses.includes(child.status);
-    });
-    if (!incomplete) {
-      this.persistenceService.setTaskStatus(parent.taskId, "completed");
+    const evaluation = this.evaluateDependencies(parent, dependencies);
+    if (evaluation.blockingDependency) {
+      this.handleDependencyFailure(parent, evaluation.blockingDependency);
+      return;
     }
+    if (!evaluation.satisfied) {
+      return;
+    }
+    this.persistenceService.setTaskStatus(parent.taskId, "completed");
   }
   log(message) {
     console.log("[TaskScheduler]", message);
@@ -446,6 +508,9 @@ class TaskScheduler {
     }
     return false;
   }
+  isSideEffectReviewTriggered(task) {
+    return Boolean(task.metadata?.side_effect_review);
+  }
   parseCheckpointPayload(checkpoint) {
     try {
       return JSON.parse(checkpoint.payloadJson);
@@ -492,6 +557,20 @@ class TaskScheduler {
       approvalPolicy: typeof policyRecord.approval_policy === "string" && ["auto", "manual"].includes(policyRecord.approval_policy) ? policyRecord.approval_policy : void 0
     };
   }
+  resolveTaskPolicy(task) {
+    const overrides = this.getTaskPolicy(task);
+    const defaults = this.config.policyDefaults ?? {};
+    const allowedTools = overrides.allowedTools ?? defaults.allowedTools;
+    return {
+      maxDepth: overrides.maxDepth ?? defaults.maxDepth,
+      maxChildren: overrides.maxChildren ?? defaults.maxChildren,
+      maxTokens: overrides.maxTokens ?? defaults.maxTokens,
+      maxToolCalls: overrides.maxToolCalls ?? defaults.maxToolCalls,
+      timeoutMs: overrides.timeoutMs ?? defaults.timeoutMs,
+      allowedTools: allowedTools ? [...allowedTools] : void 0,
+      approvalPolicy: overrides.approvalPolicy ?? defaults.approvalPolicy
+    };
+  }
   toPositiveNumber(value) {
     if (typeof value === "number" && Number.isFinite(value) && value > 0) {
       return value;
@@ -508,7 +587,7 @@ class TaskScheduler {
     return this.persistenceService.listDependents(task.taskId).length;
   }
   enforceTaskPolicy(task, requests) {
-    const policy = this.getTaskPolicy(task);
+    const policy = this.resolveTaskPolicy(task);
     if (policy.maxDepth != null) {
       const depth = this.getTaskDepth(task.taskId);
       if (depth >= policy.maxDepth) {
@@ -540,7 +619,7 @@ class TaskScheduler {
     return true;
   }
   applyUsageConstraints(task, attemptId, result) {
-    const policy = this.getTaskPolicy(task);
+    const policy = this.resolveTaskPolicy(task);
     const metrics = result.metrics;
     const existingUsage = task.metadata?.usage ?? {};
     let tokensTotal = existingUsage.tokens ?? 0;

@@ -111,6 +111,9 @@ class OrchestratorPersistenceService {
   updateAttemptStatus(attemptId, status, metadata) {
     this.persistence.attempts.updateStatus(attemptId, status, metadata);
   }
+  updateAttemptMetadata(attemptId, metadata) {
+    this.persistence.updateAttemptMetadata(attemptId, metadata);
+  }
   listAttemptsForTask(taskId) {
     return this.persistence.database.prepare("SELECT * FROM task_attempts WHERE task_id = ?").all(taskId).map((row) => ({
       attemptId: row.attempt_id,
@@ -155,6 +158,16 @@ class OrchestratorPersistenceService {
       metadata: input.metadata,
       createdAt: input.createdAt
     });
+  }
+  incrementAttemptSideEffectCount(attemptId) {
+    const attempt = this.getAttempt(attemptId);
+    const existingCount = attempt?.metadata?.side_effect_count ?? 0;
+    const nextCount = existingCount + 1;
+    this.updateAttemptMetadata(attemptId, {
+      ...attempt?.metadata ?? {},
+      side_effect_count: nextCount
+    });
+    return nextCount;
   }
   recordCheckpoint(taskId, attemptId, payload) {
     const checkpointId = (0, import_node_crypto.randomUUID)();
@@ -219,6 +232,9 @@ class OrchestratorPersistenceService {
       metadataJson: action.metadata ? JSON.stringify(action.metadata) : void 0,
       createdAt: nowIso()
     });
+  }
+  recordExecutionEvent(eventType, detail, metadata) {
+    this.persistence.recordExecutionEvent(this.run.runId, eventType, detail, metadata);
   }
   updateTaskMetadata(taskId, metadata) {
     const existing = this.persistence.tasks.get(taskId);

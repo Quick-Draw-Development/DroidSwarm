@@ -23,24 +23,42 @@ module.exports=[63681,(a,b,c)=>{"use strict";Object.defineProperty(c,"__esModule
       payload_json TEXT,
       created_at TEXT NOT NULL
     );
-  `)},m=a=>({messageId:String(a.message_id),projectId:String(a.project_id),channelId:String(a.channel_id),taskId:"string"==typeof a.task_id?a.task_id:void 0,messageType:String(a.message_type),senderType:String(a.sender_type),senderName:String(a.sender_name),content:"string"==typeof a.content?a.content:"",payload:"string"==typeof a.payload_json?JSON.parse(a.payload_json):{},createdAt:String(a.created_at)}),n=a=>{if(a)try{let b=JSON.parse(a);return"object"==typeof b&&null!==b?b:void 0}catch{return}},o=(a,b)=>{var c,d;let e,f=n(a.metadata_json),g="string"==typeof f?.stage?f.stage:void 0,h="string"==typeof f?.description?f.description:a.name,i="string"==typeof f?.created_by?f.created_by:"operator",j="string"==typeof f?.created_by_display_name?f.created_by_display_name:i;return{taskId:a.task_id,projectId:a.run_id,title:a.name,description:h,taskType:(a=>{if("string"==typeof a){let b=a.toLowerCase();if(["feature","bug","hotfix","task"].includes(b))return b}return"task"})(f?.task_type??f?.taskType),priority:"string"==typeof(c=a.priority)&&["low","medium","high","urgent"].includes(c)?c:"medium",status:"planning"===(e="string"==typeof(d=a.status)?d:"queued")||"waiting_on_dependency"===e?"planning":"running"===e?"in_progress":"waiting_on_human"===e||"review"===e||"failed"===e||"in_review"===e?"review":"verified"===e||"completed"===e?"done":"cancelled"===e?"cancelled":"todo",branchName:"string"==typeof f?.branch_name?f.branch_name:void 0,createdByUserId:i,createdByDisplayName:j,needsClarification:!!f?.needs_clarification,blockedReason:"string"==typeof f?.blocked_reason?f.blocked_reason:"string"==typeof f?.blockedReason?f.blockedReason:void 0,stage:g,updatedAt:a.updated_at,agentCount:"number"==typeof b?b:0}},p=a=>{let b=n(a.metadata_json);return{taskId:a.task_id,name:a.name,status:a.status,priority:a.priority,parentTaskId:a.parent_task_id??void 0,stage:"string"==typeof b?.stage?b.stage:void 0,updatedAt:a.updated_at}};a.s(["getProjectIdentity",0,()=>({projectId:f,projectName:g}),"getTaskDetails",0,a=>{try{let b,c=k(),d=c.prepare(`
+  `)},m=a=>({messageId:String(a.message_id),projectId:String(a.project_id),channelId:String(a.channel_id),taskId:"string"==typeof a.task_id?a.task_id:void 0,messageType:String(a.message_type),senderType:String(a.sender_type),senderName:String(a.sender_name),content:"string"==typeof a.content?a.content:"",payload:"string"==typeof a.payload_json?JSON.parse(a.payload_json):{},createdAt:String(a.created_at)}),n=a=>{if(a)try{let b=JSON.parse(a);return"object"==typeof b&&null!==b?b:void 0}catch{return}},o=(a,b)=>{var c,d;let e,f=n(a.metadata_json),g="string"==typeof f?.stage?f.stage:void 0,h="string"==typeof f?.description?f.description:a.name,i="string"==typeof f?.created_by?f.created_by:"operator",j="string"==typeof f?.created_by_display_name?f.created_by_display_name:i;return{taskId:a.task_id,projectId:a.run_id,title:a.name,description:h,taskType:(a=>{if("string"==typeof a){let b=a.toLowerCase();if(["feature","bug","hotfix","task"].includes(b))return b}return"task"})(f?.task_type??f?.taskType),priority:"string"==typeof(c=a.priority)&&["low","medium","high","urgent"].includes(c)?c:"medium",status:"planning"===(e="string"==typeof(d=a.status)?d:"queued")||"waiting_on_dependency"===e?"planning":"running"===e?"in_progress":"waiting_on_human"===e||"review"===e||"failed"===e||"in_review"===e?"review":"verified"===e||"completed"===e?"done":"cancelled"===e?"cancelled":"todo",branchName:"string"==typeof f?.branch_name?f.branch_name:void 0,createdByUserId:i,createdByDisplayName:j,needsClarification:!!f?.needs_clarification,blockedReason:"string"==typeof f?.blocked_reason?f.blocked_reason:"string"==typeof f?.blockedReason?f.blockedReason:void 0,stage:g,updatedAt:a.updated_at,agentCount:"number"==typeof b?b:0}},p=a=>{let b=n(a.metadata_json);return{taskId:a.task_id,name:a.name,status:a.status,priority:a.priority,parentTaskId:a.parent_task_id??void 0,stage:"string"==typeof b?.stage?b.stage:void 0,updatedAt:a.updated_at}};a.s(["getProjectIdentity",0,()=>({projectId:f,projectName:g}),"getTaskDetails",0,a=>{try{var b,c,d,e,g;let h,j,l,p=k(),q=p.prepare(`
         SELECT t.*
         FROM tasks t
         JOIN runs r ON r.run_id = t.run_id
         WHERE t.task_id = ? AND r.project_id = ?
-      `).get(a,f);if(!d)return null;let e=o(d,(b=c.prepare(`
+      `).get(a,f);if(!q)return null;let r=o(q,(l=p.prepare(`
       SELECT COUNT(DISTINCT aa.agent_name) as agent_count
       FROM agent_assignments aa
       JOIN task_attempts ta ON ta.attempt_id = aa.attempt_id
       WHERE ta.task_id = ?
-    `).get(a),"number"==typeof b?.agent_count?b.agent_count:0)),g=c.prepare("SELECT * FROM messages WHERE task_id = ? AND project_id = ? ORDER BY created_at ASC").all(a,f).map(m),h="cancelled"===e.status?[]:((a,b)=>{let c=a.prepare(`
+    `).get(a),"number"==typeof l?.agent_count?l.agent_count:0)),s=p.prepare("SELECT * FROM messages WHERE task_id = ? AND project_id = ? ORDER BY created_at ASC").all(a,f).map(m),t="cancelled"===r.status?[]:((a,b)=>{let c=a.prepare(`
       SELECT aa.agent_name, aa.assigned_at, ta.metadata_json
       FROM agent_assignments aa
       JOIN task_attempts ta ON ta.attempt_id = aa.attempt_id
       WHERE ta.task_id = ?
       ORDER BY aa.assigned_at DESC
       LIMIT 20
-    `).all(b),d=new Map;for(let a of c){let b=n(a.metadata_json),c="string"==typeof b?.role?b.role:"agent";d.has(a.agent_name)||d.set(a.agent_name,{name:a.agent_name,role:c,lastSeenAt:a.assigned_at})}return 0===d.size?[{name:i,role:"orchestrator",lastSeenAt:new Date().toISOString()}]:Array.from(d.values())})(c,a);return{task:e,messages:g,activeAgents:h,handoffs:["Planner-Alpha -> Architect-Beta: planning summary attached"],guardrails:["cancelled"===e.status?"Task cancelled. Orchestrator should stop and remove assigned agents.":e.needsClarification?"Waiting on creator clarification before branch creation":`Current stage: ${e.stage??"planning"}`,`Priority guardrails: ${e.priority}`],limits:[`Agents assigned: ${e.agentCount}`,`Latest update: ${new Date(e.updatedAt).toLocaleString()}`]}}catch{return null}},"listAgentAssignmentsForRun",0,a=>{if(!a)return[];try{return k().prepare(`
+    `).all(b),d=new Map;for(let a of c){let b=n(a.metadata_json),c="string"==typeof b?.role?b.role:"agent";d.has(a.agent_name)||d.set(a.agent_name,{name:a.agent_name,role:c,lastSeenAt:a.assigned_at})}return 0===d.size?[{name:i,role:"orchestrator",lastSeenAt:new Date().toISOString()}]:Array.from(d.values())})(p,a),u=p.prepare("SELECT depends_on_task_id FROM task_dependencies WHERE task_id = ? ORDER BY created_at DESC").all(a),v=p.prepare(`
+        SELECT detail
+        FROM execution_events
+        WHERE task_id = ? AND event_type = ?
+        ORDER BY created_at DESC
+        LIMIT 3
+      `).all(a,"plan_proposed"),w=p.prepare(`
+        SELECT detail, consumed
+        FROM budget_events
+        WHERE task_id = ?
+        ORDER BY created_at DESC
+        LIMIT 2
+      `).all(a),x=p.prepare(`
+        SELECT action_type, detail
+        FROM operator_actions
+        WHERE task_id = ?
+        ORDER BY created_at DESC
+        LIMIT 2
+      `).all(a);return{task:r,messages:s,activeAgents:t,handoffs:(b=u.map(a=>a.depends_on_task_id),c=v.map(a=>a.detail),h=[...b.map(a=>`Depends on ${a}`),...c],0===h.length&&h.push("No handoffs recorded for this task yet."),h),guardrails:(d=r.needsClarification,e=w,g=x.map(a=>({actionType:a.action_type,detail:a.detail})),j=[],d&&j.push("Clarification requested by the creator."),j.push(...e.map(a=>`Budget: ${a.detail} (consumed ${a.consumed})`)),j.push(...g.map(a=>`Operator ${a.actionType}: ${a.detail}`)),0===j.length&&j.push("No guardrail events recorded yet."),j),limits:[`Agents assigned: ${r.agentCount}`,`Latest update: ${new Date(r.updatedAt).toLocaleString()}`]}}catch{return null}},"listAgentAssignmentsForRun",0,a=>{if(!a)return[];try{return k().prepare(`
         SELECT aa.agent_name, aa.assigned_at, ta.task_id, t.name AS task_name, ta.metadata_json
         FROM agent_assignments aa
         JOIN task_attempts ta ON ta.attempt_id = aa.attempt_id

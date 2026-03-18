@@ -23,7 +23,6 @@ __export(AgentSupervisor_exports, {
 module.exports = __toCommonJS(AgentSupervisor_exports);
 var import_node_crypto = require("node:crypto");
 var import_node_child_process = require("node:child_process");
-var import_operator_notifications = require("./operator-notifications");
 const defaultRoleInstructions = (task) => {
   const normalizedType = task.taskType.toLowerCase();
   if (normalizedType === "bug") {
@@ -90,9 +89,6 @@ class AgentSupervisor {
     this.agents.set(agentName, agent);
     const currentNames = this.registry.get(task.taskId)?.activeAgents ?? [];
     this.registry.assignAgents(task.taskId, [...currentNames, agentName]);
-    child.on("message", (message) => {
-      this.handleAgentMessage(task, message);
-    });
     child.on("exit", () => {
       this.registry.removeAgent(task.taskId, agentName);
       this.agents.delete(agentName);
@@ -133,30 +129,6 @@ class AgentSupervisor {
       }
     }
     return count;
-  }
-  handleAgentMessage(task, message) {
-    if (message.type !== "agent_result" || message.taskId !== task.taskId) {
-      return;
-    }
-    const taskState = this.registry.get(task.taskId);
-    if (!taskState) {
-      return;
-    }
-    const agent = this.agents.get(message.agentName);
-    const attemptId = agent?.attemptId ?? "";
-    if (message.result.requested_agents.length > 0) {
-      this.callbacks.onAgentCommunication?.(
-        task.taskId,
-        (0, import_operator_notifications.formatAgentRequestContent)(message.agentName, message.result.requested_agents)
-      );
-    }
-    this.callbacks.onAgentResult?.(
-      task.taskId,
-      attemptId,
-      message.agentName,
-      message.role,
-      message.result
-    );
   }
   canSpawn(task) {
     const taskState = this.registry.get(task.taskId);

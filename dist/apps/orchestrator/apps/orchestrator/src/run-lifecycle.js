@@ -17,7 +17,9 @@ var __copyProps = (to, from, except, desc) => {
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 var run_lifecycle_exports = {};
 __export(run_lifecycle_exports, {
-  RunLifecycleService: () => RunLifecycleService
+  RunLifecycleService: () => RunLifecycleService,
+  terminalRunStatuses: () => terminalRunStatuses,
+  terminalTaskStatuses: () => terminalTaskStatuses
 });
 module.exports = __toCommonJS(run_lifecycle_exports);
 const nowIso = () => (/* @__PURE__ */ new Date()).toISOString();
@@ -168,5 +170,7 @@ class RunLifecycleService {
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
-  RunLifecycleService
+  RunLifecycleService,
+  terminalRunStatuses,
+  terminalTaskStatuses
 });

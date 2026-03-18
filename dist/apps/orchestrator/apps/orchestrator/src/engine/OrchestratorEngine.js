@@ -31,21 +31,6 @@ class OrchestratorEngine {
     this.options = options;
     this.prefix = "[OrchestratorEngine]";
     this.agentAttemptMap = /* @__PURE__ */ new Map();
-    this.handleAgentResultFromSupervisor = (taskId, attemptId, agentName, role, result) => {
-      this.recordExecutionEvent(
-        "agent_result",
-        `Agent ${agentName} reported ${result.status}`,
-        {
-          taskId,
-          attemptId,
-          agentName,
-          role,
-          status: result.status,
-          summary: result.summary
-        }
-      );
-      this.options.scheduler.handleAgentResult(taskId, attemptId, agentName, role, result);
-    };
     this.onPlanProposed = (taskId, planId, summary, plan, dependencies) => {
       this.recordExecutionEvent(
         "plan_proposed",
@@ -152,6 +137,10 @@ class OrchestratorEngine {
       return;
     }
     const isTaskChannel = source === "task";
+    if (isTaskChannel && message.type === "status_update") {
+      this.handleAgentStatusUpdate(message);
+      return;
+    }
     if (isTaskChannel && message.type === "artifact_created") {
       this.persistArtifact(message);
       return;
@@ -200,7 +189,10 @@ class OrchestratorEngine {
       return;
     }
     for (const agent of agents) {
-      this.agentAttemptMap.set(agent.agentName, agent.attemptId);
+      this.agentAttemptMap.set(agent.agentName, {
+        attemptId: agent.attemptId,
+        role: agent.role
+      });
     }
     const details = agents.map((agent) => `${agent.agentName} (${agent.role})`).join(", ");
     const assignmentId = (0, import_node_crypto.randomUUID)();
@@ -229,6 +221,42 @@ class OrchestratorEngine {
   }
   handleAgentCommunication(taskId, content) {
     this.sendStatusUpdate(taskId, taskId, "execution", "agent_communication", content);
+  }
+  handleAgentStatusUpdate(message) {
+    const taskId = message.task_id;
+    if (!taskId) {
+      console.warn("[OrchestratorEngine] received status update without task_id");
+      return;
+    }
+    const payload = message.payload;
+    const agentName = message.from.actor_name;
+    const attemptMeta = this.agentAttemptMap.get(agentName);
+    const attemptId = attemptMeta?.attemptId ?? "";
+    const role = attemptMeta?.role ?? "agent";
+    const statusCode = this.asString(payload.status_code) ?? "agent_unknown";
+    const summary = this.asString(payload.content) ?? "";
+    const payloadResult = typeof payload.result === "object" && payload.result !== null ? payload.result : void 0;
+    const result = payloadResult ?? {
+      status: this.mapStatusFromCode(statusCode),
+      summary,
+      requested_agents: [],
+      artifacts: [],
+      doc_updates: [],
+      branch_actions: []
+    };
+    this.recordExecutionEvent(
+      "agent_result",
+      `Agent ${agentName} reported ${statusCode}`,
+      {
+        taskId,
+        attemptId,
+        agentName,
+        role,
+        status: result.status,
+        summary: result.summary
+      }
+    );
+    this.options.scheduler.handleAgentResult(taskId, attemptId, agentName, role, result);
   }
   async handleTaskCreated(message) {
     const task = (0, import_task_events.resolveTaskFromMessage)(message);
@@ -348,8 +376,8 @@ class OrchestratorEngine {
     return "medium";
   }
   persistArtifact(message) {
-    const attemptId = this.agentAttemptMap.get(message.from.actor_name);
-    if (!attemptId) {
+    const attemptMeta = this.agentAttemptMap.get(message.from.actor_name);
+    if (!attemptMeta) {
       console.warn("[OrchestratorEngine] missing attempt for artifact", message.payload.artifact_id);
       return;
     }
@@ -366,7 +394,7 @@ class OrchestratorEngine {
     );
     this.options.persistenceService.recordArtifact({
       artifactId: message.payload.artifact_id,
-      attemptId,
+      attemptId: attemptMeta.attemptId,
       taskId: message.payload.task_id,
       kind: message.payload.kind,
       summary: message.payload.summary,
@@ -376,7 +404,7 @@ class OrchestratorEngine {
     });
     this.options.scheduler.handleArtifactRecorded(
       message.payload.task_id,
-      attemptId,
+      attemptMeta.attemptId,
       message.payload.kind,
       message.payload.summary
     );
@@ -393,6 +421,21 @@ class OrchestratorEngine {
         extraPayload
       )
     );
+  }
+  asString(value) {
+    return typeof value === "string" ? value : void 0;
+  }
+  mapStatusFromCode(code) {
+    if (code === "agent_completed") {
+      return "completed";
+    }
+    if (code === "agent_failed") {
+      return "blocked";
+    }
+    if (code === "agent_blocked") {
+      return "blocked";
+    }
+    return "blocked";
   }
   recordExecutionEvent(eventType, detail, metadata) {
     this.options.persistenceService.recordExecutionEvent(eventType, detail, metadata);

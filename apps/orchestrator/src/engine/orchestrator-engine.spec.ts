@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import type { CodexAgentResult, MessageEnvelope, OrchestratorConfig } from '../types';
+import type {
+  CodexAgentResult,
+  MessageEnvelope,
+  OrchestratorConfig,
+} from '../types';
+import type { StatusUpdatePayload } from 'libs/protocol/src';
 import { OrchestratorEngine } from './OrchestratorEngine';
 import { WorkerRegistry } from '../worker-registry';
 import type { OrchestratorPersistenceService } from '../persistence/service';
@@ -104,7 +109,7 @@ describe('OrchestratorEngine status handling', () => {
         status_code: 'agent_completed',
         content: 'done',
         result: agentResult,
-      },
+      } as StatusUpdatePayload & { result: CodexAgentResult },
     };
 
     await engine.handleMessage(message, 'task');

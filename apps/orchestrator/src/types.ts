@@ -121,6 +121,7 @@ export interface ExecutionEventRecord {
     | 'run_failed'
     | 'run_cancelled'
     | 'run_recovered'
+    | 'run_interrupted'
     | 'spawn_requested'
     | 'artifact_created'
     | 'clarification_requested'

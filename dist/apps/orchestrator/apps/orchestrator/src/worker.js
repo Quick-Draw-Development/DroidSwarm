@@ -108,6 +108,15 @@ const runWorker = async () => {
       })
     });
   } catch (error) {
+    const errorResult = {
+      status: "blocked",
+      summary: error instanceof Error ? error.message : "Codex execution failed.",
+      requested_agents: [],
+      artifacts: [],
+      doc_updates: [],
+      branch_actions: [],
+      reason_code: "codex_exec_failed"
+    };
     sendMessage(
       socket,
       (0, import_messages.buildAgentStatusUpdate)(
@@ -117,26 +126,11 @@ const runWorker = async () => {
         options.agentName,
         "execution",
         "agent_failed",
-        error instanceof Error ? error.message : "Codex execution failed."
+        error instanceof Error ? error.message : "Codex execution failed.",
+        void 0,
+        { result: errorResult }
       )
     );
-    if (process.send) {
-      process.send({
-        type: "agent_result",
-        taskId: options.task.taskId,
-        agentName: options.agentName,
-        role: options.role,
-        result: {
-          status: "blocked",
-          summary: error instanceof Error ? error.message : "Codex execution failed.",
-          requested_agents: [],
-          artifacts: [],
-          doc_updates: [],
-          branch_actions: [],
-          reason_code: "codex_exec_failed"
-        }
-      });
-    }
     socket.close();
     return;
   }
@@ -175,18 +169,10 @@ const runWorker = async () => {
       "execution",
       result.status === "completed" ? "agent_completed" : "agent_blocked",
       result.summary,
-      result.compression
+      result.compression,
+      { result }
     )
   );
-  if (process.send) {
-    process.send({
-      type: "agent_result",
-      taskId: options.task.taskId,
-      agentName: options.agentName,
-      role: options.role,
-      result
-    });
-  }
   socket.close();
 };
 void runWorker();

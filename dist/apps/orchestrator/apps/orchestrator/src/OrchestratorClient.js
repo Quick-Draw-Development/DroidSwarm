@@ -43,6 +43,7 @@ var import_database = require("./persistence/database");
 var import_repositories = require("./persistence/repositories");
 var import_service = require("./persistence/service");
 var import_run_lifecycle = require("./run-lifecycle");
+var import_run_shutdown = require("./run-shutdown");
 class DroidSwarmOrchestratorClient {
   constructor(config = (0, import_config.loadConfig)()) {
     this.config = config;
@@ -94,8 +95,7 @@ class DroidSwarmOrchestratorClient {
     });
     this.supervisor.setCallbacks({
       onAgentsAssigned: this.engine.handleAgentAssignment.bind(this.engine),
-      onAgentCommunication: this.engine.handleAgentCommunication.bind(this.engine),
-      onAgentResult: this.engine.handleAgentResultFromSupervisor
+      onAgentCommunication: this.engine.handleAgentCommunication.bind(this.engine)
     });
     this.gateway.setMessageHandler(this.engine.handleMessage.bind(this.engine));
     const recoveredSummaries = this.runLifecycle.getRecoverySummaries();
@@ -119,7 +119,7 @@ class DroidSwarmOrchestratorClient {
   }
   stop() {
     if (this.currentRun) {
-      this.runLifecycle.completeRunById(this.currentRun.runId);
+      (0, import_run_shutdown.finalizeRunOnShutdown)(this.persistence, this.runLifecycle, this.currentRun.runId);
     }
     this.gateway.stop();
     this.database.close();

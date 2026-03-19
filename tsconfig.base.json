@@ -18,6 +18,12 @@
     "skipDefaultLibCheck": true,
     "baseUrl": ".",
     "paths": {
+      "@protocol": [
+        "libs/protocol/src"
+      ],
+      "@protocol/*": [
+        "libs/protocol/src/*"
+      ],
       "bootstrap": [
         "packages/bootstrap/src/index.ts"
       ]

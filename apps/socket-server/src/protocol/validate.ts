@@ -1,4 +1,4 @@
-import { authMessageSchema, messageEnvelopeSchema, type AuthMessage, type MessageEnvelope, type MessageType } from '../../../../libs/protocol/src';
+import { authMessageSchema, messageEnvelopeSchema, type AuthMessage, type MessageEnvelope, type MessageType } from '@protocol';
 
 export const parseAuthMessage = (input: string): AuthMessage => authMessageSchema.parse(JSON.parse(input));
 

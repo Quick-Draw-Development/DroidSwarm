@@ -22,9 +22,9 @@ __export(validate_exports, {
   parseMessageEnvelope: () => parseMessageEnvelope
 });
 module.exports = __toCommonJS(validate_exports);
-var import_src = require("../../../../libs/protocol/src");
-const parseAuthMessage = (input) => import_src.authMessageSchema.parse(JSON.parse(input));
-const parseMessageEnvelope = (input) => import_src.messageEnvelopeSchema.parse(JSON.parse(input));
+var import_protocol = require("@protocol");
+const parseAuthMessage = (input) => import_protocol.authMessageSchema.parse(JSON.parse(input));
+const parseMessageEnvelope = (input) => import_protocol.messageEnvelopeSchema.parse(JSON.parse(input));
 const isOperatorOnlyMessage = (type) => type === "task_created" || type === "task_intake_accepted";
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {

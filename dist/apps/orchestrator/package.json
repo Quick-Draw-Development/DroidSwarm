@@ -3,7 +3,8 @@
   "version": "0.0.1",
   "dependencies": {
     "better-sqlite3": "12.6.2",
-    "ws": "8.19.0"
+    "ws": "8.19.0",
+    "zod": "4.3.6"
   },
   "main": "./main.js",
   "type": "commonjs"

@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["../../../../../../libs/protocol/src/index.ts"],
+  "sourcesContent": ["export * from './types';\nexport * from './schema';\n"],
+  "mappings": ";;;;;;;;;;;;;;AAAA;AAAA;AAAA,wBAAc,oBAAd;AACA,wBAAc,qBADd;",
+  "names": []
+}

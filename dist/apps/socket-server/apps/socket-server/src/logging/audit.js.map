@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["../../../../../../../apps/socket-server/src/logging/audit.ts"],
+  "sourcesContent": ["import { randomUUID } from 'node:crypto';\n\nimport type { PersistencePort } from '../types';\n\nexport const writeAuditEvent = (\n  persistence: PersistencePort,\n  input: {\n    projectId: string;\n    taskId?: string;\n    channelId?: string;\n    connectionId?: string;\n    traceId?: string;\n    eventType: string;\n    actorType?: string;\n    actorId?: string;\n    details?: Record<string, unknown>;\n  },\n): void => {\n  persistence.recordAuditEvent({\n    auditEventId: randomUUID(),\n    projectId: input.projectId,\n    taskId: input.taskId,\n    channelId: input.channelId,\n    connectionId: input.connectionId,\n    traceId: input.traceId,\n    eventType: input.eventType,\n    actorType: input.actorType,\n    actorId: input.actorId,\n    details: input.details,\n    createdAt: new Date().toISOString(),\n  });\n};\n"],
+  "mappings": ";;;;;;;;;;;;;;;;;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA,yBAA2B;AAIpB,MAAM,kBAAkB,CAC7B,aACA,UAWS;AACT,cAAY,iBAAiB;AAAA,IAC3B,kBAAc,+BAAW;AAAA,IACzB,WAAW,MAAM;AAAA,IACjB,QAAQ,MAAM;AAAA,IACd,WAAW,MAAM;AAAA,IACjB,cAAc,MAAM;AAAA,IACpB,SAAS,MAAM;AAAA,IACf,WAAW,MAAM;AAAA,IACjB,WAAW,MAAM;AAAA,IACjB,SAAS,MAAM;AAAA,IACf,SAAS,MAAM;AAAA,IACf,YAAW,oBAAI,KAAK,GAAE,YAAY;AAAA,EACpC,CAAC;AACH;",
+  "names": []
+}

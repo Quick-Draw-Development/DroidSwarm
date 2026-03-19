@@ -9,7 +9,7 @@ import type {
   MessagePayloadMap,
   MessageType,
   UsageShape,
-} from '../../../libs/protocol/src';
+} from '@protocol';
 export type {
   ActorRef,
   ActorType,
@@ -20,7 +20,7 @@ export type {
   MessagePayloadMap,
   MessageType,
   UsageShape,
-} from '../../../libs/protocol/src';
+} from '@protocol';
 
 export interface ConnectedClient {
   connectionId: string;

@@ -38,3 +38,4 @@ const createLogger = (config) => (0, import_pino.default)({
 0 && (module.exports = {
   createLogger
 });
+//# sourceMappingURL=Logger.js.map

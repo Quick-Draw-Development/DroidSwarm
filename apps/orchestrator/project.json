@@ -5,6 +5,9 @@
   "projectType": "application",
   "targets": {
     "build": {
+      "dependsOn": [
+        "protocol:build"
+      ],
       "executor": "@nx/esbuild:esbuild",
       "outputs": [
         "{options.outputPath}"
@@ -23,7 +26,7 @@
         "assets": [
           {
             "glob": "**/*",
-            "input": "libs/protocol/src",
+            "input": "dist/libs/protocol/src",
             "output": "libs/protocol/src"
           }
         ],

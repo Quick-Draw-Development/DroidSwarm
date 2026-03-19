@@ -6,7 +6,7 @@ import type {
   MessageEnvelope,
   OrchestratorConfig,
 } from '../types';
-import type { StatusUpdatePayload } from 'libs/protocol/src';
+import type { StatusUpdatePayload } from '@protocol';
 import { OrchestratorEngine } from './OrchestratorEngine';
 import { WorkerRegistry } from '../worker-registry';
 import type { OrchestratorPersistenceService } from '../persistence/service';

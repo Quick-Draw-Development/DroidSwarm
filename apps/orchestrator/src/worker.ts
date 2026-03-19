@@ -11,7 +11,7 @@ import {
 } from './messages';
 import { buildAuthMessage, parseEnvelope } from './protocol';
 import type { CodexAgentResult, MessageEnvelope, OrchestratorConfig, TaskRecord } from './types';
-import { CompressionShape, StatusUpdatePayload } from 'libs/protocol/src';
+import { CompressionShape, StatusUpdatePayload } from '@protocol';
 
 interface WorkerOptions {
   task: TaskRecord;

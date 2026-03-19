@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["../../../../../../../apps/socket-server/src/db/client.ts"],
+  "sourcesContent": ["import fs from 'node:fs';\nimport path from 'node:path';\n\nimport Database from 'better-sqlite3';\n\nimport { applySchema } from './schema';\n\nexport const createDatabase = (dbPath: string): Database.Database => {\n  fs.mkdirSync(path.dirname(dbPath), { recursive: true });\n  const database = new Database(dbPath);\n  applySchema(database);\n  return database;\n};\n"],
+  "mappings": ";;;;;;;;;;;;;;;;;;;;;;;;;;;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA,qBAAe;AACf,uBAAiB;AAEjB,4BAAqB;AAErB,oBAA4B;AAErB,MAAM,iBAAiB,CAAC,WAAsC;AACnE,iBAAAA,QAAG,UAAU,iBAAAC,QAAK,QAAQ,MAAM,GAAG,EAAE,WAAW,KAAK,CAAC;AACtD,QAAM,WAAW,IAAI,sBAAAC,QAAS,MAAM;AACpC,iCAAY,QAAQ;AACpB,SAAO;AACT;",
+  "names": ["fs", "path", "Database"]
+}

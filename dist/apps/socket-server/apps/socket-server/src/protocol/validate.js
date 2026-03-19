@@ -32,3 +32,4 @@ const isOperatorOnlyMessage = (type) => type === "task_created" || type === "tas
   parseAuthMessage,
   parseMessageEnvelope
 });
+//# sourceMappingURL=validate.js.map

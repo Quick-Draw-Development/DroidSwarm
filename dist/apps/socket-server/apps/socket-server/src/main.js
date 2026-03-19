@@ -13,3 +13,4 @@ process.on("SIGTERM", () => {
   void shutdown();
 });
 void server.start();
+//# sourceMappingURL=main.js.map

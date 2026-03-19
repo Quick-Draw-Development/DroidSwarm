@@ -6,7 +6,7 @@ export type {
   MessageEnvelope,
   MessagePayloadMap,
   MessageType,
-} from '../../../libs/protocol/src';
+} from '@protocol';
 
 export interface OrchestratorConfig {
   environment: 'development' | 'test' | 'production';

@@ -1,0 +1,34 @@
+{
+  "name": "protocol",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "root": "libs/protocol",
+  "sourceRoot": "libs/protocol/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": [
+        "{options.outputPath}"
+      ],
+      "options": {
+        "assets": [
+          "libs/protocol/package.json"
+        ],
+        "main": "libs/protocol/src/index.ts",
+        "tsConfig": "libs/protocol/tsconfig.lib.json",
+        "outputPath": "dist/libs/protocol",
+        "clean": true
+      },
+      "configurations": {
+        "production": {}
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc --noEmit -p libs/protocol/tsconfig.lib.json"
+      }
+    }
+  },
+  "tags": []
+}

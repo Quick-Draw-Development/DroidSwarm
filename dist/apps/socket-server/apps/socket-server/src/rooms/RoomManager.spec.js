@@ -59,3 +59,4 @@ const createClient = (overrides = {}) => ({
     () => manager.addClient(createClient({ connectionId: "conn-2", agentName: "Orchestrator", privileged: true, clientType: "orchestrator", actorType: "orchestrator" }))
   );
 });
+//# sourceMappingURL=RoomManager.spec.js.map

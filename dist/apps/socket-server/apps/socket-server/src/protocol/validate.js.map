@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["../../../../../../../apps/socket-server/src/protocol/validate.ts"],
+  "sourcesContent": ["import { authMessageSchema, messageEnvelopeSchema, type AuthMessage, type MessageEnvelope, type MessageType } from '@protocol';\n\nexport const parseAuthMessage = (input: string): AuthMessage => authMessageSchema.parse(JSON.parse(input));\n\nexport const parseMessageEnvelope = (input: string): MessageEnvelope => messageEnvelopeSchema.parse(JSON.parse(input));\n\nexport const isOperatorOnlyMessage = (type: MessageType): boolean =>\n  type === 'task_created' || type === 'task_intake_accepted';\n"],
+  "mappings": ";;;;;;;;;;;;;;;;;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA,sBAAmH;AAE5G,MAAM,mBAAmB,CAAC,UAA+B,kCAAkB,MAAM,KAAK,MAAM,KAAK,CAAC;AAElG,MAAM,uBAAuB,CAAC,UAAmC,sCAAsB,MAAM,KAAK,MAAM,KAAK,CAAC;AAE9G,MAAM,wBAAwB,CAAC,SACpC,SAAS,kBAAkB,SAAS;",
+  "names": []
+}

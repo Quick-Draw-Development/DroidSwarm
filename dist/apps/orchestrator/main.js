@@ -3,7 +3,7 @@ const path = require("path");
 const fs = require("fs");
 const originalResolveFilename = Module._resolveFilename;
 const distPath = __dirname;
-const manifest = [{ "module": "bootstrap", "exactMatch": "packages/bootstrap/src/index.js", "pattern": "packages/bootstrap/src/index.ts" }];
+const manifest = [{ "module": "@protocol/*", "pattern": "libs/protocol/src/*" }, { "module": "@protocol", "pattern": "libs/protocol/src" }, { "module": "bootstrap", "exactMatch": "packages/bootstrap/src/index.js", "pattern": "packages/bootstrap/src/index.ts" }];
 Module._resolveFilename = function(request, parent) {
   let found;
   for (const entry of manifest) {

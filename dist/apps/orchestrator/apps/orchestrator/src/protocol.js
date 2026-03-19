@@ -26,8 +26,8 @@ __export(protocol_exports, {
 });
 module.exports = __toCommonJS(protocol_exports);
 var import_node_crypto = require("node:crypto");
-var import_src = require("../../../libs/protocol/src");
-const parseEnvelope = (raw) => import_src.messageEnvelopeSchema.parse(JSON.parse(raw));
+var import_protocol = require("@protocol");
+const parseEnvelope = (raw) => import_protocol.messageEnvelopeSchema.parse(JSON.parse(raw));
 const nowIso = () => (/* @__PURE__ */ new Date()).toISOString();
 const buildAuthMessage = (config) => buildRoomAuthMessage(config, "operator", config.agentName, "orchestrator", config.agentRole);
 const buildRoomAuthMessage = (config, roomId, agentName, clientType, agentRole = config.agentRole) => ({

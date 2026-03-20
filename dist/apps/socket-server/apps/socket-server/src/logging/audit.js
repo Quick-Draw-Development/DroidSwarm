@@ -40,4 +40,3 @@ const writeAuditEvent = (persistence, input) => {
 0 && (module.exports = {
   writeAuditEvent
 });
-//# sourceMappingURL=audit.js.map

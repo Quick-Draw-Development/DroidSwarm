@@ -1,3 +1,4 @@
+import '../../shared/protocol-alias';
 import { loadConfig } from './config';
 import { createSocketServer } from './server';
 

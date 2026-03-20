@@ -44,4 +44,3 @@ const createDatabase = (dbPath) => {
 0 && (module.exports = {
   createDatabase
 });
-//# sourceMappingURL=client.js.map

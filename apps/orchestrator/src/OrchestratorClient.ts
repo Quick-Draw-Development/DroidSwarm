@@ -15,6 +15,7 @@ import { RunLifecycleService } from './run-lifecycle';
 import type { Database } from 'better-sqlite3';
 import type { OrchestratorConfig, RunRecord } from './types';
 import { finalizeRunOnShutdown } from './run-shutdown';
+import { ToolService } from './tools/ToolService';
 
 export class DroidSwarmOrchestratorClient {
   private readonly registry = new WorkerRegistry();
@@ -58,6 +59,7 @@ export class DroidSwarmOrchestratorClient {
     this.runLifecycle.startRun(this.currentRun);
     this.persistenceService = new OrchestratorPersistenceService(this.persistence, this.currentRun);
     this.scheduler = new TaskScheduler(this.persistenceService, this.supervisor, this.config);
+    const toolService = new ToolService(this.config, this.persistenceService);
 
     this.engine = new OrchestratorEngine({
       config: this.config,
@@ -69,6 +71,7 @@ export class DroidSwarmOrchestratorClient {
       controlService: new OperatorActionService(this.persistenceService, this.supervisor),
       registry: this.registry,
       runLifecycle: this.runLifecycle,
+      toolService,
     });
 
     this.scheduler.setEvents({

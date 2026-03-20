@@ -58,4 +58,3 @@ const loadConfig = () => {
 0 && (module.exports = {
   loadConfig
 });
-//# sourceMappingURL=config.js.map

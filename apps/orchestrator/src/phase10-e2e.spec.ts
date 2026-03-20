@@ -16,6 +16,7 @@ import { SocketGateway } from './socket/SocketGateway';
 import { AgentSupervisor } from './AgentSupervisor';
 import { OperatorChatResponder } from './operator/OperatorChatResponder';
 import { RunLifecycleService } from './run-lifecycle';
+import { ToolService } from './tools/ToolService';
 
 const DEFAULT_CONFIG: OrchestratorConfig = {
   environment: 'test',
@@ -42,6 +43,13 @@ const DEFAULT_CONFIG: OrchestratorConfig = {
   schedulerRetryIntervalMs: 250,
   sideEffectActionsBeforeReview: 0,
   allowedTools: [],
+  modelRouting: {
+    planning: 'o1-preview',
+    verification: 'gpt-4o-mini',
+    code: 'claude-3.5-sonnet',
+    default: 'o1-preview',
+  },
+  budgetMaxConsumed: undefined,
 };
 
 type SupervisorCallbacks = {
@@ -65,7 +73,14 @@ class StubSupervisor {
     this.callbacks = { ...this.callbacks, ...callbacks };
   }
 
-  startAgentForTask(task: { taskId: string }, role: string, attemptId: string): { agentName: string; taskId: string; role: string; attemptId: string } {
+  startAgentForTask(
+    task: { taskId: string },
+    role: string,
+    attemptId: string,
+    _parentSummary?: string,
+    _parentDroidspeak?: string,
+    model?: string,
+  ): { agentName: string; taskId: string; role: string; attemptId: string } {
     const agentName = `${task.taskId}-${role}-${attemptId.slice(0, 6)}`;
     const spawned = { agentName, taskId: task.taskId, role, attemptId };
     this.assigned.push(spawned);
@@ -161,6 +176,7 @@ const createEnvironment = (options?: { dbPath?: string; run?: RunRecord }): Envi
   const chatResponder = new StubChatResponder(schedulerConfig);
   const controlService = new OperatorActionService(service, supervisor as unknown as AgentSupervisor);
   const registry = new WorkerRegistry();
+  const toolService = new ToolService(schedulerConfig, service);
   const engine = new OrchestratorEngine({
     config: schedulerConfig,
     persistenceService: service,
@@ -171,6 +187,7 @@ const createEnvironment = (options?: { dbPath?: string; run?: RunRecord }): Envi
     controlService,
     registry,
     runLifecycle: new RunLifecycleService(persistence),
+    toolService,
   });
   scheduler.setEvents({
     onPlanProposed: engine.onPlanProposed,

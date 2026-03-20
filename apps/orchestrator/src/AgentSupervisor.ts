@@ -63,6 +63,7 @@ export class AgentSupervisor {
     attemptId: string,
     parentSummary?: string,
     parentDroidspeak?: string,
+    model?: string,
   ): SpawnedAgent | null {
     if (!this.canSpawn(task)) {
       return null;
@@ -75,6 +76,7 @@ export class AgentSupervisor {
       agentName,
       parentSummary,
       parentDroidspeak,
+      model,
     })], {
       env: process.env,
       stdio: ['ignore', 'pipe', 'pipe', 'ipc'],

@@ -74,6 +74,14 @@ class SocketGateway {
   send(message) {
     this.sendToSocket(this.socket, message);
   }
+  sendToTask(taskId, message) {
+    const channelSocket = this.channelSockets.get(taskId);
+    if (!channelSocket) {
+      console.warn("[SocketGateway] task channel not open for", taskId);
+      return;
+    }
+    this.sendToSocket(channelSocket, message);
+  }
   watchTaskChannel(taskId) {
     if (this.stopped || this.channelSockets.has(taskId)) {
       return;

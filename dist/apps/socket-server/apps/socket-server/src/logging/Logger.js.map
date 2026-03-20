@@ -1,7 +1,0 @@
-{
-  "version": 3,
-  "sources": ["../../../../../../../apps/socket-server/src/logging/Logger.ts"],
-  "sourcesContent": ["import pino from 'pino';\n\nimport type { ServerConfig } from '../types';\n\nexport const createLogger = (config: ServerConfig) =>\n  pino({\n    level: config.environment === 'development' ? 'debug' : 'info',\n  });\n"],
-  "mappings": ";;;;;;;;;;;;;;;;;;;;;;;;;;;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA,kBAAiB;AAIV,MAAM,eAAe,CAAC,eAC3B,YAAAA,SAAK;AAAA,EACH,OAAO,OAAO,gBAAgB,gBAAgB,UAAU;AAC1D,CAAC;",
-  "names": ["pino"]
-}

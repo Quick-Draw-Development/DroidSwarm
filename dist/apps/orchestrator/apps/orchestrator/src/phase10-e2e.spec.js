@@ -34,6 +34,7 @@ var import_worker_registry = require("./worker-registry");
 var import_OperatorActionService = require("./operator/OperatorActionService");
 var import_OperatorChatResponder = require("./operator/OperatorChatResponder");
 var import_run_lifecycle = require("./run-lifecycle");
+var import_ToolService = require("./tools/ToolService");
 const DEFAULT_CONFIG = {
   environment: "test",
   projectId: "droidswarm",
@@ -58,7 +59,14 @@ const DEFAULT_CONFIG = {
   schedulerMaxFanOut: 3,
   schedulerRetryIntervalMs: 250,
   sideEffectActionsBeforeReview: 0,
-  allowedTools: []
+  allowedTools: [],
+  modelRouting: {
+    planning: "o1-preview",
+    verification: "gpt-4o-mini",
+    code: "claude-3.5-sonnet",
+    default: "o1-preview"
+  },
+  budgetMaxConsumed: void 0
 };
 class StubSupervisor {
   constructor() {
@@ -69,7 +77,7 @@ class StubSupervisor {
   setCallbacks(callbacks) {
     this.callbacks = { ...this.callbacks, ...callbacks };
   }
-  startAgentForTask(task, role, attemptId) {
+  startAgentForTask(task, role, attemptId, _parentSummary, _parentDroidspeak, model) {
     const agentName = `${task.taskId}-${role}-${attemptId.slice(0, 6)}`;
     const spawned = { agentName, taskId: task.taskId, role, attemptId };
     this.assigned.push(spawned);
@@ -140,6 +148,7 @@ const createEnvironment = (options) => {
   const chatResponder = new StubChatResponder(schedulerConfig);
   const controlService = new import_OperatorActionService.OperatorActionService(service, supervisor);
   const registry = new import_worker_registry.WorkerRegistry();
+  const toolService = new import_ToolService.ToolService(schedulerConfig, service);
   const engine = new import_OrchestratorEngine.OrchestratorEngine({
     config: schedulerConfig,
     persistenceService: service,
@@ -149,7 +158,8 @@ const createEnvironment = (options) => {
     chatResponder,
     controlService,
     registry,
-    runLifecycle: new import_run_lifecycle.RunLifecycleService(persistence)
+    runLifecycle: new import_run_lifecycle.RunLifecycleService(persistence),
+    toolService
   });
   scheduler.setEvents({
     onPlanProposed: engine.onPlanProposed,

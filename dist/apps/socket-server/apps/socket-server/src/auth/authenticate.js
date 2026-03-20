@@ -56,4 +56,3 @@ const authenticateClient = (config, message) => {
   AuthenticationError,
   authenticateClient
 });
-//# sourceMappingURL=authenticate.js.map

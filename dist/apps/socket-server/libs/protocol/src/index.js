@@ -21,4 +21,3 @@ __reExport(src_exports, require("./schema"), module.exports);
   ...require("./types"),
   ...require("./schema")
 });
-//# sourceMappingURL=index.js.map

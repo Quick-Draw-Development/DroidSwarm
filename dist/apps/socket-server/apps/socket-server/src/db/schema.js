@@ -203,4 +203,3 @@ const applySchema = (database) => {
 0 && (module.exports = {
   applySchema
 });
-//# sourceMappingURL=schema.js.map

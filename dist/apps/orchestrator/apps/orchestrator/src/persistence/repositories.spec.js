@@ -127,7 +127,7 @@ const nowIso = () => (/* @__PURE__ */ new Date()).toISOString();
     };
     persistence.attempts.create(attempt);
     persistence.attempts.updateStatus(attempt.attemptId, "completed");
-    const updated = db.prepare("SELECT status FROM task_attempts WHERE attempt_id = ?").get(attempt.attemptId);
+    const updated = persistence.attempts.getById(attempt.attemptId);
     import_strict.default.equal(updated?.status, "completed");
     db.close();
     (0, import_node_fs.rmSync)(tempDir, { recursive: true, force: true });
@@ -197,9 +197,10 @@ const nowIso = () => (/* @__PURE__ */ new Date()).toISOString();
       }
     });
     service.recordBudgetEvent("task-limit", "test limit hit", 1);
-    const event = db.prepare("SELECT detail, consumed FROM budget_events WHERE task_id = ?").get("task-limit");
-    import_strict.default.equal(event?.detail, "test limit hit");
-    import_strict.default.equal(event?.consumed, 1);
+    const events = persistence.budgets.listByTask("task-limit");
+    import_strict.default.equal(events.length, 1);
+    import_strict.default.equal(events[0].detail, "test limit hit");
+    import_strict.default.equal(events[0].consumed, 1);
     db.close();
     (0, import_node_fs.rmSync)(tempDir, { recursive: true, force: true });
   });
@@ -224,10 +225,10 @@ const nowIso = () => (/* @__PURE__ */ new Date()).toISOString();
       detail: "operator requested cancel",
       metadata: { reason: "urgent" }
     });
-    const stored = db.prepare("SELECT action_type, detail, metadata_json FROM operator_actions WHERE task_id = ?").get("task-operator");
-    import_strict.default.equal(stored?.action_type, "cancel_task");
+    const stored = persistence.actions.listByTask("task-operator")[0];
+    import_strict.default.equal(stored?.actionType, "cancel_task");
     import_strict.default.equal(stored?.detail, "operator requested cancel");
-    import_strict.default.equal(JSON.parse(stored?.metadata_json ?? "{}").reason, "urgent");
+    import_strict.default.equal(JSON.parse(stored?.metadataJson ?? "{}").reason, "urgent");
     db.close();
     (0, import_node_fs.rmSync)(tempDir, { recursive: true, force: true });
   });
@@ -256,7 +257,7 @@ const nowIso = () => (/* @__PURE__ */ new Date()).toISOString();
       reviewer: "Tester",
       details: "all good"
     });
-    const stored = db.prepare("SELECT status, reviewer, details FROM verification_reviews WHERE task_id = ?").get(task.taskId);
+    const stored = persistence.verifications.listByTask(task.taskId)[0];
     import_strict.default.equal(stored?.status, "passed");
     import_strict.default.equal(stored?.reviewer, "Tester");
     import_strict.default.equal(stored?.details, "all good");

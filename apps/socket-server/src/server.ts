@@ -322,6 +322,22 @@ export class DroidSwarmSocketServer {
             ? 'stop_agents_and_remove_assignments'
             : 'reconcile_task_state',
         },
+        });
+    }
+
+    if (message.type === 'tool_response' && message.task_id) {
+      this.persistence.recordTaskEvent({
+        eventId: randomUUID(),
+        projectId: this.config.projectId,
+        taskId: message.task_id,
+        eventType: 'tool_response',
+        actorType: message.from.actor_type,
+        actorId: message.from.actor_id,
+        payload: {
+          payload: message.payload as unknown as Record<string, unknown>,
+          usage: message.usage,
+        },
+        createdAt: message.timestamp,
       });
     }
   }

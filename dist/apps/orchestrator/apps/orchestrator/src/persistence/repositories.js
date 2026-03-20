@@ -21,6 +21,7 @@ __export(repositories_exports, {
   ArtifactRepository: () => ArtifactRepository,
   BudgetEventRepository: () => BudgetEventRepository,
   CheckpointRepository: () => CheckpointRepository,
+  CheckpointVectorRepository: () => CheckpointVectorRepository,
   ExecutionEventRepository: () => ExecutionEventRepository,
   OperatorActionRepository: () => OperatorActionRepository,
   PersistenceClient: () => PersistenceClient,
@@ -32,6 +33,7 @@ __export(repositories_exports, {
 });
 module.exports = __toCommonJS(repositories_exports);
 var import_node_crypto = require("node:crypto");
+var import_embeddings = require("../utils/embeddings");
 const nowIso = () => (/* @__PURE__ */ new Date()).toISOString();
 const parseJson = (value) => {
   if (!value) {
@@ -231,6 +233,34 @@ class TaskAttemptRepository {
       updatedAt: nowIso()
     });
   }
+  listByTask(taskId) {
+    return this.database.prepare("SELECT * FROM task_attempts WHERE task_id = ? ORDER BY created_at ASC").all(taskId).map((row) => ({
+      attemptId: row.attempt_id,
+      taskId: row.task_id,
+      runId: row.run_id,
+      agentName: row.agent_name,
+      status: row.status,
+      metadata: parseJson(row.metadata_json),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    }));
+  }
+  getById(attemptId) {
+    const row = this.database.prepare("SELECT * FROM task_attempts WHERE attempt_id = ?").get(attemptId);
+    if (!row) {
+      return null;
+    }
+    return {
+      attemptId: row.attempt_id,
+      taskId: row.task_id,
+      runId: row.run_id,
+      agentName: row.agent_name,
+      status: row.status,
+      metadata: parseJson(row.metadata_json),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    };
+  }
 }
 class AgentAssignmentRepository {
   constructor(database) {
@@ -308,6 +338,71 @@ class CheckpointRepository {
       createdAt: checkpoint.createdAt
     });
   }
+  getLatestForTask(taskId) {
+    const row = this.database.prepare("SELECT * FROM checkpoints WHERE task_id = ? ORDER BY created_at DESC LIMIT 1").get(taskId);
+    if (!row) {
+      return null;
+    }
+    return {
+      checkpointId: row.checkpoint_id,
+      taskId: row.task_id,
+      runId: row.run_id,
+      attemptId: row.attempt_id ?? void 0,
+      payloadJson: row.payload_json,
+      createdAt: row.created_at
+    };
+  }
+}
+class CheckpointVectorRepository {
+  constructor(database) {
+    this.database = database;
+  }
+  record(entry) {
+    const transaction = this.database.transaction(() => {
+      this.database.prepare("DELETE FROM checkpoint_vectors WHERE checkpoint_id = ?").run(entry.checkpointId);
+      this.database.prepare("DELETE FROM checkpoint_vectors_search WHERE checkpoint_id = ?").run(entry.checkpointId);
+      this.database.prepare(
+        `INSERT INTO checkpoint_vectors (
+            checkpoint_id, task_id, run_id, summary, content, embedding_json, created_at
+          ) VALUES (
+            @checkpointId, @taskId, @runId, @summary, @content, @embeddingJson, @createdAt
+          )`
+      ).run({
+        checkpointId: entry.checkpointId,
+        taskId: entry.taskId,
+        runId: entry.runId,
+        summary: entry.summary ?? null,
+        content: entry.content ?? null,
+        embeddingJson: JSON.stringify(entry.embedding),
+        createdAt: entry.createdAt
+      });
+      this.database.prepare("INSERT INTO checkpoint_vectors_search (checkpoint_id, summary, content) VALUES (?, ?, ?)").run(entry.checkpointId, entry.summary ?? "", entry.content ?? "");
+    });
+    transaction();
+  }
+  search(query, limit) {
+    const queryEmbedding = (0, import_embeddings.buildEmbedding)(query);
+    const rows = this.database.prepare(
+      `SELECT c.*, c.embedding_json FROM checkpoint_vectors c
+         JOIN checkpoint_vectors_search fts ON c.checkpoint_id = fts.checkpoint_id
+         WHERE checkpoint_vectors_search MATCH ?
+         ORDER BY created_at DESC
+         LIMIT ?`
+    ).all(query, limit);
+    return rows.map((row) => {
+      const embedding = JSON.parse(row.embedding_json);
+      return {
+        checkpointId: row.checkpoint_id,
+        taskId: row.task_id,
+        runId: row.run_id,
+        summary: row.summary ?? void 0,
+        content: row.content ?? void 0,
+        embedding,
+        createdAt: row.created_at,
+        score: (0, import_embeddings.cosineSimilarity)(queryEmbedding, embedding)
+      };
+    }).sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  }
 }
 class BudgetEventRepository {
   constructor(database) {
@@ -328,6 +423,26 @@ class BudgetEventRepository {
       consumed: event.consumed,
       createdAt: event.createdAt
     });
+  }
+  listByTask(taskId) {
+    return this.database.prepare("SELECT * FROM budget_events WHERE task_id = ? ORDER BY created_at ASC").all(taskId).map((row) => ({
+      eventId: row.event_id,
+      runId: row.run_id,
+      taskId: row.task_id ?? void 0,
+      detail: row.detail,
+      consumed: row.consumed,
+      createdAt: row.created_at
+    }));
+  }
+  listByRun(runId) {
+    return this.database.prepare("SELECT * FROM budget_events WHERE run_id = ? ORDER BY created_at ASC").all(runId).map((row) => ({
+      eventId: row.event_id,
+      runId: row.run_id,
+      taskId: row.task_id ?? void 0,
+      detail: row.detail,
+      consumed: row.consumed,
+      createdAt: row.created_at
+    }));
   }
 }
 class OperatorActionRepository {
@@ -350,6 +465,17 @@ class OperatorActionRepository {
       metadataJson: action.metadataJson ?? null,
       createdAt: action.createdAt
     });
+  }
+  listByTask(taskId) {
+    return this.database.prepare("SELECT * FROM operator_actions WHERE task_id = ? ORDER BY created_at ASC").all(taskId).map((row) => ({
+      actionId: row.action_id,
+      runId: row.run_id,
+      taskId: row.task_id ?? void 0,
+      actionType: row.action_type,
+      detail: row.detail,
+      metadataJson: row.metadata_json ?? void 0,
+      createdAt: row.created_at
+    }));
   }
 }
 class TaskDependencyRepository {
@@ -411,9 +537,23 @@ class VerificationOutcomeRepository {
       createdAt: outcome.createdAt
     });
   }
+  listByTask(taskId) {
+    return this.database.prepare("SELECT * FROM verification_reviews WHERE task_id = ? ORDER BY created_at ASC").all(taskId).map((row) => ({
+      reviewId: row.review_id,
+      runId: row.run_id,
+      taskId: row.task_id,
+      attemptId: row.attempt_id ?? void 0,
+      stage: row.stage,
+      status: row.status,
+      summary: row.summary ?? void 0,
+      details: row.details ?? void 0,
+      reviewer: row.reviewer ?? void 0,
+      createdAt: row.created_at
+    }));
+  }
 }
 class PersistenceClient {
-  constructor(database, runs, tasks, attempts, assignments, artifacts, checkpoints, budgets, actions, dependencies, verifications, executionEvents) {
+  constructor(database, runs, tasks, attempts, assignments, artifacts, checkpoints, budgets, actions, dependencies, verifications, executionEvents, vectors) {
     this.database = database;
     this.runs = runs;
     this.tasks = tasks;
@@ -426,6 +566,7 @@ class PersistenceClient {
     this.dependencies = dependencies;
     this.verifications = verifications;
     this.executionEvents = executionEvents;
+    this.vectors = vectors;
   }
   updateAttemptMetadata(attemptId, metadata) {
     this.attempts.updateMetadata(attemptId, metadata);
@@ -443,7 +584,8 @@ class PersistenceClient {
       new OperatorActionRepository(database),
       new TaskDependencyRepository(database),
       new VerificationOutcomeRepository(database),
-      new ExecutionEventRepository(database)
+      new ExecutionEventRepository(database),
+      new CheckpointVectorRepository(database)
     );
   }
   createRun(projectId) {
@@ -475,6 +617,7 @@ class PersistenceClient {
   ArtifactRepository,
   BudgetEventRepository,
   CheckpointRepository,
+  CheckpointVectorRepository,
   ExecutionEventRepository,
   OperatorActionRepository,
   PersistenceClient,

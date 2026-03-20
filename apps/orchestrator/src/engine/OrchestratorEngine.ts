@@ -6,6 +6,7 @@ import {
   buildOrchestratorStatusUpdate,
   buildPlanProposedMessage,
   buildTaskAssignedMessage,
+  buildToolResponseMessage,
   buildVerificationCompletedMessage,
   buildVerificationRequestedMessage,
 } from '../messages';
@@ -30,6 +31,8 @@ import { OperatorChatResponder } from '../operator/OperatorChatResponder';
 import { OperatorControlAction, parseOperatorIntent } from '../operator/operator-intents';
 import { RunLifecycleService } from '../run-lifecycle';
 import type { TaskSchedulerEvents } from '../scheduler/TaskScheduler';
+import type { ToolRequest } from '../tools/types';
+import { ToolService } from '../tools/ToolService';
 
 export interface OrchestratorEngineOptions {
   config: OrchestratorConfig;
@@ -41,6 +44,7 @@ export interface OrchestratorEngineOptions {
   controlService: OperatorActionService;
   registry: WorkerRegistry;
   runLifecycle: RunLifecycleService;
+  toolService: ToolService;
 }
 
 export class OrchestratorEngine implements TaskSchedulerEvents {
@@ -69,6 +73,11 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
 
     if (isTaskChannel && message.type === 'artifact_created') {
       this.persistArtifact(message as MessageEnvelope<'artifact_created'>);
+      return;
+    }
+
+    if (isTaskChannel && message.type === 'tool_request') {
+      await this.handleToolRequest(message as MessageEnvelope<'tool_request'>);
       return;
     }
 
@@ -373,9 +382,36 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
     this.options.scheduler.handleArtifactRecorded(
       message.payload.task_id,
       attemptMeta.attemptId,
+      message.payload.artifact_id,
       message.payload.kind,
       message.payload.summary,
     );
+  }
+
+  private async handleToolRequest(message: MessageEnvelope<'tool_request'>): Promise<void> {
+    const taskId = message.task_id;
+    if (!taskId) {
+      console.warn('[OrchestratorEngine] tool request without task_id');
+      return;
+    }
+
+    const request: ToolRequest = {
+      requestId: message.payload.request_id,
+      taskId,
+      toolName: message.payload.tool_name,
+      parameters: message.payload.parameters,
+      agentName: message.from.actor_name,
+    };
+    const response = await this.options.toolService.handleRequest(request);
+    const responseMessage = buildToolResponseMessage(
+      this.options.config,
+      taskId,
+      request.requestId,
+      response.status,
+      response.result,
+      response.error,
+    );
+    this.options.gateway.sendToTask(taskId, responseMessage);
   }
 
   private sendStatusUpdate(

@@ -56,8 +56,9 @@ const runCodexPrompt = async (input) => {
     outputPath,
     "-"
   ];
-  if (input.config.codexModel) {
-    args.splice(1, 0, "--model", input.config.codexModel);
+  const modelOverride = input.model ?? input.config.codexModel;
+  if (modelOverride) {
+    args.splice(1, 0, "--model", modelOverride);
   }
   await new Promise((resolve, reject) => {
     const child = (0, import_node_child_process.spawn)(input.config.codexBin, args, {

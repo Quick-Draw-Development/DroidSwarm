@@ -7,6 +7,7 @@ import {
   ArtifactRecord,
   BudgetEventRecord,
   CheckpointRecord,
+  CheckpointVectorRecord,
   OperatorControlActionRecord,
   PersistedTask,
   RunRecord,
@@ -15,6 +16,7 @@ import {
   VerificationOutcomeRecord,
   ExecutionEventRecord,
 } from '../types';
+import { buildEmbedding, cosineSimilarity } from '../utils/embeddings';
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -83,11 +85,52 @@ type ArtifactRow = {
   created_at: string;
 };
 
+type CheckpointRow = {
+  checkpoint_id: string;
+  task_id: string;
+  run_id: string;
+  attempt_id?: string | null;
+  payload_json: string;
+  created_at: string;
+};
+
 type TaskDependencyRow = {
   dependency_id: string;
   task_id: string;
   depends_on_task_id: string;
   created_at?: string;
+};
+
+type BudgetEventRow = {
+  event_id: string;
+  run_id: string;
+  task_id?: string | null;
+  detail: string;
+  consumed: number;
+  created_at: string;
+};
+
+type OperatorActionRow = {
+  action_id: string;
+  run_id: string;
+  task_id?: string | null;
+  action_type: string;
+  detail: string;
+  metadata_json?: string | null;
+  created_at: string;
+};
+
+type VerificationOutcomeRow = {
+  review_id: string;
+  run_id: string;
+  task_id: string;
+  attempt_id?: string | null;
+  stage: string;
+  status: string;
+  summary?: string | null;
+  details?: string | null;
+  reviewer?: string | null;
+  created_at: string;
 };
 
 
@@ -317,6 +360,42 @@ export class TaskAttemptRepository {
         updatedAt: nowIso(),
       });
   }
+
+  listByTask(taskId: string): TaskAttemptRecord[] {
+    return this.database
+      .prepare('SELECT * FROM task_attempts WHERE task_id = ? ORDER BY created_at ASC')
+      .all(taskId)
+      .map((row: TaskAttemptRow) => ({
+        attemptId: row.attempt_id,
+        taskId: row.task_id,
+        runId: row.run_id,
+        agentName: row.agent_name,
+        status: row.status as TaskAttemptRecord['status'],
+        metadata: parseJson<Record<string, unknown>>(row.metadata_json),
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      }));
+  }
+
+  getById(attemptId: string): TaskAttemptRecord | null {
+    const row = this.database
+      .prepare('SELECT * FROM task_attempts WHERE attempt_id = ?')
+      .get(attemptId) as TaskAttemptRow | undefined;
+    if (!row) {
+      return null;
+    }
+
+    return {
+      attemptId: row.attempt_id,
+      taskId: row.task_id,
+      runId: row.run_id,
+      agentName: row.agent_name,
+      status: row.status as TaskAttemptRecord['status'],
+      metadata: parseJson<Record<string, unknown>>(row.metadata_json),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
 }
 
 export class AgentAssignmentRepository {
@@ -402,7 +481,107 @@ export class CheckpointRepository {
         attemptId: checkpoint.attemptId ?? null,
         payloadJson: checkpoint.payloadJson,
         createdAt: checkpoint.createdAt,
-      });
+    });
+  }
+
+  getLatestForTask(taskId: string): CheckpointRecord | null {
+    const row = this.database
+      .prepare('SELECT * FROM checkpoints WHERE task_id = ? ORDER BY created_at DESC LIMIT 1')
+      .get(taskId) as CheckpointRow | undefined;
+    if (!row) {
+      return null;
+    }
+    return {
+      checkpointId: row.checkpoint_id,
+      taskId: row.task_id,
+      runId: row.run_id,
+      attemptId: row.attempt_id ?? undefined,
+      payloadJson: row.payload_json,
+      createdAt: row.created_at,
+    };
+  }
+}
+
+type CheckpointVectorRow = {
+  checkpoint_id: string;
+  task_id: string;
+  run_id: string;
+  summary?: string | null;
+  content?: string | null;
+  embedding_json: string;
+  created_at: string;
+};
+
+export class CheckpointVectorRepository {
+  constructor(private readonly database: Database.Database) {}
+
+  record(entry: {
+    checkpointId: string;
+    taskId: string;
+    runId: string;
+    summary?: string;
+    content?: string;
+    embedding: number[];
+    createdAt: string;
+  }): void {
+    const transaction = this.database.transaction(() => {
+      this.database
+        .prepare('DELETE FROM checkpoint_vectors WHERE checkpoint_id = ?')
+        .run(entry.checkpointId);
+      this.database
+        .prepare('DELETE FROM checkpoint_vectors_search WHERE checkpoint_id = ?')
+        .run(entry.checkpointId);
+      this.database
+        .prepare(
+          `INSERT INTO checkpoint_vectors (
+            checkpoint_id, task_id, run_id, summary, content, embedding_json, created_at
+          ) VALUES (
+            @checkpointId, @taskId, @runId, @summary, @content, @embeddingJson, @createdAt
+          )`,
+        )
+        .run({
+          checkpointId: entry.checkpointId,
+          taskId: entry.taskId,
+          runId: entry.runId,
+          summary: entry.summary ?? null,
+          content: entry.content ?? null,
+          embeddingJson: JSON.stringify(entry.embedding),
+          createdAt: entry.createdAt,
+        });
+      this.database
+        .prepare('INSERT INTO checkpoint_vectors_search (checkpoint_id, summary, content) VALUES (?, ?, ?)')
+        .run(entry.checkpointId, entry.summary ?? '', entry.content ?? '');
+    });
+    transaction();
+  }
+
+  search(query: string, limit: number): CheckpointVectorRecord[] {
+    const queryEmbedding = buildEmbedding(query);
+    const rows = this.database
+      .prepare(
+        `SELECT c.*, c.embedding_json FROM checkpoint_vectors c
+         JOIN checkpoint_vectors_search fts ON c.checkpoint_id = fts.checkpoint_id
+         WHERE checkpoint_vectors_search MATCH ?
+         ORDER BY created_at DESC
+         LIMIT ?`,
+      )
+      .all(query, limit) as CheckpointVectorRow[];
+
+    return rows
+      .map((row) => {
+        const embedding = JSON.parse(row.embedding_json) as number[];
+        return {
+          checkpointId: row.checkpoint_id,
+          taskId: row.task_id,
+          runId: row.run_id,
+          summary: row.summary ?? undefined,
+          content: row.content ?? undefined,
+          embedding,
+          createdAt: row.created_at,
+          score: cosineSimilarity(queryEmbedding, embedding),
+        };
+      })
+      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
   }
 }
 
@@ -425,7 +604,35 @@ export class BudgetEventRepository {
         detail: event.detail,
         consumed: event.consumed,
         createdAt: event.createdAt,
-      });
+    });
+  }
+
+  listByTask(taskId: string): BudgetEventRecord[] {
+    return this.database
+      .prepare('SELECT * FROM budget_events WHERE task_id = ? ORDER BY created_at ASC')
+      .all(taskId)
+      .map((row: BudgetEventRow) => ({
+        eventId: row.event_id,
+        runId: row.run_id,
+        taskId: row.task_id ?? undefined,
+        detail: row.detail,
+        consumed: row.consumed,
+        createdAt: row.created_at,
+      }));
+  }
+
+  listByRun(runId: string): BudgetEventRecord[] {
+    return this.database
+      .prepare('SELECT * FROM budget_events WHERE run_id = ? ORDER BY created_at ASC')
+      .all(runId)
+      .map((row: BudgetEventRow) => ({
+        eventId: row.event_id,
+        runId: row.run_id,
+        taskId: row.task_id ?? undefined,
+        detail: row.detail,
+        consumed: row.consumed,
+        createdAt: row.created_at,
+      }));
   }
 }
 
@@ -449,7 +656,22 @@ export class OperatorActionRepository {
         detail: action.detail,
         metadataJson: action.metadataJson ?? null,
         createdAt: action.createdAt,
-      });
+    });
+  }
+
+  listByTask(taskId: string): OperatorControlActionRecord[] {
+    return this.database
+      .prepare('SELECT * FROM operator_actions WHERE task_id = ? ORDER BY created_at ASC')
+      .all(taskId)
+      .map((row: OperatorActionRow) => ({
+        actionId: row.action_id,
+        runId: row.run_id,
+        taskId: row.task_id ?? undefined,
+        actionType: row.action_type as OperatorControlActionRecord['actionType'],
+        detail: row.detail,
+        metadataJson: row.metadata_json ?? undefined,
+        createdAt: row.created_at,
+      }));
   }
 }
 
@@ -521,7 +743,25 @@ export class VerificationOutcomeRepository {
         details: outcome.details ?? null,
         reviewer: outcome.reviewer ?? null,
         createdAt: outcome.createdAt,
-      });
+    });
+  }
+
+  listByTask(taskId: string): VerificationOutcomeRecord[] {
+    return this.database
+      .prepare('SELECT * FROM verification_reviews WHERE task_id = ? ORDER BY created_at ASC')
+      .all(taskId)
+      .map((row: VerificationOutcomeRow) => ({
+        reviewId: row.review_id,
+        runId: row.run_id,
+        taskId: row.task_id,
+        attemptId: row.attempt_id ?? undefined,
+        stage: row.stage as VerificationOutcomeRecord['stage'],
+        status: row.status as VerificationOutcomeRecord['status'],
+        summary: row.summary ?? undefined,
+        details: row.details ?? undefined,
+        reviewer: row.reviewer ?? undefined,
+        createdAt: row.created_at,
+      }));
   }
 }
 
@@ -539,6 +779,7 @@ export class PersistenceClient {
     public readonly dependencies: TaskDependencyRepository,
     public readonly verifications: VerificationOutcomeRepository,
     public readonly executionEvents: ExecutionEventRepository,
+    public readonly vectors: CheckpointVectorRepository,
   ) {}
 
   updateAttemptMetadata(attemptId: string, metadata?: Record<string, unknown>): void {
@@ -552,15 +793,16 @@ export class PersistenceClient {
       new TaskRepository(database),
       new TaskAttemptRepository(database),
       new AgentAssignmentRepository(database),
-      new ArtifactRepository(database),
-      new CheckpointRepository(database),
-      new BudgetEventRepository(database),
-      new OperatorActionRepository(database),
-      new TaskDependencyRepository(database),
-      new VerificationOutcomeRepository(database),
-      new ExecutionEventRepository(database),
-    );
-  }
+    new ArtifactRepository(database),
+    new CheckpointRepository(database),
+    new BudgetEventRepository(database),
+    new OperatorActionRepository(database),
+    new TaskDependencyRepository(database),
+    new VerificationOutcomeRepository(database),
+    new ExecutionEventRepository(database),
+    new CheckpointVectorRepository(database),
+  );
+}
 
   createRun(projectId: string): RunRecord {
     const run: RunRecord = {
@@ -585,4 +827,5 @@ export class PersistenceClient {
       createdAt: nowIso(),
     });
   }
+
 }

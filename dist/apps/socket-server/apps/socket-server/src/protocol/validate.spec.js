@@ -49,4 +49,3 @@ var import_validate = require("./validate");
     payload: {}
   })));
 });
-//# sourceMappingURL=validate.spec.js.map

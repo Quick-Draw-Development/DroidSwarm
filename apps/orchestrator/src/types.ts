@@ -6,6 +6,8 @@ export type {
   MessageEnvelope,
   MessagePayloadMap,
   MessageType,
+  ToolRequestPayload,
+  ToolResponsePayload,
 } from '@protocol';
 
 export interface OrchestratorConfig {
@@ -35,7 +37,16 @@ export interface OrchestratorConfig {
   maxConcurrentCodeAgents: number;
   sideEffectActionsBeforeReview: number;
   allowedTools: string[];
+  modelRouting: ModelRoutingConfig;
+  budgetMaxConsumed?: number;
   policyDefaults?: TaskPolicy;
+}
+
+export interface ModelRoutingConfig {
+  planning: string;
+  verification: string;
+  code: string;
+  default: string;
 }
 
 export interface TaskRecord {
@@ -124,6 +135,8 @@ export interface ExecutionEventRecord {
     | 'run_interrupted'
     | 'spawn_requested'
     | 'artifact_created'
+    | 'tool_request'
+    | 'tool_response'
     | 'clarification_requested'
     | 'checkpoint_created'
     | 'verification_requested'
@@ -193,6 +206,17 @@ export interface CheckpointRecord {
   attemptId?: string;
   payloadJson: string;
   createdAt: string;
+}
+
+export interface CheckpointVectorRecord {
+  checkpointId: string;
+  taskId: string;
+  runId: string;
+  summary?: string;
+  content?: string;
+  embedding: number[];
+  createdAt: string;
+  score?: number;
 }
 
 export interface BudgetEventRecord {

@@ -77,7 +77,14 @@ EOF
       schedulerRetryIntervalMs: 1e3,
       maxConcurrentCodeAgents: 2,
       sideEffectActionsBeforeReview: 0,
-      allowedTools: []
+      allowedTools: [],
+      modelRouting: {
+        planning: "o1-preview",
+        verification: "gpt-4o-mini",
+        code: "claude-3.5-sonnet",
+        default: "o1-preview"
+      },
+      budgetMaxConsumed: void 0
     };
     try {
       const result = await (0, import_codex_runner.runCodexPrompt)({

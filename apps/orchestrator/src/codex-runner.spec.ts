@@ -62,6 +62,13 @@ describe('runCodexPrompt', () => {
       maxConcurrentCodeAgents: 2,
       sideEffectActionsBeforeReview: 0,
       allowedTools: [],
+      modelRouting: {
+        planning: 'o1-preview',
+        verification: 'gpt-4o-mini',
+        code: 'claude-3.5-sonnet',
+        default: 'o1-preview',
+      },
+      budgetMaxConsumed: undefined,
     };
 
     try {

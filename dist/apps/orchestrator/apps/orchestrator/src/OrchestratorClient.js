@@ -44,6 +44,7 @@ var import_repositories = require("./persistence/repositories");
 var import_service = require("./persistence/service");
 var import_run_lifecycle = require("./run-lifecycle");
 var import_run_shutdown = require("./run-shutdown");
+var import_ToolService = require("./tools/ToolService");
 class DroidSwarmOrchestratorClient {
   constructor(config = (0, import_config.loadConfig)()) {
     this.config = config;
@@ -76,6 +77,7 @@ class DroidSwarmOrchestratorClient {
     this.runLifecycle.startRun(this.currentRun);
     this.persistenceService = new import_service.OrchestratorPersistenceService(this.persistence, this.currentRun);
     this.scheduler = new import_TaskScheduler.TaskScheduler(this.persistenceService, this.supervisor, this.config);
+    const toolService = new import_ToolService.ToolService(this.config, this.persistenceService);
     this.engine = new import_OrchestratorEngine.OrchestratorEngine({
       config: this.config,
       persistenceService: this.persistenceService,
@@ -85,7 +87,8 @@ class DroidSwarmOrchestratorClient {
       chatResponder: new import_OperatorChatResponder.OperatorChatResponder(this.config),
       controlService: new import_OperatorActionService.OperatorActionService(this.persistenceService, this.supervisor),
       registry: this.registry,
-      runLifecycle: this.runLifecycle
+      runLifecycle: this.runLifecycle,
+      toolService
     });
     this.scheduler.setEvents({
       onPlanProposed: this.engine.onPlanProposed,

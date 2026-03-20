@@ -21,6 +21,7 @@ __export(service_exports, {
 });
 module.exports = __toCommonJS(service_exports);
 var import_node_crypto = require("node:crypto");
+var import_embeddings = require("../utils/embeddings");
 const nowIso = () => (/* @__PURE__ */ new Date()).toISOString();
 class OrchestratorPersistenceService {
   constructor(persistence, run) {
@@ -115,32 +116,10 @@ class OrchestratorPersistenceService {
     this.persistence.updateAttemptMetadata(attemptId, metadata);
   }
   listAttemptsForTask(taskId) {
-    return this.persistence.database.prepare("SELECT * FROM task_attempts WHERE task_id = ?").all(taskId).map((row) => ({
-      attemptId: row.attempt_id,
-      taskId: row.task_id,
-      runId: row.run_id,
-      agentName: row.agent_name,
-      status: row.status,
-      metadata: row.metadata_json ? JSON.parse(row.metadata_json) : void 0,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at
-    }));
+    return this.persistence.attempts.listByTask(taskId);
   }
   getAttempt(attemptId) {
-    const row = this.persistence.database.prepare("SELECT * FROM task_attempts WHERE attempt_id = ?").get(attemptId);
-    if (!row) {
-      return void 0;
-    }
-    return {
-      attemptId: row.attempt_id,
-      taskId: row.task_id,
-      runId: row.run_id,
-      agentName: row.agent_name,
-      status: row.status,
-      metadata: row.metadata_json ? JSON.parse(row.metadata_json) : void 0,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at
-    };
+    return this.persistence.attempts.getById(attemptId) ?? void 0;
   }
   recordArtifact(input) {
     if (!input.attemptId) {
@@ -179,21 +158,23 @@ class OrchestratorPersistenceService {
       payloadJson: JSON.stringify(payload),
       createdAt: nowIso()
     });
+    const embeddingContent = [
+      typeof payload.summary === "string" ? payload.summary : "",
+      typeof payload.compression?.compressed_content === "string" ? payload.compression.compressed_content : ""
+    ].filter(Boolean).join(" ");
+    this.persistence.vectors.record({
+      checkpointId,
+      taskId,
+      runId: this.run.runId,
+      summary: typeof payload.summary === "string" ? payload.summary : void 0,
+      content: typeof payload.compression?.compressed_content === "string" ? payload.compression.compressed_content : void 0,
+      embedding: (0, import_embeddings.buildEmbedding)(embeddingContent, 16),
+      createdAt: nowIso()
+    });
     return checkpointId;
   }
   getLatestCheckpoint(taskId) {
-    const row = this.persistence.database.prepare("SELECT * FROM checkpoints WHERE task_id = ? ORDER BY created_at DESC LIMIT 1").get(taskId);
-    if (!row) {
-      return void 0;
-    }
-    return {
-      checkpointId: row.checkpoint_id,
-      taskId: row.task_id,
-      runId: row.run_id,
-      attemptId: row.attempt_id ?? void 0,
-      payloadJson: row.payload_json ?? "",
-      createdAt: row.created_at
-    };
+    return this.persistence.checkpoints.getLatestForTask(taskId) ?? void 0;
   }
   getArtifactsForTask(taskId) {
     return this.persistence.artifacts.listByTask(taskId);
@@ -222,6 +203,9 @@ class OrchestratorPersistenceService {
       createdAt: nowIso()
     });
   }
+  getRunBudgetConsumed() {
+    return this.persistence.budgets.listByRun(this.run.runId).reduce((total, event) => total + event.consumed, 0);
+  }
   recordOperatorAction(action) {
     this.persistence.actions.record({
       actionId: (0, import_node_crypto.randomUUID)(),
@@ -247,6 +231,9 @@ class OrchestratorPersistenceService {
       updatedAt: nowIso()
     };
     this.persistence.tasks.create(updated);
+  }
+  searchCheckpoints(query, limit) {
+    return this.persistence.vectors.search(query, Math.max(1, limit));
   }
 }
 // Annotate the CommonJS export names for ESM import in node:

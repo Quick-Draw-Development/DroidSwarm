@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import WebSocket from 'ws';
 
 import { loadConfig } from './config';
@@ -8,10 +9,11 @@ import {
   buildAgentStatusUpdate,
   buildClarificationRequest,
   buildSpawnRequestedMessage,
+  buildAgentToolResponseMessage,
 } from './messages';
 import { buildAuthMessage, parseEnvelope } from './protocol';
 import type { CodexAgentResult, MessageEnvelope, OrchestratorConfig, TaskRecord } from './types';
-import { CompressionShape, StatusUpdatePayload } from '@protocol';
+import { CompressionShape, StatusUpdatePayload, ToolResponsePayload, UsageShape } from '@protocol';
 
 interface WorkerOptions {
   task: TaskRecord;
@@ -19,6 +21,7 @@ interface WorkerOptions {
   agentName: string;
   parentSummary?: string;
   parentDroidspeak?: string;
+  model?: string;
 }
 
 const parseOptions = (): WorkerOptions => {
@@ -99,25 +102,56 @@ const runWorker = async (): Promise<void> => {
 
   console.log(`[Worker ${options.agentName}] notifying orchestrator of start`);
 
+  const promptContent = buildAgentPrompt({
+    task: options.task,
+    role: options.role,
+    agentName: options.agentName,
+    parentSummary: options.parentSummary,
+    parentDroidspeak: options.parentDroidspeak,
+    projectId: config.projectId,
+    projectName: config.projectName,
+    specRules: config.agentRules,
+    specDroidspeak: config.droidspeakRules,
+  });
+  const modelOverride = options.model ?? config.codexModel;
+  const reportLLMCall = (payload: ToolResponsePayload, usage?: UsageShape): void => {
+    sendMessage(
+      socket,
+      buildAgentToolResponseMessage(
+        config,
+        options.task.taskId,
+        options.task.taskId,
+        options.agentName,
+        payload,
+        usage,
+      ),
+    );
+  };
+
+  const llmStart = Date.now();
   let result: CodexAgentResult;
   try {
     console.log(`[Worker ${options.agentName}] launching Codex prompt (${options.role})`);
     result = await runCodexPrompt({
       config,
       projectRoot: config.projectRoot,
-      prompt: buildAgentPrompt({
-        task: options.task,
-        role: options.role,
-        agentName: options.agentName,
-        parentSummary: options.parentSummary,
-        parentDroidspeak: options.parentDroidspeak,
-        projectId: config.projectId,
-        projectName: config.projectName,
-        specRules: config.agentRules,
-        specDroidspeak: config.droidspeakRules,
-      }),
+      prompt: promptContent,
+      model: modelOverride,
     });
   } catch (error) {
+    const latencyMs = Date.now() - llmStart;
+    reportLLMCall({
+      request_id: randomUUID(),
+      status: 'error',
+      error: error instanceof Error ? error.message : 'Codex execution failed.',
+      result: {
+        tool_name: 'codex_agent',
+        prompt: promptContent,
+        latency_ms: latencyMs,
+        model: modelOverride ?? 'codex_agent',
+        error: error instanceof Error ? error.message : 'Codex execution failed.',
+      },
+    });
     const errorResult: CodexAgentResult = {
       status: 'blocked',
       summary: error instanceof Error ? error.message : 'Codex execution failed.',
@@ -144,6 +178,31 @@ const runWorker = async (): Promise<void> => {
     socket.close();
     return;
   }
+
+  const latencyMs = Date.now() - llmStart;
+  const usage: UsageShape = {};
+  if (result.metrics?.tokens !== undefined) {
+    usage.total_tokens = result.metrics.tokens;
+    usage.output_tokens = result.metrics.tokens;
+  }
+  const usagePayload: UsageShape | undefined = Object.keys(usage).length > 0 ? usage : undefined;
+  reportLLMCall(
+    {
+      request_id: randomUUID(),
+      status: 'success',
+      result: {
+        tool_name: 'codex_agent',
+        prompt: promptContent,
+        output: result.summary,
+        tokens: result.metrics?.tokens,
+        tool_calls: result.metrics?.tool_calls,
+        latency_ms: latencyMs,
+        duration_ms: result.metrics?.duration_ms ?? latencyMs,
+        model: modelOverride ?? 'codex_agent',
+      },
+    },
+    usagePayload,
+  );
 
   console.log(`[Worker ${options.agentName}] Codex completed with status ${result.status}`);
 
@@ -191,4 +250,6 @@ const runWorker = async (): Promise<void> => {
   socket.close();
 };
 
-void runWorker();
+if (require.main === module) {
+  void runWorker();
+}

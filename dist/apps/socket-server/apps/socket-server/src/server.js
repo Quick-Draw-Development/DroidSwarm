@@ -296,6 +296,21 @@ class DroidSwarmSocketServer {
         }
       });
     }
+    if (message.type === "tool_response" && message.task_id) {
+      this.persistence.recordTaskEvent({
+        eventId: (0, import_node_crypto.randomUUID)(),
+        projectId: this.config.projectId,
+        taskId: message.task_id,
+        eventType: "tool_response",
+        actorType: message.from.actor_type,
+        actorId: message.from.actor_id,
+        payload: {
+          payload: message.payload,
+          usage: message.usage
+        },
+        createdAt: message.timestamp
+      });
+    }
   }
   handleAuthMessage(socket, rawMessage, state) {
     let authMessage;
@@ -472,4 +487,3 @@ const createDefaultSocketServer = () => {
   createDefaultSocketServer,
   createSocketServer
 });
-//# sourceMappingURL=server.js.map

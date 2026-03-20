@@ -169,4 +169,29 @@ export const migrations: SchemaMigration[] = [
       `);
     },
   },
+  {
+    version: 3,
+    description: 'Checkpoint vector storage and search tables',
+    apply: (database) => {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS checkpoint_vectors (
+          checkpoint_id TEXT PRIMARY KEY,
+          task_id TEXT NOT NULL,
+          run_id TEXT NOT NULL,
+          summary TEXT,
+          content TEXT,
+          embedding_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY(task_id) REFERENCES tasks(task_id),
+          FOREIGN KEY(run_id) REFERENCES runs(run_id)
+        );
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS checkpoint_vectors_search USING fts5(
+          checkpoint_id,
+          summary,
+          content
+        );
+      `);
+    },
+  },
 ];

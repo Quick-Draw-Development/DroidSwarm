@@ -1,7 +1,0 @@
-{
-  "version": 3,
-  "sources": ["../../../../../../apps/socket-server/src/main.ts"],
-  "sourcesContent": ["import { loadConfig } from './config';\nimport { createSocketServer } from './server';\n\nconst config = loadConfig();\nconst server = createSocketServer(config);\n\nconst shutdown = async (): Promise<void> => {\n  await server.stop();\n  process.exit(0);\n};\n\nprocess.on('SIGINT', () => {\n  void shutdown();\n});\nprocess.on('SIGTERM', () => {\n  void shutdown();\n});\n\nvoid server.start();\n"],
-  "mappings": "AAAA,oBAA2B;AAC3B,oBAAmC;AAEnC,MAAM,aAAS,0BAAW;AAC1B,MAAM,aAAS,kCAAmB,MAAM;AAExC,MAAM,WAAW,YAA2B;AAC1C,QAAM,OAAO,KAAK;AAClB,UAAQ,KAAK,CAAC;AAChB;AAEA,QAAQ,GAAG,UAAU,MAAM;AACzB,OAAK,SAAS;AAChB,CAAC;AACD,QAAQ,GAAG,WAAW,MAAM;AAC1B,OAAK,SAAS;AAChB,CAAC;AAED,KAAK,OAAO,MAAM;",
-  "names": []
-}

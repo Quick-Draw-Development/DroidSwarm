@@ -1,10 +1,9 @@
+import '../../shared/protocol-alias';
+import '../../shared/protocol-alias';
 import { DroidSwarmOrchestratorClient } from './OrchestratorClient';
 
-if (process.argv[2] === 'worker') {
-  require('./worker');
-} else {
+const startOrchestrator = (): void => {
   const orchestrator = new DroidSwarmOrchestratorClient();
-
   const shutdown = (): void => {
     orchestrator.stop();
     process.exit(0);
@@ -14,4 +13,18 @@ if (process.argv[2] === 'worker') {
   process.on('SIGTERM', shutdown);
 
   orchestrator.start();
+};
+
+const bootstrapWorker = (): void => {
+  require('./worker');
+};
+
+const isWorkerMode = process.argv[2] === 'worker';
+
+if (require.main === module) {
+  if (isWorkerMode) {
+    bootstrapWorker();
+  } else {
+    startOrchestrator();
+  }
 }

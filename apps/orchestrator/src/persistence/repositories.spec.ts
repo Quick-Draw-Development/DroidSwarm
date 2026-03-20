@@ -122,9 +122,7 @@ describe('Orchestrator persistence repositories', () => {
     persistence.attempts.create(attempt);
     persistence.attempts.updateStatus(attempt.attemptId, 'completed');
 
-    const updated = db
-      .prepare('SELECT status FROM task_attempts WHERE attempt_id = ?')
-      .get(attempt.attemptId) as { status: TaskAttemptRecord['status'] } | undefined;
+    const updated = persistence.attempts.getById(attempt.attemptId);
     assert.equal(updated?.status, 'completed');
 
     db.close();
@@ -207,11 +205,10 @@ describe('Orchestrator persistence repositories', () => {
 
     service.recordBudgetEvent('task-limit', 'test limit hit', 1);
 
-    const event = db
-      .prepare('SELECT detail, consumed FROM budget_events WHERE task_id = ?')
-      .get('task-limit') as { detail: string; consumed: number } | undefined;
-    assert.equal(event?.detail, 'test limit hit');
-    assert.equal(event?.consumed, 1);
+    const events = persistence.budgets.listByTask('task-limit');
+    assert.equal(events.length, 1);
+    assert.equal(events[0].detail, 'test limit hit');
+    assert.equal(events[0].consumed, 1);
 
     db.close();
     rmSync(tempDir, { recursive: true, force: true });
@@ -241,12 +238,10 @@ describe('Orchestrator persistence repositories', () => {
       metadata: { reason: 'urgent' },
     });
 
-    const stored = db
-      .prepare('SELECT action_type, detail, metadata_json FROM operator_actions WHERE task_id = ?')
-      .get('task-operator') as { action_type: string; detail: string; metadata_json: string } | undefined;
-    assert.equal(stored?.action_type, 'cancel_task');
+    const stored = persistence.actions.listByTask('task-operator')[0];
+    assert.equal(stored?.actionType, 'cancel_task');
     assert.equal(stored?.detail, 'operator requested cancel');
-    assert.equal(JSON.parse(stored?.metadata_json ?? '{}').reason, 'urgent');
+    assert.equal(JSON.parse(stored?.metadataJson ?? '{}').reason, 'urgent');
 
     db.close();
     rmSync(tempDir, { recursive: true, force: true });
@@ -280,9 +275,7 @@ describe('Orchestrator persistence repositories', () => {
       details: 'all good',
     });
 
-    const stored = db
-      .prepare('SELECT status, reviewer, details FROM verification_reviews WHERE task_id = ?')
-      .get(task.taskId) as { status: string; reviewer: string; details: string } | undefined;
+    const stored = persistence.verifications.listByTask(task.taskId)[0];
     assert.equal(stored?.status, 'passed');
     assert.equal(stored?.reviewer, 'Tester');
     assert.equal(stored?.details, 'all good');

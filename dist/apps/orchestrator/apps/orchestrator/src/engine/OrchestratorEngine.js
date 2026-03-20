@@ -145,6 +145,10 @@ class OrchestratorEngine {
       this.persistArtifact(message);
       return;
     }
+    if (isTaskChannel && message.type === "tool_request") {
+      await this.handleToolRequest(message);
+      return;
+    }
     if (isTaskChannel && message.type === "spawn_requested") {
       const payload = message.payload;
       this.recordChannelEvent(
@@ -405,9 +409,34 @@ class OrchestratorEngine {
     this.options.scheduler.handleArtifactRecorded(
       message.payload.task_id,
       attemptMeta.attemptId,
+      message.payload.artifact_id,
       message.payload.kind,
       message.payload.summary
     );
+  }
+  async handleToolRequest(message) {
+    const taskId = message.task_id;
+    if (!taskId) {
+      console.warn("[OrchestratorEngine] tool request without task_id");
+      return;
+    }
+    const request = {
+      requestId: message.payload.request_id,
+      taskId,
+      toolName: message.payload.tool_name,
+      parameters: message.payload.parameters,
+      agentName: message.from.actor_name
+    };
+    const response = await this.options.toolService.handleRequest(request);
+    const responseMessage = (0, import_messages.buildToolResponseMessage)(
+      this.options.config,
+      taskId,
+      request.requestId,
+      response.status,
+      response.result,
+      response.error
+    );
+    this.options.gateway.sendToTask(taskId, responseMessage);
   }
   sendStatusUpdate(roomId, taskId, phase, statusCode, content, extraPayload) {
     this.options.gateway.send(

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { UsageShape } from '@protocol';
 
 import type {
   CodexAgentResult,
@@ -6,6 +7,8 @@ import type {
   OrchestratorConfig,
   RequestedAgent,
   SpawnedAgent,
+  ToolRequestPayload,
+  ToolResponsePayload,
 } from './types';
 
 const nowIso = (): string => new Date().toISOString();
@@ -159,6 +162,25 @@ export const buildClarificationRequest = (
   },
 });
 
+export const buildAgentToolResponseMessage = (
+  config: OrchestratorConfig,
+  taskId: string,
+  roomId: string,
+  agentName: string,
+  payload: ToolResponsePayload,
+  usage?: UsageShape,
+): MessageEnvelope => ({
+  message_id: randomUUID(),
+  project_id: config.projectId,
+  room_id: roomId,
+  task_id: taskId,
+  type: 'tool_response',
+  from: buildActor(agentName, 'agent'),
+  timestamp: nowIso(),
+  payload,
+  usage,
+});
+
 export const buildOperatorChatResponse = (
   config: OrchestratorConfig,
   content: string,
@@ -195,6 +217,45 @@ export const buildPlanProposedMessage = (
     summary,
     plan,
     dependencies,
+  },
+});
+
+export const buildToolRequestMessage = (
+  config: OrchestratorConfig,
+  taskId: string,
+  agentName: string,
+  payload: ToolRequestPayload,
+): MessageEnvelope<'tool_request'> => ({
+  message_id: randomUUID(),
+  project_id: config.projectId,
+  room_id: taskId,
+  task_id: taskId,
+  type: 'tool_request',
+  from: buildActor(agentName, 'agent'),
+  timestamp: nowIso(),
+  payload,
+});
+
+export const buildToolResponseMessage = (
+  config: OrchestratorConfig,
+  taskId: string,
+  requestId: string,
+  status: ToolResponsePayload['status'],
+  result?: ToolResponsePayload['result'],
+  error?: string,
+): MessageEnvelope<'tool_response'> => ({
+  message_id: randomUUID(),
+  project_id: config.projectId,
+  room_id: taskId,
+  task_id: taskId,
+  type: 'tool_response',
+  from: buildActor(config.agentName, 'orchestrator'),
+  timestamp: nowIso(),
+  payload: {
+    request_id: requestId,
+    status,
+    result,
+    error,
   },
 });
 

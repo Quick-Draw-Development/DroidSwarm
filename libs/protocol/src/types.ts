@@ -202,6 +202,21 @@ export interface CheckpointEventPayload {
   summary_ref?: string;
 }
 
+export type ToolName = 'file_read' | 'file_write' | 'nx_run' | 'web_search' | 'checkpoint_search';
+
+export interface ToolRequestPayload {
+  request_id: string;
+  tool_name: ToolName;
+  parameters?: Record<string, unknown>;
+}
+
+export interface ToolResponsePayload {
+  request_id: string;
+  status: 'success' | 'error';
+  result?: Record<string, unknown>;
+  error?: string;
+}
+
 export interface MessagePayloadMap {
   status_update: StatusUpdatePayload;
   task_created: TaskCreatedPayload;
@@ -227,6 +242,8 @@ export interface MessagePayloadMap {
   trace_event: TraceEventPayload;
   limit_event: LimitEventPayload;
   checkpoint_event: CheckpointEventPayload;
+  tool_request: ToolRequestPayload;
+  tool_response: ToolResponsePayload;
 }
 
 export type MessageType = keyof MessagePayloadMap;

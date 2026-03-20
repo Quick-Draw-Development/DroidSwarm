@@ -222,6 +222,20 @@ const checkpointEventPayloadSchema = z.object({
   summary_ref: z.string().optional(),
 }).passthrough();
 
+const toolNameEnum = z.enum(['file_read', 'file_write', 'nx_run', 'web_search', 'checkpoint_search'] as const);
+const toolRequestPayloadSchema = z.object({
+  request_id: z.string().min(1),
+  tool_name: toolNameEnum,
+  parameters: z.record(z.string(), z.unknown()).optional(),
+});
+
+const toolResponsePayloadSchema = z.object({
+  request_id: z.string().min(1),
+  status: z.enum(['success', 'error']),
+  result: z.record(z.string(), z.unknown()).optional(),
+  error: z.string().min(1).optional(),
+});
+
 const runCompletedPayloadSchema = z.object({
   run_id: z.string().min(1),
   status: z.enum(['completed', 'failed', 'cancelled']),
@@ -253,6 +267,8 @@ const payloadSchemas: { [K in MessageType]: z.ZodType<MessagePayloadMap[K]> } = 
   trace_event: traceEventPayloadSchema,
   limit_event: limitEventPayloadSchema,
   checkpoint_event: checkpointEventPayloadSchema,
+  tool_request: toolRequestPayloadSchema,
+  tool_response: toolResponsePayloadSchema,
 };
 
 const envelopeSchemas = (Object.keys(payloadSchemas) as MessageType[]).map((type) =>

@@ -41,6 +41,10 @@ class TaskScheduler {
     this.config = config;
     this.readyQueue = /* @__PURE__ */ new Set();
     this.retryTimers = /* @__PURE__ */ new Map();
+    this.pendingCheckpoints = /* @__PURE__ */ new Map();
+    this.artifactCriticQueue = /* @__PURE__ */ new Set();
+    this.tasksAwaitingCritic = /* @__PURE__ */ new Set();
+    this.budgetLimitReached = false;
   }
   setEvents(events) {
     this.events = events;
@@ -65,6 +69,10 @@ class TaskScheduler {
       summary: result.summary
     });
     const stage = typeof task.metadata?.stage === "string" ? task.metadata.stage : void 0;
+    if (stage === "artifact_verification") {
+      this.handleArtifactVerificationResult(task, attemptId, agentName, result);
+      return;
+    }
     if (stage === "verification") {
       this.handleVerificationResult(task, attemptId, agentName, result);
       return;
@@ -96,62 +104,45 @@ class TaskScheduler {
       this.persistenceService.setTaskStatus(taskId, "waiting_on_human");
       this.scheduleRetry(task.taskId);
     }
-    if (result.compression?.compressed_content) {
-      const checkpointId = this.persistenceService.recordCheckpoint(
-        taskId,
-        attemptId,
-        {
-          compression: result.compression,
-          summary: result.summary
-        }
-      );
-      this.events?.onCheckpointCreated?.(
-        taskId,
-        checkpointId,
-        result.summary,
-        {
-          compression: result.compression
-        }
-      );
-    }
+    this.enqueueCheckpoint(task, attemptId, result);
     this.resolveParentIfReady(task);
     this.schedule();
   }
-  handleArtifactRecorded(taskId, attemptId, kind, summary) {
-    if (this.config.sideEffectActionsBeforeReview <= 0 || kind !== "side_effect") {
-      return;
-    }
+  handleArtifactRecorded(taskId, attemptId, artifactId, kind, summary) {
     const task = this.persistenceService.getTask(taskId);
-    if (!task || this.isSideEffectReviewTriggered(task)) {
+    if (!task) {
       return;
     }
-    const count = this.persistenceService.incrementAttemptSideEffectCount(attemptId);
-    if (count < this.config.sideEffectActionsBeforeReview) {
-      return;
-    }
-    const detail = `Side-effect limit (${this.config.sideEffectActionsBeforeReview}) reached after ${count} actions`;
-    const attempt = this.persistenceService.getAttempt(attemptId);
-    this.persistenceService.updateAttemptStatus(attemptId, "blocked", {
-      ...attempt?.metadata ?? {},
-      reason_code: "side_effect_limit",
-      summary: detail
-    });
-    this.recordBudgetLimit(taskId, detail, count);
-    this.persistenceService.updateTaskMetadata(task.taskId, {
-      ...task.metadata ?? {},
-      side_effect_review: {
-        triggered_at: (/* @__PURE__ */ new Date()).toISOString(),
-        count,
-        detail
+    if (this.config.sideEffectActionsBeforeReview > 0 && kind === "side_effect" && !this.isSideEffectReviewTriggered(task)) {
+      const count = this.persistenceService.incrementAttemptSideEffectCount(attemptId);
+      if (count >= this.config.sideEffectActionsBeforeReview) {
+        const detail = `Side-effect limit (${this.config.sideEffectActionsBeforeReview}) reached after ${count} actions`;
+        const attempt = this.persistenceService.getAttempt(attemptId);
+        this.persistenceService.updateAttemptStatus(attemptId, "blocked", {
+          ...attempt?.metadata ?? {},
+          reason_code: "side_effect_limit",
+          summary: detail
+        });
+        this.recordBudgetLimit(taskId, detail, count);
+        this.persistenceService.updateTaskMetadata(task.taskId, {
+          ...task.metadata ?? {},
+          side_effect_review: {
+            triggered_at: (/* @__PURE__ */ new Date()).toISOString(),
+            count,
+            detail
+          }
+        });
+        this.events?.onVerificationRequested?.(
+          task.taskId,
+          "review",
+          this.config.agentName,
+          detail
+        );
+        this.startReview(task, summary ?? "Side-effect review triggered");
       }
-    });
-    this.events?.onVerificationRequested?.(
-      task.taskId,
-      "review",
-      this.config.agentName,
-      detail
-    );
-    this.startReview(task, summary ?? "Side-effect review triggered");
+    }
+    this.queueArtifactVerification(task, artifactId, summary);
+    this.schedule();
   }
   schedule() {
     const pending = Array.from(this.readyQueue);
@@ -173,6 +164,9 @@ class TaskScheduler {
   }
   canRun(task) {
     if (task.status === "running" || task.status === "cancelled") {
+      return false;
+    }
+    if (!this.enforceBudgetLimit(task)) {
       return false;
     }
     const globalActive = this.supervisor.getActiveAgentCount();
@@ -265,7 +259,15 @@ class TaskScheduler {
       return;
     }
     const attemptId = (0, import_node_crypto.randomUUID)();
-    const spawned = this.supervisor.startAgentForTask(record, role, attemptId, parentSummary, parentDroidspeak);
+    const model = this.selectModelForTask(task, role);
+    const spawned = this.supervisor.startAgentForTask(
+      record,
+      role,
+      attemptId,
+      parentSummary,
+      parentDroidspeak,
+      model
+    );
     if (!spawned) {
       this.readyQueue.add(task.taskId);
       return;
@@ -280,7 +282,8 @@ class TaskScheduler {
         instructions,
         parent_summary: parentSummary,
         parent_droidspeak: parentDroidspeak,
-        effective_policy: effectivePolicy
+        effective_policy: effectivePolicy,
+        effective_model: model
       }
     );
     this.persistenceService.recordAssignment(spawned.agentName, attemptId);
@@ -350,6 +353,65 @@ class TaskScheduler {
       return;
     }
     this.persistenceService.setTaskStatus(parent.taskId, "completed");
+  }
+  queueArtifactVerification(task, artifactId, summary) {
+    if (!artifactId || this.artifactCriticQueue.has(artifactId)) {
+      return;
+    }
+    this.artifactCriticQueue.add(artifactId);
+    this.tasksAwaitingCritic.add(task.taskId);
+    const description = summary ? `Critic review: ${summary}` : `Critic review for artifact ${artifactId}`;
+    const child = this.createStageTask(
+      task,
+      "artifact_verification",
+      "critic",
+      description,
+      summary,
+      { artifact_id: artifactId, artifact_summary: summary }
+    );
+    this.readyQueue.add(child.taskId);
+    this.persistenceService.setTaskStatus(task.taskId, "waiting_on_dependency");
+  }
+  enqueueCheckpoint(task, attemptId, result) {
+    const payload = this.buildCheckpointPayload(result);
+    if (!payload) {
+      return;
+    }
+    if (this.tasksAwaitingCritic.has(task.taskId)) {
+      this.pendingCheckpoints.set(task.taskId, {
+        attemptId,
+        summary: result.summary,
+        payload
+      });
+      return;
+    }
+    this.persistCheckpoint(task.taskId, attemptId, result.summary, payload);
+  }
+  buildCheckpointPayload(result) {
+    if (!result.compression) {
+      return void 0;
+    }
+    return {
+      compression: result.compression,
+      summary: result.summary
+    };
+  }
+  persistCheckpoint(taskId, attemptId, summary, payload) {
+    const checkpointId = this.persistenceService.recordCheckpoint(taskId, attemptId, payload);
+    this.events?.onCheckpointCreated?.(
+      taskId,
+      checkpointId,
+      summary,
+      payload
+    );
+  }
+  flushPendingCheckpoint(task) {
+    const pending = this.pendingCheckpoints.get(task.taskId);
+    if (!pending) {
+      return;
+    }
+    this.pendingCheckpoints.delete(task.taskId);
+    this.persistCheckpoint(task.taskId, pending.attemptId, pending.summary, pending.payload);
   }
   log(message) {
     console.log("[TaskScheduler]", message);
@@ -457,6 +519,53 @@ class TaskScheduler {
     }
     this.resolveParentIfReady(task);
   }
+  handleArtifactVerificationResult(task, attemptId, agentName, result) {
+    const parentId = task.parentTaskId;
+    if (!parentId) {
+      return;
+    }
+    const parent = this.persistenceService.getTask(parentId);
+    if (!parent) {
+      return;
+    }
+    const normalizedStatus = this.mapResultToOutcomeStatus(result.status);
+    this.persistenceService.recordVerificationOutcome({
+      taskId: parent.taskId,
+      attemptId,
+      stage: "verification",
+      status: normalizedStatus,
+      summary: result.summary,
+      details: this.buildOutcomeDetails(result),
+      reviewer: agentName
+    });
+    this.events?.onVerificationOutcome?.(
+      parent.taskId,
+      "verification",
+      normalizedStatus,
+      result.summary,
+      attemptId,
+      agentName
+    );
+    if (result.status === "completed") {
+      this.tasksAwaitingCritic.delete(parent.taskId);
+      const artifactId = typeof task.metadata?.artifact_id === "string" ? task.metadata.artifact_id : void 0;
+      if (artifactId) {
+        this.artifactCriticQueue.delete(artifactId);
+      }
+      this.persistenceService.updateTaskMetadata(parent.taskId, {
+        ...parent.metadata ?? {},
+        critic_verified: (/* @__PURE__ */ new Date()).toISOString()
+      });
+      this.flushPendingCheckpoint(parent);
+      this.persistenceService.setTaskStatus(parent.taskId, "queued");
+    } else {
+      this.persistenceService.setTaskStatus(parent.taskId, "waiting_on_human");
+      this.scheduleRetry(parent.taskId);
+    }
+    this.resolveParentIfReady(task);
+    this.readyQueue.add(parent.taskId);
+    this.schedule();
+  }
   startVerification(parent, summary) {
     if (this.hasStageDependency(parent, "verification")) {
       return;
@@ -479,7 +588,7 @@ class TaskScheduler {
     this.readyQueue.add(child.taskId);
     this.persistenceService.setTaskStatus(parent.taskId, "waiting_on_dependency");
   }
-  createStageTask(parent, stage, role, description, parentSummary) {
+  createStageTask(parent, stage, role, description, parentSummary, extraMetadata) {
     const taskId = (0, import_node_crypto.randomUUID)();
     const record = this.persistenceService.createTask({
       taskId,
@@ -492,7 +601,8 @@ class TaskScheduler {
         agent_role: role,
         task_type: stage,
         description,
-        parent_summary: parentSummary
+        parent_summary: parentSummary,
+        ...extraMetadata
       }
     });
     this.persistenceService.addDependency(parent.taskId, record.taskId);
@@ -511,6 +621,24 @@ class TaskScheduler {
   isSideEffectReviewTriggered(task) {
     return Boolean(task.metadata?.side_effect_review);
   }
+  selectModelForTask(task, role) {
+    const metadataModel = typeof task.metadata?.agent_model === "string" ? task.metadata.agent_model : void 0;
+    if (metadataModel) {
+      return metadataModel;
+    }
+    const stage = typeof task.metadata?.stage === "string" ? task.metadata.stage : void 0;
+    if (stage === "verification" || stage === "review") {
+      return this.config.modelRouting.verification;
+    }
+    const normalizedTaskType = typeof task.metadata?.task_type === "string" ? task.metadata.task_type.toLowerCase() : "";
+    if (this.isCodeRole(role) || normalizedTaskType.includes("code") || normalizedTaskType.includes("implementation") || normalizedTaskType.includes("dev") || normalizedTaskType.includes("coder")) {
+      return this.config.modelRouting.code;
+    }
+    if (normalizedTaskType.includes("plan") || role.toLowerCase().includes("plan")) {
+      return this.config.modelRouting.planning;
+    }
+    return this.config.modelRouting.default;
+  }
   parseCheckpointPayload(checkpoint) {
     try {
       return JSON.parse(checkpoint.payloadJson);
@@ -524,6 +652,23 @@ class TaskScheduler {
   }
   recordBudgetLimit(taskId, detail, consumed) {
     this.persistenceService.recordBudgetEvent(taskId, detail, consumed);
+  }
+  enforceBudgetLimit(task) {
+    const limit = this.config.budgetMaxConsumed;
+    if (limit == null) {
+      return true;
+    }
+    if (this.budgetLimitReached) {
+      return false;
+    }
+    const consumed = this.persistenceService.getRunBudgetConsumed();
+    if (consumed >= limit) {
+      this.recordBudgetLimit(task.taskId, `Run budget limit (${limit}) reached (${consumed})`, consumed);
+      this.persistenceService.setTaskStatus(task.taskId, "waiting_on_human");
+      this.budgetLimitReached = true;
+      return false;
+    }
+    return true;
   }
   checkSideEffectBudget(task) {
     if (this.config.sideEffectActionsBeforeReview <= 0) {

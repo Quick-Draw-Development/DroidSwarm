@@ -13,6 +13,41 @@ import { TaskScheduler } from './TaskScheduler';
 
 const nowIso = (): string => new Date().toISOString();
 
+const createTestConfig = (overrides: Partial<OrchestratorConfig> = {}): OrchestratorConfig => ({
+  environment: 'test',
+  projectId: 'droidswarm',
+  projectName: 'DroidSwarm',
+  projectRoot: '/',
+  agentName: 'Orchestrator',
+  agentRole: 'control-plane',
+  socketUrl: 'ws://localhost:8765',
+  heartbeatMs: 1000,
+  reconnectMs: 1000,
+  codexBin: 'codex',
+  codexSandboxMode: 'workspace-write',
+  maxAgentsPerTask: 4,
+  maxConcurrentAgents: 4,
+  specDir: '',
+  orchestratorRules: '',
+  droidspeakRules: '',
+  agentRules: '',
+  dbPath: '',
+  schedulerMaxTaskDepth: 4,
+  schedulerMaxFanOut: 3,
+  schedulerRetryIntervalMs: 1000,
+  maxConcurrentCodeAgents: 2,
+  sideEffectActionsBeforeReview: 1,
+  allowedTools: [],
+  modelRouting: {
+    planning: 'o1-preview',
+    verification: 'gpt-4o-mini',
+    code: 'claude-3.5-sonnet',
+    default: 'o1-preview',
+  },
+  budgetMaxConsumed: undefined,
+  ...overrides,
+});
+
 describe('TaskScheduler', () => {
   it('schedules tasks, respects dependencies, and reopens parents when children finish', () => {
     const workspace = mkdtempSync(path.join(tmpdir(), 'droidswarm-scheduler-'));
@@ -23,7 +58,7 @@ describe('TaskScheduler', () => {
 
     const spawnLog: Array<{ taskId: string; role: string; attemptId: string; agentName: string }> = [];
     const supervisorStub = {
-      startAgentForTask(task, role, attemptId) {
+      startAgentForTask(task, role, attemptId, _parentSummary?: string, _parentDroidspeak?: string, model?: string) {
         spawnLog.push({ taskId: task.taskId, role, attemptId, agentName: `test-${attemptId}` });
         return {
           agentName: `test-${attemptId}`,
@@ -43,32 +78,7 @@ describe('TaskScheduler', () => {
       },
     } as unknown as AgentSupervisor;
 
-    const config: OrchestratorConfig = {
-      environment: 'test',
-      projectId: 'droidswarm',
-      projectName: 'DroidSwarm',
-      projectRoot: '/',
-      agentName: 'Orchestrator',
-      agentRole: 'control-plane',
-      socketUrl: 'ws://localhost:8765',
-      heartbeatMs: 1000,
-      reconnectMs: 1000,
-      codexBin: 'codex',
-      codexSandboxMode: 'workspace-write',
-      maxAgentsPerTask: 4,
-      maxConcurrentAgents: 4,
-      specDir: '',
-      orchestratorRules: '',
-      droidspeakRules: '',
-      agentRules: '',
-      dbPath: '',
-      schedulerMaxTaskDepth: 4,
-      schedulerMaxFanOut: 3,
-      schedulerRetryIntervalMs: 1000,
-      maxConcurrentCodeAgents: 2,
-      sideEffectActionsBeforeReview: 1,
-      allowedTools: [],
-    };
+    const config = createTestConfig();
     const scheduler = new TaskScheduler(service, supervisorStub, config);
     const rootTask = service.createTask({
       taskId: 'root',
@@ -135,7 +145,7 @@ describe('TaskScheduler', () => {
 
     const spawnLog: Array<{ taskId: string; role: string; attemptId: string; agentName: string }> = [];
     const supervisorStub = {
-      startAgentForTask(task, role, attemptId) {
+      startAgentForTask(task, role, attemptId, _parentSummary?: string, _parentDroidspeak?: string, model?: string) {
         spawnLog.push({ taskId: task.taskId, role, attemptId, agentName: `test-${attemptId}` });
         return {
           agentName: `test-${attemptId}`,
@@ -155,32 +165,7 @@ describe('TaskScheduler', () => {
       },
     } as unknown as AgentSupervisor;
 
-    const config: OrchestratorConfig = {
-      environment: 'test',
-      projectId: 'droidswarm',
-      projectName: 'DroidSwarm',
-      projectRoot: '/',
-      agentName: 'Orchestrator',
-      agentRole: 'control-plane',
-      socketUrl: 'ws://localhost:8765',
-      heartbeatMs: 1000,
-      reconnectMs: 1000,
-      codexBin: 'codex',
-      codexSandboxMode: 'workspace-write',
-      maxAgentsPerTask: 4,
-      maxConcurrentAgents: 4,
-      specDir: '',
-      orchestratorRules: '',
-      droidspeakRules: '',
-      agentRules: '',
-      dbPath: '',
-      schedulerMaxTaskDepth: 4,
-      schedulerMaxFanOut: 3,
-      schedulerRetryIntervalMs: 1000,
-      maxConcurrentCodeAgents: 2,
-      sideEffectActionsBeforeReview: 1,
-      allowedTools: [],
-    };
+    const config = createTestConfig();
     const scheduler = new TaskScheduler(service, supervisorStub, config);
     const rootTask = service.createTask({
       taskId: 'root',
@@ -238,7 +223,7 @@ describe('TaskScheduler', () => {
 
     const spawnLog: Array<{ taskId: string; role: string; attemptId: string; agentName: string }> = [];
     const supervisorStub = {
-      startAgentForTask(task, role, attemptId) {
+      startAgentForTask(task, role, attemptId, _parentSummary?: string, _parentDroidspeak?: string, model?: string) {
         spawnLog.push({ taskId: task.taskId, role, attemptId, agentName: `test-${attemptId}` });
         return {
           agentName: `test-${attemptId}`,
@@ -258,32 +243,7 @@ describe('TaskScheduler', () => {
       },
     } as unknown as AgentSupervisor;
 
-    const config: OrchestratorConfig = {
-      environment: 'test',
-      projectId: 'droidswarm',
-      projectName: 'DroidSwarm',
-      projectRoot: '/',
-      agentName: 'Orchestrator',
-      agentRole: 'control-plane',
-      socketUrl: 'ws://localhost:8765',
-      heartbeatMs: 1000,
-      reconnectMs: 1000,
-      codexBin: 'codex',
-      codexSandboxMode: 'workspace-write',
-      maxAgentsPerTask: 4,
-      maxConcurrentAgents: 4,
-      specDir: '',
-      orchestratorRules: '',
-      droidspeakRules: '',
-      agentRules: '',
-      dbPath: '',
-      schedulerMaxTaskDepth: 4,
-      schedulerMaxFanOut: 3,
-      schedulerRetryIntervalMs: 1000,
-      maxConcurrentCodeAgents: 2,
-      sideEffectActionsBeforeReview: 1,
-      allowedTools: [],
-    };
+    const config = createTestConfig();
     const scheduler = new TaskScheduler(service, supervisorStub, config);
     const policyTask = service.createTask({
       taskId: 'policy-root',
@@ -345,7 +305,7 @@ describe('TaskScheduler', () => {
 
     const spawnLog: Array<{ taskId: string; role: string; attemptId: string; agentName: string }> = [];
     const supervisorStub = {
-      startAgentForTask(task, role, attemptId) {
+      startAgentForTask(task, role, attemptId, _parentSummary?: string, _parentDroidspeak?: string, model?: string) {
         spawnLog.push({ taskId: task.taskId, role, attemptId, agentName: `test-${attemptId}` });
         return {
           agentName: `test-${attemptId}`,
@@ -365,36 +325,12 @@ describe('TaskScheduler', () => {
       },
     } as unknown as AgentSupervisor;
 
-    const config: OrchestratorConfig = {
-      environment: 'test',
-      projectId: 'droidswarm',
-      projectName: 'DroidSwarm',
-      projectRoot: '/',
-      agentName: 'Orchestrator',
-      agentRole: 'control-plane',
-      socketUrl: 'ws://localhost:8765',
-      heartbeatMs: 1000,
-      reconnectMs: 1000,
-      codexBin: 'codex',
-      codexSandboxMode: 'workspace-write',
-      maxAgentsPerTask: 4,
-      maxConcurrentAgents: 4,
-      specDir: '',
-      orchestratorRules: '',
-      droidspeakRules: '',
-      agentRules: '',
-      dbPath: '',
-      schedulerMaxTaskDepth: 4,
-      schedulerMaxFanOut: 3,
-      schedulerRetryIntervalMs: 1000,
-      maxConcurrentCodeAgents: 2,
-      sideEffectActionsBeforeReview: 1,
-      allowedTools: [],
+    const config = createTestConfig({
       policyDefaults: {
         maxTokens: 50,
         approvalPolicy: 'auto',
       },
-    };
+    });
     const scheduler = new TaskScheduler(service, supervisorStub, config);
     const defaultTask = service.createTask({
       taskId: 'default-policy',
@@ -426,7 +362,7 @@ describe('TaskScheduler', () => {
 
     const spawnLog: Array<{ taskId: string; role: string; attemptId: string; agentName: string }> = [];
     const supervisorStub = {
-      startAgentForTask(task, role, attemptId) {
+      startAgentForTask(task, role, attemptId, _parentSummary?: string, _parentDroidspeak?: string, model?: string) {
         spawnLog.push({ taskId: task.taskId, role, attemptId, agentName: `test-${attemptId}` });
         return {
           agentName: `test-${attemptId}`,
@@ -447,32 +383,9 @@ describe('TaskScheduler', () => {
     } as unknown as AgentSupervisor;
 
     const reviewNotifications: Array<{ taskId: string; detail?: string }> = [];
-    const config: OrchestratorConfig = {
-      environment: 'test',
-      projectId: 'droidswarm',
-      projectName: 'DroidSwarm',
-      projectRoot: '/',
-      agentName: 'Orchestrator',
-      agentRole: 'control-plane',
-      socketUrl: 'ws://localhost:8765',
-      heartbeatMs: 1000,
-      reconnectMs: 1000,
-      codexBin: 'codex',
-      codexSandboxMode: 'workspace-write',
-      maxAgentsPerTask: 4,
-      maxConcurrentAgents: 4,
-      specDir: '',
-      orchestratorRules: '',
-      droidspeakRules: '',
-      agentRules: '',
-      dbPath: '',
-      schedulerMaxTaskDepth: 4,
-      schedulerMaxFanOut: 3,
-      schedulerRetryIntervalMs: 1000,
-      maxConcurrentCodeAgents: 2,
+    const config = createTestConfig({
       sideEffectActionsBeforeReview: 2,
-      allowedTools: [],
-    };
+    });
     const scheduler = new TaskScheduler(service, supervisorStub, config);
     scheduler.setEvents({
       onVerificationRequested: (taskId, _type, _requestedBy, detail) => {
@@ -493,10 +406,10 @@ describe('TaskScheduler', () => {
     scheduler.handleNewTask(task.taskId);
     assert.equal(spawnLog.length, 1);
 
-    scheduler.handleArtifactRecorded(task.taskId, spawnLog[0].attemptId, 'side_effect', 'write file 1');
+    scheduler.handleArtifactRecorded(task.taskId, spawnLog[0].attemptId, 'artifact-write-1', 'side_effect', 'write file 1');
     assert.equal(service.getAttempt(spawnLog[0].attemptId)?.metadata?.side_effect_count, 1);
 
-    scheduler.handleArtifactRecorded(task.taskId, spawnLog[0].attemptId, 'side_effect', 'write file 2');
+    scheduler.handleArtifactRecorded(task.taskId, spawnLog[0].attemptId, 'artifact-write-2', 'side_effect', 'write file 2');
     assert.equal(service.getAttempt(spawnLog[0].attemptId)?.metadata?.side_effect_count, 2);
 
     const parent = service.getTask(task.taskId);
@@ -509,6 +422,11 @@ describe('TaskScheduler', () => {
       .map((dependency) => service.getTask(dependency.dependsOnTaskId))
       .find((child) => child?.metadata?.stage === 'review');
     assert.ok(reviewChild);
+
+    const critics = spawnLog.filter((entry) => entry.role === 'critic');
+    assert.equal(critics.length, 2, 'Each artifact should spawn a critic agent.');
+    const criticStages = service.getTasks().filter((t) => t.metadata?.stage === 'artifact_verification');
+    assert.equal(criticStages.length, 2, 'Two artifact verification stages should exist.');
 
     const budgetEvent = database
       .prepare('SELECT detail FROM budget_events WHERE task_id = ? ORDER BY created_at DESC LIMIT 1')

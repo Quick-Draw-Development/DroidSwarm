@@ -11,6 +11,7 @@ import { OrchestratorEngine } from './OrchestratorEngine';
 import { WorkerRegistry } from '../worker-registry';
 import type { OrchestratorPersistenceService } from '../persistence/service';
 import type { TaskScheduler } from '../scheduler/TaskScheduler';
+import { ToolService } from '../tools/ToolService';
 
 const TEST_CONFIG: OrchestratorConfig = {
   environment: 'test',
@@ -37,7 +38,21 @@ const TEST_CONFIG: OrchestratorConfig = {
   schedulerRetryIntervalMs: 250,
   sideEffectActionsBeforeReview: 0,
   allowedTools: [],
+  modelRouting: {
+    planning: 'o1-preview',
+    verification: 'gpt-4o-mini',
+    code: 'claude-3.5-sonnet',
+    default: 'o1-preview',
+  },
+  budgetMaxConsumed: undefined,
 };
+
+const toolServiceStub = {
+  handleRequest: async () => ({
+    status: 'error' as const,
+    error: 'stubbed tool',
+  }),
+} as unknown as ToolService;
 
 describe('OrchestratorEngine status handling', () => {
   it('fires scheduler and records events from status updates', async () => {
@@ -74,6 +89,7 @@ describe('OrchestratorEngine status handling', () => {
       controlService: {} as any,
       registry: new WorkerRegistry(),
       runLifecycle: {} as any,
+      toolService: toolServiceStub,
     });
 
     engine.handleAgentAssignment('task-1', [{

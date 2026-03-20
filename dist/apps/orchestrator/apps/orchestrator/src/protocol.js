@@ -26,6 +26,7 @@ __export(protocol_exports, {
 });
 module.exports = __toCommonJS(protocol_exports);
 var import_node_crypto = require("node:crypto");
+var import_protocol_alias = require("../../shared/protocol-alias");
 var import_protocol = require("@protocol");
 const parseEnvelope = (raw) => import_protocol.messageEnvelopeSchema.parse(JSON.parse(raw));
 const nowIso = () => (/* @__PURE__ */ new Date()).toISOString();

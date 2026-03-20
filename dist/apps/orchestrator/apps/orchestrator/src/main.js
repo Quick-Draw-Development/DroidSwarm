@@ -1,7 +1,7 @@
+var import_protocol_alias = require("../../shared/protocol-alias");
+var import_protocol_alias2 = require("../../shared/protocol-alias");
 var import_OrchestratorClient = require("./OrchestratorClient");
-if (process.argv[2] === "worker") {
-  require("./worker");
-} else {
+const startOrchestrator = () => {
   const orchestrator = new import_OrchestratorClient.DroidSwarmOrchestratorClient();
   const shutdown = () => {
     orchestrator.stop();
@@ -10,4 +10,15 @@ if (process.argv[2] === "worker") {
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
   orchestrator.start();
+};
+const bootstrapWorker = () => {
+  require("./worker");
+};
+const isWorkerMode = process.argv[2] === "worker";
+if (require.main === module) {
+  if (isWorkerMode) {
+    bootstrapWorker();
+  } else {
+    startOrchestrator();
+  }
 }

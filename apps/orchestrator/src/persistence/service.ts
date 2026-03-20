@@ -4,6 +4,7 @@ import type { PersistenceClient } from './repositories';
 import type {
   ArtifactRecord,
   CheckpointRecord,
+  CheckpointVectorRecord,
   ExecutionEventRecord,
   OperatorControlActionRecord,
   PersistedTask,
@@ -12,6 +13,7 @@ import type {
   TaskDependencyRecord,
   VerificationOutcomeRecord,
 } from '../types';
+import { buildEmbedding } from '../utils/embeddings';
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -33,6 +35,14 @@ type CheckpointRow = {
   attempt_id?: string | null;
   payload_json?: string | null;
   created_at: string;
+};
+
+type CheckpointPayload = {
+  summary?: string;
+  compression?: {
+    compressed_content?: string;
+  };
+  [key: string]: unknown;
 };
 
 export class OrchestratorPersistenceService {
@@ -161,39 +171,11 @@ export class OrchestratorPersistenceService {
   }
 
   listAttemptsForTask(taskId: string): TaskAttemptRecord[] {
-    return this.persistence.database
-      .prepare('SELECT * FROM task_attempts WHERE task_id = ?')
-      .all(taskId)
-      .map((row: TaskAttemptMaintenanceRow) => ({
-        attemptId: row.attempt_id,
-        taskId: row.task_id,
-        runId: row.run_id,
-        agentName: row.agent_name,
-        status: row.status as TaskAttemptRecord['status'],
-        metadata: row.metadata_json ? JSON.parse(row.metadata_json) as Record<string, unknown> : undefined,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      }));
+    return this.persistence.attempts.listByTask(taskId);
   }
 
   getAttempt(attemptId: string): TaskAttemptRecord | undefined {
-    const row = this.persistence.database
-      .prepare('SELECT * FROM task_attempts WHERE attempt_id = ?')
-      .get(attemptId) as TaskAttemptMaintenanceRow | undefined;
-    if (!row) {
-      return undefined;
-    }
-
-    return {
-      attemptId: row.attempt_id,
-      taskId: row.task_id,
-      runId: row.run_id,
-      agentName: row.agent_name,
-      status: row.status as TaskAttemptRecord['status'],
-      metadata: row.metadata_json ? JSON.parse(row.metadata_json) as Record<string, unknown> : undefined,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    };
+    return this.persistence.attempts.getById(attemptId) ?? undefined;
   }
 
   recordArtifact(input: {
@@ -235,7 +217,7 @@ export class OrchestratorPersistenceService {
     return nextCount;
   }
 
-  recordCheckpoint(taskId: string, attemptId: string | undefined, payload: Record<string, unknown>): string {
+  recordCheckpoint(taskId: string, attemptId: string | undefined, payload: CheckpointPayload): string {
     const checkpointId = randomUUID();
     this.persistence.checkpoints.create({
       checkpointId,
@@ -245,24 +227,30 @@ export class OrchestratorPersistenceService {
       payloadJson: JSON.stringify(payload),
       createdAt: nowIso(),
     });
+    const embeddingContent = [
+      typeof payload.summary === 'string' ? payload.summary : '',
+      typeof payload.compression?.compressed_content === 'string'
+        ? payload.compression.compressed_content
+        : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    this.persistence.vectors.record({
+      checkpointId,
+      taskId,
+      runId: this.run.runId,
+      summary: typeof payload.summary === 'string' ? payload.summary : undefined,
+      content: typeof payload.compression?.compressed_content === 'string'
+        ? payload.compression.compressed_content
+        : undefined,
+      embedding: buildEmbedding(embeddingContent, 16),
+      createdAt: nowIso(),
+    });
     return checkpointId;
   }
 
   getLatestCheckpoint(taskId: string): CheckpointRecord | undefined {
-    const row = this.persistence.database
-      .prepare('SELECT * FROM checkpoints WHERE task_id = ? ORDER BY created_at DESC LIMIT 1')
-      .get(taskId) as CheckpointRow | undefined;
-    if (!row) {
-      return undefined;
-    }
-    return {
-      checkpointId: row.checkpoint_id,
-      taskId: row.task_id,
-      runId: row.run_id,
-      attemptId: row.attempt_id ?? undefined,
-      payloadJson: row.payload_json ?? '',
-      createdAt: row.created_at,
-    };
+    return this.persistence.checkpoints.getLatestForTask(taskId) ?? undefined;
   }
 
   getArtifactsForTask(taskId: string): ArtifactRecord[] {
@@ -303,6 +291,12 @@ export class OrchestratorPersistenceService {
     });
   }
 
+  getRunBudgetConsumed(): number {
+    return this.persistence.budgets
+      .listByRun(this.run.runId)
+      .reduce((total, event) => total + event.consumed, 0);
+  }
+
   recordOperatorAction(action: {
     taskId?: string;
     actionType: OperatorControlActionRecord['actionType'];
@@ -336,5 +330,9 @@ export class OrchestratorPersistenceService {
       updatedAt: nowIso(),
     };
     this.persistence.tasks.create(updated);
+  }
+
+  searchCheckpoints(query: string, limit: number): CheckpointVectorRecord[] {
+    return this.persistence.vectors.search(query, Math.max(1, limit));
   }
 }

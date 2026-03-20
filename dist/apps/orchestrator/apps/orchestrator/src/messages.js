@@ -18,6 +18,7 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var messages_exports = {};
 __export(messages_exports, {
   buildAgentStatusUpdate: () => buildAgentStatusUpdate,
+  buildAgentToolResponseMessage: () => buildAgentToolResponseMessage,
   buildArtifactCreatedMessage: () => buildArtifactCreatedMessage,
   buildCheckpointCreatedMessage: () => buildCheckpointCreatedMessage,
   buildClarificationRequest: () => buildClarificationRequest,
@@ -26,6 +27,8 @@ __export(messages_exports, {
   buildPlanProposedMessage: () => buildPlanProposedMessage,
   buildSpawnRequestedMessage: () => buildSpawnRequestedMessage,
   buildTaskAssignedMessage: () => buildTaskAssignedMessage,
+  buildToolRequestMessage: () => buildToolRequestMessage,
+  buildToolResponseMessage: () => buildToolResponseMessage,
   buildVerificationCompletedMessage: () => buildVerificationCompletedMessage,
   buildVerificationRequestedMessage: () => buildVerificationRequestedMessage
 });
@@ -132,6 +135,17 @@ const buildClarificationRequest = (config, taskId, roomId, targetUserId, questio
     content: targetUserId ? `@${targetUserId} ${question}` : question
   }
 });
+const buildAgentToolResponseMessage = (config, taskId, roomId, agentName, payload, usage) => ({
+  message_id: (0, import_node_crypto.randomUUID)(),
+  project_id: config.projectId,
+  room_id: roomId,
+  task_id: taskId,
+  type: "tool_response",
+  from: buildActor(agentName, "agent"),
+  timestamp: nowIso(),
+  payload,
+  usage
+});
 const buildOperatorChatResponse = (config, content) => ({
   message_id: (0, import_node_crypto.randomUUID)(),
   project_id: config.projectId,
@@ -157,6 +171,31 @@ const buildPlanProposedMessage = (config, taskId, planId, summary, plan, depende
     summary,
     plan,
     dependencies
+  }
+});
+const buildToolRequestMessage = (config, taskId, agentName, payload) => ({
+  message_id: (0, import_node_crypto.randomUUID)(),
+  project_id: config.projectId,
+  room_id: taskId,
+  task_id: taskId,
+  type: "tool_request",
+  from: buildActor(agentName, "agent"),
+  timestamp: nowIso(),
+  payload
+});
+const buildToolResponseMessage = (config, taskId, requestId, status, result, error) => ({
+  message_id: (0, import_node_crypto.randomUUID)(),
+  project_id: config.projectId,
+  room_id: taskId,
+  task_id: taskId,
+  type: "tool_response",
+  from: buildActor(config.agentName, "orchestrator"),
+  timestamp: nowIso(),
+  payload: {
+    request_id: requestId,
+    status,
+    result,
+    error
   }
 });
 const buildVerificationRequestedMessage = (config, taskId, verificationType, requestedBy, detail) => ({
@@ -207,6 +246,7 @@ const buildCheckpointCreatedMessage = (config, taskId, roomId, checkpointId, sum
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   buildAgentStatusUpdate,
+  buildAgentToolResponseMessage,
   buildArtifactCreatedMessage,
   buildCheckpointCreatedMessage,
   buildClarificationRequest,
@@ -215,6 +255,8 @@ const buildCheckpointCreatedMessage = (config, taskId, roomId, checkpointId, sum
   buildPlanProposedMessage,
   buildSpawnRequestedMessage,
   buildTaskAssignedMessage,
+  buildToolRequestMessage,
+  buildToolResponseMessage,
   buildVerificationCompletedMessage,
   buildVerificationRequestedMessage
 });

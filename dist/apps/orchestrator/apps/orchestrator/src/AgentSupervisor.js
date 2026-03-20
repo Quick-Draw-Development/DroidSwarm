@@ -50,7 +50,7 @@ class AgentSupervisor {
   setCallbacks(callbacks) {
     this.callbacks = { ...this.callbacks, ...callbacks };
   }
-  startAgentForTask(task, role, attemptId, parentSummary, parentDroidspeak) {
+  startAgentForTask(task, role, attemptId, parentSummary, parentDroidspeak, model) {
     if (!this.canSpawn(task)) {
       return null;
     }
@@ -60,7 +60,8 @@ class AgentSupervisor {
       role,
       agentName,
       parentSummary,
-      parentDroidspeak
+      parentDroidspeak,
+      model
     })], {
       env: process.env,
       stdio: ["ignore", "pipe", "pipe", "ipc"]

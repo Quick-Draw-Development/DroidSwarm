@@ -207,6 +207,18 @@ const checkpointEventPayloadSchema = import_zod.z.object({
   content: import_zod.z.string().optional(),
   summary_ref: import_zod.z.string().optional()
 }).passthrough();
+const toolNameEnum = import_zod.z.enum(["file_read", "file_write", "nx_run", "web_search", "checkpoint_search"]);
+const toolRequestPayloadSchema = import_zod.z.object({
+  request_id: import_zod.z.string().min(1),
+  tool_name: toolNameEnum,
+  parameters: import_zod.z.record(import_zod.z.string(), import_zod.z.unknown()).optional()
+});
+const toolResponsePayloadSchema = import_zod.z.object({
+  request_id: import_zod.z.string().min(1),
+  status: import_zod.z.enum(["success", "error"]),
+  result: import_zod.z.record(import_zod.z.string(), import_zod.z.unknown()).optional(),
+  error: import_zod.z.string().min(1).optional()
+});
 const runCompletedPayloadSchema = import_zod.z.object({
   run_id: import_zod.z.string().min(1),
   status: import_zod.z.enum(["completed", "failed", "cancelled"]),
@@ -236,7 +248,9 @@ const payloadSchemas = {
   guardrail_event: guardrailEventPayloadSchema,
   trace_event: traceEventPayloadSchema,
   limit_event: limitEventPayloadSchema,
-  checkpoint_event: checkpointEventPayloadSchema
+  checkpoint_event: checkpointEventPayloadSchema,
+  tool_request: toolRequestPayloadSchema,
+  tool_response: toolResponsePayloadSchema
 };
 const envelopeSchemas = Object.keys(payloadSchemas).map(
   (type) => baseEnvelopeSchema.extend({
@@ -264,4 +278,3 @@ const authMessageSchema = import_zod.z.object({
   authMessageSchema,
   messageEnvelopeSchema
 });
-//# sourceMappingURL=schema.js.map

@@ -48,7 +48,20 @@ const TEST_CONFIG = {
   schedulerMaxFanOut: 3,
   schedulerRetryIntervalMs: 250,
   sideEffectActionsBeforeReview: 0,
-  allowedTools: []
+  allowedTools: [],
+  modelRouting: {
+    planning: "o1-preview",
+    verification: "gpt-4o-mini",
+    code: "claude-3.5-sonnet",
+    default: "o1-preview"
+  },
+  budgetMaxConsumed: void 0
+};
+const toolServiceStub = {
+  handleRequest: async () => ({
+    status: "error",
+    error: "stubbed tool"
+  })
 };
 (0, import_node_test.describe)("OrchestratorEngine status handling", () => {
   (0, import_node_test.it)("fires scheduler and records events from status updates", async () => {
@@ -77,7 +90,8 @@ const TEST_CONFIG = {
       chatResponder: {},
       controlService: {},
       registry: new import_worker_registry.WorkerRegistry(),
-      runLifecycle: {}
+      runLifecycle: {},
+      toolService: toolServiceStub
     });
     engine.handleAgentAssignment("task-1", [{
       agentName: "Agent-1",

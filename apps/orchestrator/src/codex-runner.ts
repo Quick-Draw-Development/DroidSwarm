@@ -12,6 +12,7 @@ export const runCodexPrompt = async (input: {
   config: OrchestratorConfig;
   prompt: string;
   projectRoot: string;
+  model?: string;
 }): Promise<CodexAgentResult> => {
   const tempDir = createTempWorkspace();
   const schemaPath = path.join(tempDir, 'schema.json');
@@ -35,8 +36,9 @@ export const runCodexPrompt = async (input: {
     '-',
   ];
 
-  if (input.config.codexModel) {
-    args.splice(1, 0, '--model', input.config.codexModel);
+  const modelOverride = input.model ?? input.config.codexModel;
+  if (modelOverride) {
+    args.splice(1, 0, '--model', modelOverride);
   }
 
   await new Promise<void>((resolve, reject) => {

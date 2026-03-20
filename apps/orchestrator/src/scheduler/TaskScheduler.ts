@@ -35,6 +35,12 @@ type CheckpointPayload = {
   };
 };
 
+type PendingCheckpoint = {
+  attemptId: string;
+  summary?: string;
+  payload: Record<string, unknown>;
+};
+
 export interface TaskSchedulerEvents {
   onPlanProposed?: (
     taskId: string,
@@ -68,7 +74,11 @@ export interface TaskSchedulerEvents {
 export class TaskScheduler {
   private readonly readyQueue = new Set<string>();
   private readonly retryTimers = new Map<string, NodeJS.Timeout>();
+  private readonly pendingCheckpoints = new Map<string, PendingCheckpoint>();
+  private readonly artifactCriticQueue = new Set<string>();
+  private readonly tasksAwaitingCritic = new Set<string>();
   private events?: TaskSchedulerEvents;
+  private budgetLimitReached = false;
 
   constructor(
     private readonly persistenceService: OrchestratorPersistenceService,
@@ -110,6 +120,10 @@ export class TaskScheduler {
     });
 
     const stage = typeof task.metadata?.stage === 'string' ? task.metadata.stage : undefined;
+    if (stage === 'artifact_verification') {
+      this.handleArtifactVerificationResult(task, attemptId, agentName, result);
+      return;
+    }
     if (stage === 'verification') {
       this.handleVerificationResult(task, attemptId, agentName, result);
       return;
@@ -144,67 +158,53 @@ export class TaskScheduler {
       this.scheduleRetry(task.taskId);
     }
 
-    if (result.compression?.compressed_content) {
-      const checkpointId = this.persistenceService.recordCheckpoint(
-        taskId,
-        attemptId,
-        {
-          compression: result.compression,
-          summary: result.summary,
-        },
-      );
-      this.events?.onCheckpointCreated?.(
-        taskId,
-        checkpointId,
-        result.summary,
-        {
-          compression: result.compression,
-        },
-      );
-    }
+    this.enqueueCheckpoint(task, attemptId, result);
 
     this.resolveParentIfReady(task);
     this.schedule();
   }
 
-  handleArtifactRecorded(taskId: string, attemptId: string, kind: string, summary?: string): void {
-    if (this.config.sideEffectActionsBeforeReview <= 0 || kind !== 'side_effect') {
-      return;
-    }
-
+  handleArtifactRecorded(taskId: string, attemptId: string, artifactId: string, kind: string, summary?: string): void {
     const task = this.persistenceService.getTask(taskId);
-    if (!task || this.isSideEffectReviewTriggered(task)) {
+    if (!task) {
       return;
     }
 
-    const count = this.persistenceService.incrementAttemptSideEffectCount(attemptId);
-    if (count < this.config.sideEffectActionsBeforeReview) {
-      return;
+    if (
+      this.config.sideEffectActionsBeforeReview > 0 &&
+      kind === 'side_effect' &&
+      !this.isSideEffectReviewTriggered(task)
+    ) {
+      const count = this.persistenceService.incrementAttemptSideEffectCount(attemptId);
+      if (count >= this.config.sideEffectActionsBeforeReview) {
+        const detail = `Side-effect limit (${this.config.sideEffectActionsBeforeReview}) reached after ${count} actions`;
+        const attempt = this.persistenceService.getAttempt(attemptId);
+        this.persistenceService.updateAttemptStatus(attemptId, 'blocked', {
+          ...(attempt?.metadata ?? {}),
+          reason_code: 'side_effect_limit',
+          summary: detail,
+        });
+        this.recordBudgetLimit(taskId, detail, count);
+        this.persistenceService.updateTaskMetadata(task.taskId, {
+          ...(task.metadata ?? {}),
+          side_effect_review: {
+            triggered_at: new Date().toISOString(),
+            count,
+            detail,
+          },
+        });
+        this.events?.onVerificationRequested?.(
+          task.taskId,
+          'review',
+          this.config.agentName,
+          detail,
+        );
+        this.startReview(task, summary ?? 'Side-effect review triggered');
+      }
     }
 
-    const detail = `Side-effect limit (${this.config.sideEffectActionsBeforeReview}) reached after ${count} actions`;
-    const attempt = this.persistenceService.getAttempt(attemptId);
-    this.persistenceService.updateAttemptStatus(attemptId, 'blocked', {
-      ...(attempt?.metadata ?? {}),
-      reason_code: 'side_effect_limit',
-      summary: detail,
-    });
-    this.recordBudgetLimit(taskId, detail, count);
-    this.persistenceService.updateTaskMetadata(task.taskId, {
-      ...(task.metadata ?? {}),
-      side_effect_review: {
-        triggered_at: new Date().toISOString(),
-        count,
-        detail,
-      },
-    });
-    this.events?.onVerificationRequested?.(
-      task.taskId,
-      'review',
-      this.config.agentName,
-      detail,
-    );
-    this.startReview(task, summary ?? 'Side-effect review triggered');
+    this.queueArtifactVerification(task, artifactId, summary);
+    this.schedule();
   }
 
   private schedule(): void {
@@ -231,6 +231,10 @@ export class TaskScheduler {
 
   private canRun(task: PersistedTask): boolean {
     if (task.status === 'running' || task.status === 'cancelled') {
+      return false;
+    }
+
+    if (!this.enforceBudgetLimit(task)) {
       return false;
     }
 
@@ -345,7 +349,15 @@ export class TaskScheduler {
     }
 
     const attemptId = randomUUID();
-    const spawned = this.supervisor.startAgentForTask(record, role, attemptId, parentSummary, parentDroidspeak);
+    const model = this.selectModelForTask(task, role);
+    const spawned = this.supervisor.startAgentForTask(
+      record,
+      role,
+      attemptId,
+      parentSummary,
+      parentDroidspeak,
+      model,
+    );
     if (!spawned) {
       this.readyQueue.add(task.taskId);
       return;
@@ -362,6 +374,7 @@ export class TaskScheduler {
         parent_summary: parentSummary,
         parent_droidspeak: parentDroidspeak,
         effective_policy: effectivePolicy,
+        effective_model: model,
       },
     );
     this.persistenceService.recordAssignment(spawned.agentName, attemptId);
@@ -443,6 +456,75 @@ export class TaskScheduler {
     }
 
     this.persistenceService.setTaskStatus(parent.taskId, 'completed');
+  }
+
+  private queueArtifactVerification(task: PersistedTask, artifactId: string, summary?: string): void {
+    if (!artifactId || this.artifactCriticQueue.has(artifactId)) {
+      return;
+    }
+
+    this.artifactCriticQueue.add(artifactId);
+    this.tasksAwaitingCritic.add(task.taskId);
+    const description = summary ? `Critic review: ${summary}` : `Critic review for artifact ${artifactId}`;
+    const child = this.createStageTask(
+      task,
+      'artifact_verification',
+      'critic',
+      description,
+      summary,
+      { artifact_id: artifactId, artifact_summary: summary },
+    );
+    this.readyQueue.add(child.taskId);
+    this.persistenceService.setTaskStatus(task.taskId, 'waiting_on_dependency');
+  }
+
+  private enqueueCheckpoint(task: PersistedTask, attemptId: string, result: CodexAgentResult): void {
+    const payload = this.buildCheckpointPayload(result);
+    if (!payload) {
+      return;
+    }
+
+    if (this.tasksAwaitingCritic.has(task.taskId)) {
+      this.pendingCheckpoints.set(task.taskId, {
+        attemptId,
+        summary: result.summary,
+        payload,
+      });
+      return;
+    }
+
+    this.persistCheckpoint(task.taskId, attemptId, result.summary, payload);
+  }
+
+  private buildCheckpointPayload(result: CodexAgentResult): Record<string, unknown> | undefined {
+    if (!result.compression) {
+      return undefined;
+    }
+
+    return {
+      compression: result.compression,
+      summary: result.summary,
+    };
+  }
+
+  private persistCheckpoint(taskId: string, attemptId: string, summary: string | undefined, payload: Record<string, unknown>): void {
+    const checkpointId = this.persistenceService.recordCheckpoint(taskId, attemptId, payload);
+    this.events?.onCheckpointCreated?.(
+      taskId,
+      checkpointId,
+      summary,
+      payload,
+    );
+  }
+
+  private flushPendingCheckpoint(task: PersistedTask): void {
+    const pending = this.pendingCheckpoints.get(task.taskId);
+    if (!pending) {
+      return;
+    }
+
+    this.pendingCheckpoints.delete(task.taskId);
+    this.persistCheckpoint(task.taskId, pending.attemptId, pending.summary, pending.payload);
   }
 
   private log(message: string): void {
@@ -577,6 +659,63 @@ export class TaskScheduler {
     this.resolveParentIfReady(task);
   }
 
+  private handleArtifactVerificationResult(
+    task: PersistedTask,
+    attemptId: string,
+    agentName: string,
+    result: CodexAgentResult,
+  ): void {
+    const parentId = task.parentTaskId;
+    if (!parentId) {
+      return;
+    }
+
+    const parent = this.persistenceService.getTask(parentId);
+    if (!parent) {
+      return;
+    }
+
+    const normalizedStatus = this.mapResultToOutcomeStatus(result.status);
+    this.persistenceService.recordVerificationOutcome({
+      taskId: parent.taskId,
+      attemptId,
+      stage: 'verification',
+      status: normalizedStatus,
+      summary: result.summary,
+      details: this.buildOutcomeDetails(result),
+      reviewer: agentName,
+    });
+    this.events?.onVerificationOutcome?.(
+      parent.taskId,
+      'verification',
+      normalizedStatus,
+      result.summary,
+      attemptId,
+      agentName,
+    );
+
+    if (result.status === 'completed') {
+      this.tasksAwaitingCritic.delete(parent.taskId);
+      const artifactId = typeof task.metadata?.artifact_id === 'string' ? task.metadata.artifact_id : undefined;
+      if (artifactId) {
+        this.artifactCriticQueue.delete(artifactId);
+      }
+      this.persistenceService.updateTaskMetadata(parent.taskId, {
+        ...(parent.metadata ?? {}),
+        critic_verified: new Date().toISOString(),
+      });
+      this.flushPendingCheckpoint(parent);
+      this.persistenceService.setTaskStatus(parent.taskId, 'queued');
+    } else {
+      this.persistenceService.setTaskStatus(parent.taskId, 'waiting_on_human');
+      this.scheduleRetry(parent.taskId);
+    }
+
+    this.resolveParentIfReady(task);
+    this.readyQueue.add(parent.taskId);
+    this.schedule();
+  }
+
   private startVerification(parent: PersistedTask, summary: string | undefined): void {
     if (this.hasStageDependency(parent, 'verification')) {
       return;
@@ -605,10 +744,11 @@ export class TaskScheduler {
 
   private createStageTask(
     parent: PersistedTask,
-    stage: 'verification' | 'review',
+    stage: 'verification' | 'review' | 'artifact_verification',
     role: string,
     description: string,
     parentSummary?: string,
+    extraMetadata?: Record<string, unknown>,
   ): PersistedTask {
     const taskId = randomUUID();
     const record = this.persistenceService.createTask({
@@ -623,6 +763,7 @@ export class TaskScheduler {
         task_type: stage,
         description,
         parent_summary: parentSummary,
+        ...extraMetadata,
       },
     });
     this.persistenceService.addDependency(parent.taskId, record.taskId);
@@ -644,6 +785,37 @@ export class TaskScheduler {
     return Boolean(task.metadata?.side_effect_review);
   }
 
+  private selectModelForTask(task: PersistedTask, role: string): string {
+    const metadataModel = typeof task.metadata?.agent_model === 'string' ? task.metadata.agent_model : undefined;
+    if (metadataModel) {
+      return metadataModel;
+    }
+
+    const stage = typeof task.metadata?.stage === 'string' ? task.metadata.stage : undefined;
+    if (stage === 'verification' || stage === 'review') {
+      return this.config.modelRouting.verification;
+    }
+
+    const normalizedTaskType = typeof task.metadata?.task_type === 'string'
+      ? task.metadata.task_type.toLowerCase()
+      : '';
+    if (
+      this.isCodeRole(role) ||
+      normalizedTaskType.includes('code') ||
+      normalizedTaskType.includes('implementation') ||
+      normalizedTaskType.includes('dev') ||
+      normalizedTaskType.includes('coder')
+    ) {
+      return this.config.modelRouting.code;
+    }
+
+    if (normalizedTaskType.includes('plan') || role.toLowerCase().includes('plan')) {
+      return this.config.modelRouting.planning;
+    }
+
+    return this.config.modelRouting.default;
+  }
+
 
   private parseCheckpointPayload(checkpoint: CheckpointRecord): CheckpointPayload | undefined {
     try {
@@ -660,6 +832,26 @@ export class TaskScheduler {
 
   private recordBudgetLimit(taskId: string | undefined, detail: string, consumed: number): void {
     this.persistenceService.recordBudgetEvent(taskId, detail, consumed);
+  }
+
+  private enforceBudgetLimit(task: PersistedTask): boolean {
+    const limit = this.config.budgetMaxConsumed;
+    if (limit == null) {
+      return true;
+    }
+    if (this.budgetLimitReached) {
+      return false;
+    }
+
+    const consumed = this.persistenceService.getRunBudgetConsumed();
+    if (consumed >= limit) {
+      this.recordBudgetLimit(task.taskId, `Run budget limit (${limit}) reached (${consumed})`, consumed);
+      this.persistenceService.setTaskStatus(task.taskId, 'waiting_on_human');
+      this.budgetLimitReached = true;
+      return false;
+    }
+
+    return true;
   }
 
   private checkSideEffectBudget(task: PersistedTask): boolean {

@@ -79,4 +79,3 @@ class RoomManager {
 0 && (module.exports = {
   RoomManager
 });
-//# sourceMappingURL=RoomManager.js.map

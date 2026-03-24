@@ -5,8 +5,9 @@
   "projectType": "application",
   "targets": {
     "build": {
-      "dependsOn": [
-        "protocol:build"
+    "dependsOn": [
+        "protocol:build",
+        "shared:build"
       ],
       "executor": "@nx/esbuild:esbuild",
       "outputs": [

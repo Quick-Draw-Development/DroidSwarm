@@ -1,4 +1,4 @@
-import '@protocol-alias';
+import '@protocol-alias/index';
 import { DroidSwarmOrchestratorClient } from './OrchestratorClient';
 
 const startOrchestrator = (): void => {

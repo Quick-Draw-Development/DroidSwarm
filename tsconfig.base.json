@@ -18,18 +18,21 @@
     "skipDefaultLibCheck": true,
     "baseUrl": ".",
     "paths": {
-      "@protocol": [
-        "packages/protocol/src"
-      ],
-      "@protocol/*": [
-        "packages/protocol/src/*"
-      ],
-      "@protocol-alias": [
-        "packages/protocol-alias/src"
-      ],
-      "bootstrap": [
-        "packages/bootstrap/src/index.ts"
-      ]
+    "@protocol": [
+      "packages/protocol/src"
+    ],
+    "@protocol/*": [
+      "packages/protocol/src/*"
+    ],
+    "@protocol-alias": [
+      "packages/protocol-alias/src"
+    ],
+    "@protocol-alias/*": [
+      "packages/protocol-alias/src/*"
+    ],
+    "bootstrap": [
+      "packages/bootstrap/src/index.ts"
+    ]
     }
   },
   "exclude": [

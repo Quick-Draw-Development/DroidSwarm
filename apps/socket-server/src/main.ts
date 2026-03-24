@@ -1,4 +1,4 @@
-import '@protocol-alias';
+import '@protocol-alias/index';
 import { loadConfig } from './config';
 import { createSocketServer } from './server';
 

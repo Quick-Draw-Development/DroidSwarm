@@ -9,7 +9,7 @@ const path = require('path');
 const fs = require('fs');
 const originalResolveFilename = Module._resolveFilename;
 const distPath = __dirname;
-const manifest = [{"module":"@protocol/*","pattern":"packages/protocol/src/*"},{"module":"@protocol","pattern":"packages/protocol/src"},{"module":"@protocol-alias","pattern":"packages/protocol-alias/src"},{"module":"bootstrap","exactMatch":"packages/bootstrap/src/index.js","pattern":"packages/bootstrap/src/index.ts"}];
+const manifest = [{"module":"@protocol-alias/*","pattern":"packages/protocol-alias/src/*"},{"module":"@protocol/*","pattern":"packages/protocol/src/*"},{"module":"@protocol","pattern":"packages/protocol/src"},{"module":"@protocol-alias","pattern":"packages/protocol-alias/src"},{"module":"bootstrap","exactMatch":"packages/bootstrap/src/index.js","pattern":"packages/bootstrap/src/index.ts"}];
 
 Module._resolveFilename = function(request, parent) {
   let found;

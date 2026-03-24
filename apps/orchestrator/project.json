@@ -28,7 +28,7 @@
           {
             "glob": "**/*",
             "input": "dist/packages/protocol/src",
-            "output": "libs/protocol/src"
+            "output": "packages/protocol/src"
           },
           {
             "glob": "**/*",

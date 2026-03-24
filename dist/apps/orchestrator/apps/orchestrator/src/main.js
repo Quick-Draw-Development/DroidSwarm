@@ -1,5 +1,4 @@
-var import_protocol_alias = require("../../shared/protocol-alias");
-var import_protocol_alias2 = require("../../shared/protocol-alias");
+var import_protocol_alias = require("@protocol-alias");
 var import_OrchestratorClient = require("./OrchestratorClient");
 const startOrchestrator = () => {
   const orchestrator = new import_OrchestratorClient.DroidSwarmOrchestratorClient();

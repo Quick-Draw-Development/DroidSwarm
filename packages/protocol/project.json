@@ -26,7 +26,7 @@
     "typecheck": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "tsc --noEmit -p libs/protocol/tsconfig.lib.json"
+        "command": "tsc --noEmit -p packages/protocol/tsconfig.lib.json"
       }
     }
   },

@@ -1,4 +1,4 @@
-var import_protocol_alias = require("../../shared/protocol-alias");
+var import_protocol_alias = require("@protocol-alias");
 var import_config = require("./config");
 var import_server = require("./server");
 const config = (0, import_config.loadConfig)();

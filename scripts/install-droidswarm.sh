@@ -196,6 +196,10 @@ cp -R "$ORCHESTRATOR_RUNTIME_SOURCE/." "$INSTALL_ROOT/runtime/orchestrator/"
   cd "$INSTALL_ROOT/runtime/orchestrator"
   npm install --production >/dev/null 2>&1 || true
 )
+if [[ -d "$WORKSPACE_SOURCE_ROOT/dist/apps/shared" ]]; then
+  mkdir -p "$INSTALL_ROOT/runtime/apps/shared"
+  cp -R "$WORKSPACE_SOURCE_ROOT/dist/apps/shared/." "$INSTALL_ROOT/runtime/apps/shared/"
+fi
 cp -R "$DASHBOARD_RUNTIME_SOURCE/." "$INSTALL_ROOT/runtime/dashboard/"
 if [[ -d "$DASHBOARD_STATIC_SOURCE" ]]; then
   cp -R "$DASHBOARD_STATIC_SOURCE" "$INSTALL_ROOT/runtime/dashboard/.next/"

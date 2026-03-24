@@ -30,6 +30,12 @@
             "input": "dist/libs/protocol/src",
             "output": "libs/protocol/src"
           }
+          ,
+          {
+            "glob": "**/*",
+            "input": "dist/apps/shared",
+            "output": "apps/shared"
+          }
         ],
         "generatePackageJson": true,
         "esbuildOptions": {

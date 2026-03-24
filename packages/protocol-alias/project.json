@@ -1,0 +1,19 @@
+{
+  "name": "protocol-alias",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "root": "packages/protocol-alias",
+  "sourceRoot": "packages/protocol-alias/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "outputs": [
+        "{workspaceRoot}/dist/packages/protocol-alias"
+      ],
+      "options": {
+        "command": "npx tsc -p packages/protocol-alias/tsconfig.json"
+      }
+    }
+  },
+  "tags": []
+}

@@ -1,0 +1,6 @@
+{
+  "name": "@protocol-alias",
+  "version": "0.0.0",
+  "main": "src/index.js",
+  "type": "commonjs"
+}

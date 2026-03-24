@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 
 import type { AuthMessage, ClientType, MessageEnvelope, OrchestratorConfig } from './types';
-import '../../shared/protocol-alias';
 import { messageEnvelopeSchema } from '@protocol';
+import '@protocol-alias';
 
 export const parseEnvelope = (raw: string): MessageEnvelope =>
   messageEnvelopeSchema.parse(JSON.parse(raw));

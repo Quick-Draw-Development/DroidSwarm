@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "target": "es2020",
+    "module": "commonjs",
+    "rootDir": "src",
+    "outDir": "../../dist/packages/protocol-alias/src",
+    "esModuleInterop": true,
+    "moduleResolution": "node",
+    "sourceMap": true,
+    "composite": false,
+    "tsBuildInfoFile": "../../dist/packages/protocol-alias/tsconfig.tsbuildinfo"
+  },
+  "include": [
+    "src/**/*"
+  ]
+}

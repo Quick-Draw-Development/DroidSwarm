@@ -11,8 +11,8 @@ import { join, resolve } from 'node:path';
   moduleWithFlag[FLAG] = true;
 
   const protocolRoots = [
-    resolve(process.cwd(), 'dist/libs/protocol/src'),
-    resolve(process.cwd(), 'libs/protocol/src'),
+    resolve(process.cwd(), 'dist/packages/protocol/src'),
+    resolve(process.cwd(), 'packages/protocol/src'),
   ];
   const protocolRoot = protocolRoots.find((root) => existsSync(root));
   if (!protocolRoot) {

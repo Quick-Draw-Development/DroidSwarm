@@ -1,12 +1,12 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "outDir": "../../dist/libs/protocol/src",
+    "outDir": "../../dist/packages/protocol/src",
     "rootDir": "src",
     "sourceMap": true,
     "declaration": false,
     "composite": false,
-    "tsBuildInfoFile": "../../dist/libs/protocol/tsconfig.lib.tsbuildinfo",
+    "tsBuildInfoFile": "../../dist/packages/protocol/tsconfig.lib.tsbuildinfo",
     "module": "CommonJS",
     "moduleResolution": "Node",
     "allowSyntheticDefaultImports": true,

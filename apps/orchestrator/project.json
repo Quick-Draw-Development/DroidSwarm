@@ -7,7 +7,7 @@
     "build": {
     "dependsOn": [
         "protocol:build",
-        "shared:build"
+        "protocol-alias:build"
       ],
       "executor": "@nx/esbuild:esbuild",
       "outputs": [
@@ -27,14 +27,13 @@
         "assets": [
           {
             "glob": "**/*",
-            "input": "dist/libs/protocol/src",
+            "input": "dist/packages/protocol/src",
             "output": "libs/protocol/src"
-          }
-          ,
+          },
           {
             "glob": "**/*",
-            "input": "dist/apps/shared",
-            "output": "apps/shared"
+            "input": "dist/packages/protocol-alias/src",
+            "output": "packages/protocol-alias/src"
           }
         ],
         "esbuildOptions": {

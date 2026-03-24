@@ -1,8 +1,8 @@
 {
   "name": "protocol",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
-  "root": "libs/protocol",
-  "sourceRoot": "libs/protocol/src",
+  "root": "packages/protocol",
+  "sourceRoot": "packages/protocol/src",
   "projectType": "library",
   "targets": {
     "build": {
@@ -12,11 +12,11 @@
       ],
       "options": {
         "assets": [
-          "libs/protocol/package.json"
+          "packages/protocol/package.json"
         ],
-        "main": "libs/protocol/src/index.ts",
-        "tsConfig": "libs/protocol/tsconfig.lib.json",
-        "outputPath": "dist/libs/protocol",
+        "main": "packages/protocol/src/index.ts",
+        "tsConfig": "packages/protocol/tsconfig.lib.json",
+        "outputPath": "dist/packages/protocol",
         "clean": true
       },
       "configurations": {

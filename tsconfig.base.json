@@ -19,10 +19,13 @@
     "baseUrl": ".",
     "paths": {
       "@protocol": [
-        "libs/protocol/src"
+        "packages/protocol/src"
       ],
       "@protocol/*": [
-        "libs/protocol/src/*"
+        "packages/protocol/src/*"
+      ],
+      "@protocol-alias": [
+        "packages/protocol-alias/src"
       ],
       "bootstrap": [
         "packages/bootstrap/src/index.ts"

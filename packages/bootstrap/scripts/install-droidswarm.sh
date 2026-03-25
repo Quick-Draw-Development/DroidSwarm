@@ -147,7 +147,7 @@ fi
 SOURCE_DIR="$INSTALL_ROOT/source/packages/bootstrap"
 WORKSPACE_SOURCE_ROOT="$INSTALL_ROOT/source"
 ARCHIVE_URL="$(github_archive_url "$REPO_URL" "$REF")"
-TMP_ARCHIVE="$(mktemp "${TMPDIR:-/tmp}/droidswarm-install.XXXXXX.tar.gz")"
+TMP_ARCHIVE="$(mktemp -t droidswarm-install.XXXXXX.tar.gz)"
 rm -rf "$INSTALL_ROOT/source"
 mkdir -p "$INSTALL_ROOT/source"
 curl -fsSL "$ARCHIVE_URL" -o "$TMP_ARCHIVE"

@@ -14,10 +14,8 @@ const bootstrapWorker = () => {
   require("./worker");
 };
 const isWorkerMode = process.argv[2] === "worker";
-if (require.main === module) {
-  if (isWorkerMode) {
-    bootstrapWorker();
-  } else {
-    startOrchestrator();
-  }
+if (isWorkerMode) {
+  bootstrapWorker();
+} else {
+  startOrchestrator();
 }

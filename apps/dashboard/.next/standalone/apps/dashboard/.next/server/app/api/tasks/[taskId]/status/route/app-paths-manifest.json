@@ -1,3 +1,0 @@
-{
-  "/api/tasks/[taskId]/status/route": "app/api/tasks/[taskId]/status/route.js"
-}

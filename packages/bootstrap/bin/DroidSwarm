@@ -658,12 +658,12 @@ cmd_swarm() {
   dashboard_server_entry="$(resolve_runtime_value "${DROIDSWARM_DASHBOARD_SERVER_ENTRY:-}" \
     "$install_runtime_root/dashboard/server.js" \
     "$install_runtime_root/dashboard/apps/dashboard/server.js" \
-    "$workspace_root/apps/dashboard/.next/standalone/server.js" \
-    "$workspace_root/apps/dashboard/.next/standalone/apps/dashboard/server.js" || true)"
+    "$workspace_root/dist/apps/dashboard/.next/standalone/server.js" \
+    "$workspace_root/dist/apps/dashboard/.next/standalone/apps/dashboard/server.js" || true)"
   dashboard_static_dir="$(resolve_runtime_dir_value "${DROIDSWARM_DASHBOARD_STATIC_DIR:-}" \
     "$install_runtime_root/dashboard/.next/static" \
     "$install_runtime_root/dashboard/apps/dashboard/.next/static" \
-    "$workspace_root/apps/dashboard/.next/static" || true)"
+    "$workspace_root/dist/apps/dashboard/.next/static" || true)"
   dashboard_public_dir="$(resolve_runtime_dir_value "${DROIDSWARM_DASHBOARD_PUBLIC_DIR:-}" \
     "$install_runtime_root/dashboard/public" \
     "$install_runtime_root/dashboard/apps/dashboard/public" \
@@ -685,7 +685,7 @@ cmd_swarm() {
 
   if [[ -z "$dashboard_server_entry" ]]; then
     err "Missing dashboard standalone server artifact."
-    err "Expected apps/dashboard/.next/standalone/.../server.js or installed runtime copy."
+    err "Expected dist/apps/dashboard/.next/standalone/.../server.js or installed runtime copy."
     err "Run: nx build dashboard"
     return 1
   fi

@@ -156,6 +156,7 @@ mkdir -p "$DROIDSWARM_HOME/{swarms,run,logs}"
 local_version="$(read_local_version || true)"
 remote_version=""
 if remote_url="$(raw_file_url "$REPO_URL" "${REF:-main}" "VERSION" 2>/dev/null)"; then
+  info "Fetching version metadata from $remote_url"
   remote_version="$(curl -fsSL "$remote_url" 2>/dev/null || true)"
   remote_version="${remote_version%%$'\r'}"
   remote_version="${remote_version%%$'\n'}"
@@ -167,6 +168,7 @@ if [[ "$FORCE_UPDATE" != "1" && -n "$local_version" && -n "$remote_version" && "
 fi
 
 info "Local version: ${local_version:-unknown}; remote version: ${remote_version:-unknown}"
+info "Downloading and installing the latest runtime into $INSTALL_ROOT"
 
 INSTALL_ARGS=()
 if [[ -n "$REPO_URL" ]]; then
@@ -190,6 +192,7 @@ for config in "${swarm_configs[@]}"; do
   old_dir="$DROIDSWARM_HOME/swarms/$swarm_id"
   rm -rf "$old_dir"
 
+  info "Starting swarm $swarm_id (project $project_root) with WS port ${ws_port:-default}"
   restart_cmd=("$BIN_DIR/DroidSwarm" swarm --swarm-id "$swarm_id" --project-root "$project_root")
   [[ -n "$dashboard_port" ]] && restart_cmd+=(--dashboard-port "$dashboard_port")
   [[ -n "$ws_port" ]] && restart_cmd+=(--ws-port "$ws_port")

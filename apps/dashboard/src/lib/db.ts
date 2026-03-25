@@ -22,8 +22,8 @@ import type {
   VerificationTaskSummary,
 } from './types';
 
-const DEFAULT_PROJECT_ID = process.env.DROIDSWARM_PROJECT_ID ?? 'droidswarm';
-const DEFAULT_PROJECT_NAME = process.env.DROIDSWARM_PROJECT_NAME ?? 'DroidSwarm';
+const getProjectId = (): string => process.env.DROIDSWARM_PROJECT_ID ?? 'droidswarm';
+const getProjectName = (): string => process.env.DROIDSWARM_PROJECT_NAME ?? 'DroidSwarm';
 const DEFAULT_DB_PATH = process.env.DROIDSWARM_DB_PATH ?? path.resolve(process.cwd(), 'data', 'droidswarm.db');
 const DEFAULT_SOCKET_URL = process.env.DROIDSWARM_SOCKET_URL ?? 'ws://127.0.0.1:8765';
 const DEFAULT_ORCHESTRATOR_NAME = process.env.DROIDSWARM_ORCHESTRATOR_NAME ?? 'Orchestrator';
@@ -317,8 +317,8 @@ const buildActiveAgents = (database: Database.Database, taskId: string): TaskDet
 };
 
 export const getProjectIdentity = (): ProjectIdentity => ({
-  projectId: DEFAULT_PROJECT_ID,
-  projectName: DEFAULT_PROJECT_NAME,
+  projectId: getProjectId(),
+  projectName: getProjectName(),
 });
 
 export const listOperatorMessages = (): MessageRecord[] => {
@@ -326,7 +326,7 @@ export const listOperatorMessages = (): MessageRecord[] => {
     const database = getDatabase();
     const rows = database
       .prepare('SELECT * FROM messages WHERE channel_id = ? AND project_id = ? ORDER BY created_at ASC LIMIT 200')
-      .all('operator', DEFAULT_PROJECT_ID) as Record<string, unknown>[];
+      .all('operator', getProjectId()) as Record<string, unknown>[];
 
     return rows.map(mapMessageRecord);
   } catch {
@@ -339,7 +339,7 @@ export const listRuns = (): RunSummary[] => {
     const database = getDatabase();
     const rows = database
       .prepare('SELECT * FROM runs WHERE project_id = ? ORDER BY updated_at DESC')
-      .all(DEFAULT_PROJECT_ID) as Array<{
+      .all(getProjectId()) as Array<{
         run_id: string;
         project_id: string;
         status: string;
@@ -709,7 +709,7 @@ export const getTaskDetails = (taskId: string): TaskDetails | null => {
         JOIN runs r ON r.run_id = t.run_id
         WHERE t.task_id = ? AND r.project_id = ?
       `)
-      .get(taskId, DEFAULT_PROJECT_ID) as Record<string, unknown> | undefined;
+      .get(taskId, getProjectId()) as Record<string, unknown> | undefined;
 
     if (!taskRow) {
       return null;
@@ -720,7 +720,7 @@ export const getTaskDetails = (taskId: string): TaskDetails | null => {
     const messages = (
       database
         .prepare('SELECT * FROM messages WHERE task_id = ? AND project_id = ? ORDER BY created_at ASC')
-        .all(taskId, DEFAULT_PROJECT_ID) as Record<string, unknown>[]
+        .all(taskId, getProjectId()) as Record<string, unknown>[]
     ).map(mapMessageRecord);
 
     const activeAgents = task.status === 'cancelled' ? [] : buildActiveAgents(database, taskId);
@@ -840,7 +840,7 @@ const defaultOperatorDispatcher: OperatorDispatcher = async (input) => {
     socket.on('open', () => {
       socket.send(JSON.stringify({
         type: 'auth',
-        project_id: DEFAULT_PROJECT_ID,
+        project_id: getProjectId(),
         timestamp: new Date().toISOString(),
         payload: {
           room_id: 'operator',
@@ -872,7 +872,7 @@ const defaultOperatorDispatcher: OperatorDispatcher = async (input) => {
         messageSent = true;
         socket.send(JSON.stringify({
           message_id: messageId,
-          project_id: DEFAULT_PROJECT_ID,
+          project_id: getProjectId(),
           room_id: roomId,
           task_id: input.taskId,
           type: input.messageType,
@@ -1002,7 +1002,7 @@ export const sendChannelMessage = async (input: {
   const createdAt = new Date().toISOString();
   const message: MessageRecord = {
     messageId: randomUUID(),
-    projectId: DEFAULT_PROJECT_ID,
+    projectId: getProjectId(),
     channelId: input.taskId,
     taskId: input.taskId,
     messageType: 'chat',
@@ -1050,7 +1050,7 @@ export const createTask = async (input: {
   const now = new Date().toISOString();
   const task: TaskRecord = {
     taskId: randomUUID(),
-    projectId: DEFAULT_PROJECT_ID,
+    projectId: getProjectId(),
     title: input.title,
     description: input.description,
     taskType: input.taskType,
@@ -1122,7 +1122,7 @@ export const updateTaskStatus = async (input: {
     `)
     .run(
       randomUUID(),
-      DEFAULT_PROJECT_ID,
+      getProjectId(),
       input.taskId,
       input.status === 'cancelled' ? 'task_cancelled_local' : 'task_status_changed_local',
       'human',
@@ -1140,7 +1140,7 @@ export const updateTaskStatus = async (input: {
     `)
     .run(
       randomUUID(),
-      DEFAULT_PROJECT_ID,
+      getProjectId(),
       input.taskId,
       dispatchStatus === 'offline' ? 'task_status_dispatch_offline' : 'task_status_dispatch_queued',
       'system',

@@ -10,9 +10,11 @@ import { join, resolve } from 'node:path';
   }
   moduleWithFlag[FLAG] = true;
 
+  const aliasDir = resolve(__dirname, '../../protocol/src');
   const protocolRoots = [
     resolve(process.cwd(), 'dist/packages/protocol/src'),
     resolve(process.cwd(), 'packages/protocol/src'),
+    aliasDir,
   ];
   const protocolRoot = protocolRoots.find((root) => existsSync(root));
   if (!protocolRoot) {

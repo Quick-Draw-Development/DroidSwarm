@@ -30,9 +30,11 @@ var import_node_path = require("node:path");
     return;
   }
   moduleWithFlag[FLAG] = true;
+  const aliasDir = (0, import_node_path.resolve)(__dirname, "../../protocol/src");
   const protocolRoots = [
     (0, import_node_path.resolve)(process.cwd(), "dist/packages/protocol/src"),
-    (0, import_node_path.resolve)(process.cwd(), "packages/protocol/src")
+    (0, import_node_path.resolve)(process.cwd(), "packages/protocol/src"),
+    aliasDir
   ];
   const protocolRoot = protocolRoots.find((root) => (0, import_node_fs.existsSync)(root));
   if (!protocolRoot) {

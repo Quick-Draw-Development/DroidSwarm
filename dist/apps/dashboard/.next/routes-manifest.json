@@ -1,0 +1,117 @@
+{
+  "version": 3,
+  "pages404": true,
+  "caseSensitive": false,
+  "basePath": "",
+  "redirects": [
+    {
+      "source": "/:path+/",
+      "destination": "/:path+",
+      "internal": true,
+      "priority": true,
+      "statusCode": 308,
+      "regex": "^(?:/((?:[^/]+?)(?:/(?:[^/]+?))*))/$"
+    }
+  ],
+  "headers": [],
+  "rewrites": {
+    "beforeFiles": [],
+    "afterFiles": [],
+    "fallback": []
+  },
+  "dynamicRoutes": [
+    {
+      "page": "/api/channels/[taskId]/messages",
+      "regex": "^/api/channels/([^/]+?)/messages(?:/)?$",
+      "routeKeys": {
+        "nxtPtaskId": "nxtPtaskId"
+      },
+      "namedRegex": "^/api/channels/(?<nxtPtaskId>[^/]+?)/messages(?:/)?$"
+    },
+    {
+      "page": "/api/tasks/[taskId]/status",
+      "regex": "^/api/tasks/([^/]+?)/status(?:/)?$",
+      "routeKeys": {
+        "nxtPtaskId": "nxtPtaskId"
+      },
+      "namedRegex": "^/api/tasks/(?<nxtPtaskId>[^/]+?)/status(?:/)?$"
+    },
+    {
+      "page": "/channels/[taskId]",
+      "regex": "^/channels/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPtaskId": "nxtPtaskId"
+      },
+      "namedRegex": "^/channels/(?<nxtPtaskId>[^/]+?)(?:/)?$"
+    }
+  ],
+  "staticRoutes": [
+    {
+      "page": "/",
+      "regex": "^/(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/(?:/)?$"
+    },
+    {
+      "page": "/_global-error",
+      "regex": "^/_global\\-error(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/_global\\-error(?:/)?$"
+    },
+    {
+      "page": "/_not-found",
+      "regex": "^/_not\\-found(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/_not\\-found(?:/)?$"
+    },
+    {
+      "page": "/api/identity",
+      "regex": "^/api/identity(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/identity(?:/)?$"
+    },
+    {
+      "page": "/api/operator/messages",
+      "regex": "^/api/operator/messages(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/operator/messages(?:/)?$"
+    },
+    {
+      "page": "/api/socket-url",
+      "regex": "^/api/socket\\-url(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/socket\\-url(?:/)?$"
+    },
+    {
+      "page": "/api/tasks",
+      "regex": "^/api/tasks(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/tasks(?:/)?$"
+    },
+    {
+      "page": "/board",
+      "regex": "^/board(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/board(?:/)?$"
+    }
+  ],
+  "dataRoutes": [],
+  "rsc": {
+    "header": "rsc",
+    "varyHeader": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch",
+    "prefetchHeader": "next-router-prefetch",
+    "didPostponeHeader": "x-nextjs-postponed",
+    "contentTypeHeader": "text/x-component",
+    "suffix": ".rsc",
+    "prefetchSuffix": ".prefetch.rsc",
+    "prefetchSegmentHeader": "next-router-segment-prefetch",
+    "prefetchSegmentSuffix": ".segment.rsc",
+    "prefetchSegmentDirSuffix": ".segments",
+    "clientParamParsing": false,
+    "dynamicRSCPrerender": false
+  },
+  "rewriteHeaders": {
+    "pathHeader": "x-nextjs-rewritten-path",
+    "queryHeader": "x-nextjs-rewritten-query"
+  }
+}

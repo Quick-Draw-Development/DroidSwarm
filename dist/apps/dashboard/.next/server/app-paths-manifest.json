@@ -1,0 +1,13 @@
+{
+  "/_global-error/page": "app/_global-error/page.js",
+  "/_not-found/page": "app/_not-found/page.js",
+  "/api/channels/[taskId]/messages/route": "app/api/channels/[taskId]/messages/route.js",
+  "/api/identity/route": "app/api/identity/route.js",
+  "/api/operator/messages/route": "app/api/operator/messages/route.js",
+  "/api/socket-url/route": "app/api/socket-url/route.js",
+  "/api/tasks/[taskId]/status/route": "app/api/tasks/[taskId]/status/route.js",
+  "/api/tasks/route": "app/api/tasks/route.js",
+  "/board/page": "app/board/page.js",
+  "/channels/[taskId]/page": "app/channels/[taskId]/page.js",
+  "/page": "app/page.js"
+}

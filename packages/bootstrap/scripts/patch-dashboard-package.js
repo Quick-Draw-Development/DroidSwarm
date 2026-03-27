@@ -3,7 +3,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const pkgPath = process.argv[2] || path.resolve('dist/apps/dashboard/.next/standalone/apps/dashboard/package.json');
+const pkgPath =
+  process.argv[2] || path.resolve(__dirname, '../../dist/apps/dashboard/.next/standalone/apps/dashboard/package.json');
 
 if (!fs.existsSync(pkgPath)) {
   throw new Error(`Dashboard standalone package not found: ${pkgPath}`);

@@ -11,7 +11,7 @@
         "{workspaceRoot}/dist/packages/protocol-alias"
       ],
       "options": {
-        "command": "npx tsc -p packages/protocol-alias/tsconfig.json"
+        "command": "npx tsc -p packages/protocol-alias/tsconfig.json && cp packages/protocol-alias/package.json dist/packages/protocol-alias/"
       }
     }
   },

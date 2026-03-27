@@ -27,13 +27,13 @@
         "assets": [
           {
             "glob": "**/*",
-            "input": "dist/packages/protocol/src",
-            "output": "packages/protocol/src"
+            "input": "dist/packages/protocol",
+            "output": "packages/protocol"
           },
           {
             "glob": "**/*",
-            "input": "dist/packages/protocol-alias/src",
-            "output": "packages/protocol-alias/src"
+            "input": "dist/packages/protocol-alias",
+            "output": "packages/protocol-alias"
           }
         ],
         "esbuildOptions": {

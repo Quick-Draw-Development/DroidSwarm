@@ -197,6 +197,10 @@ cp -R "$ORCHESTRATOR_RUNTIME_SOURCE/." "$INSTALL_ROOT/runtime/orchestrator/"
   cd "$INSTALL_ROOT/runtime/orchestrator"
   npm install --production >/dev/null 2>&1 || true
 )
+if [[ -d "$WORKSPACE_SOURCE_ROOT/dist/packages/protocol" ]]; then
+  mkdir -p "$INSTALL_ROOT/runtime/packages/protocol"
+  cp -R "$WORKSPACE_SOURCE_ROOT/dist/packages/protocol/." "$INSTALL_ROOT/runtime/packages/protocol/"
+fi
 if [[ -d "$WORKSPACE_SOURCE_ROOT/dist/packages/protocol-alias" ]]; then
   mkdir -p "$INSTALL_ROOT/runtime/packages/protocol-alias"
   cp -R "$WORKSPACE_SOURCE_ROOT/dist/packages/protocol-alias/." "$INSTALL_ROOT/runtime/packages/protocol-alias/"

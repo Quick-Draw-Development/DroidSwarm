@@ -5,10 +5,10 @@
   "type": "commonjs",
   "main": "main.js",
   "dependencies": {
-    "@protocol": "file:packages/protocol",
-    "@protocol-alias": "file:packages/protocol-alias",
     "better-sqlite3": "^12.6.2",
     "pino": "^10.3.1",
+    "protocol": "file:packages/protocol",
+    "protocol-alias": "file:packages/protocol-alias",
     "ws": "^8.19.0",
     "zod": "^4.3.6"
   }

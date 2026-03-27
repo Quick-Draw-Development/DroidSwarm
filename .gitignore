@@ -50,10 +50,10 @@ Thumbs.db
 # Large media files
 *.mp4
 *.tiff
-*.avi
-*.flv
-*.mov
-*.wmv
+.avi
+.flv
+.mov
+.wmv
 
 
 .nx/installation
@@ -70,11 +70,13 @@ dist/*
 !dist/apps/
 dist/apps/*
 !dist/apps/socket-server/
-!dist/apps/socket-server/**
+dist/apps/socket-server/**
 !dist/apps/orchestrator/
-!dist/apps/orchestrator/**
+dist/apps/orchestrator/**
+!dist/apps/dashboard/
+dist/apps/dashboard/**
 
-!.next/
+.next/
 .next/*
 !apps/dashboard/.next/
 apps/dashboard/.next/*

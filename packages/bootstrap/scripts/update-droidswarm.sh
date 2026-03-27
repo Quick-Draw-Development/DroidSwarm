@@ -177,10 +177,6 @@ fi
 if [[ -n "$REF" ]]; then
   INSTALL_ARGS+=(--ref "$REF")
 fi
-if [[ "$FORCE_UPDATE" == "1" ]]; then
-  INSTALL_ARGS+=(--force)
-fi
-
 env DROIDSWARM_INSTALL_ROOT="$INSTALL_ROOT" \
     DROIDSWARM_BIN_DIR="$BIN_DIR" \
     DROIDSWARM_DEFAULT_REPO_URL="$REPO_URL" \

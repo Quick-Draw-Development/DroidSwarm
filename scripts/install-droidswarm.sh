@@ -214,17 +214,9 @@ if [[ -d "$DASHBOARD_PUBLIC_SOURCE" ]]; then
 fi
 
 DASHBOARD_STANDALONE_PKG="$INSTALL_ROOT/runtime/dashboard/apps/dashboard/package.json"
+# shellcheck disable=SC1090
 if [[ -f "$DASHBOARD_STANDALONE_PKG" ]]; then
-  node <<'NODE' "$DASHBOARD_STANDALONE_PKG"
-const fs = require('node:fs');
-const pkgPath = process.argv[1];
-const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-pkg.type = 'commonjs';
-if (!pkg.main) {
-  pkg.main = 'server.js';
-}
-fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
-NODE
+  node "$SOURCE_DIR/scripts/patch-dashboard-package.js" "$DASHBOARD_STANDALONE_PKG"
 fi
 
 chmod +x "$INSTALL_ROOT/bin/DroidSwarm" "$INSTALL_ROOT/libexec/droidswarm-daemon.sh" "$INSTALL_ROOT/bin/update-droidswarm" "$INSTALL_ROOT/scripts/update-droidswarm.sh"

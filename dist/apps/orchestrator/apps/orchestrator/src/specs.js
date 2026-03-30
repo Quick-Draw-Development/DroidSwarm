@@ -35,7 +35,9 @@ var import_node_path = __toESM(require("node:path"));
 const CARD_FILES = {
   orchestrator: "orchestrator-card.md",
   agent: "agent-card.md",
-  droidspeak: "droidspeak-card.md"
+  droidspeak: "droidspeak-card.md",
+  planner: "planner-agent-card.md",
+  coding: "coding-agent-card.md"
 };
 let cachedSpecDir = null;
 let cachedCards = null;
@@ -60,6 +62,8 @@ const loadSpecCards = (specDir) => {
     orchestrator: cards.orchestrator || "",
     agent: cards.agent || "",
     droidspeak: cards.droidspeak || "",
+    planner: cards.planner || "",
+    coding: cards.coding || "",
     all: cards
   };
   return cachedCards;

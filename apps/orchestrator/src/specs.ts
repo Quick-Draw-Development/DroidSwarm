@@ -1,12 +1,14 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
-type SpecKey = 'orchestrator' | 'agent' | 'droidspeak';
+type SpecKey = 'orchestrator' | 'agent' | 'droidspeak' | 'planner' | 'coding';
 
 export interface SpecCards {
   orchestrator: string;
   agent: string;
   droidspeak: string;
+  planner: string;
+  coding: string;
   all: Record<string, string>;
 }
 
@@ -14,6 +16,8 @@ const CARD_FILES: Record<SpecKey, string> = {
   orchestrator: 'orchestrator-card.md',
   agent: 'agent-card.md',
   droidspeak: 'droidspeak-card.md',
+  planner: 'planner-agent-card.md',
+  coding: 'coding-agent-card.md',
 };
 
 let cachedSpecDir: string | null = null;
@@ -44,6 +48,8 @@ export const loadSpecCards = (specDir: string): SpecCards => {
     orchestrator: cards.orchestrator || '',
     agent: cards.agent || '',
     droidspeak: cards.droidspeak || '',
+    planner: cards.planner || '',
+    coding: cards.coding || '',
     all: cards,
   };
 

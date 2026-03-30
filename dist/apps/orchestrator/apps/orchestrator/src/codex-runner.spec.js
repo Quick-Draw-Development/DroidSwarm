@@ -71,6 +71,8 @@ EOF
       orchestratorRules: "",
       droidspeakRules: "",
       agentRules: "",
+      plannerRules: "",
+      codingRules: "",
       dbPath: import_node_path.default.join(process.cwd(), "state.db"),
       schedulerMaxTaskDepth: 4,
       schedulerMaxFanOut: 3,

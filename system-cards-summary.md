@@ -11,7 +11,19 @@ Defines how every agent is instantiated, named, and behaves.
 - Can request additional agents via request_help message
 - All actions visible in room for auditing
 
-## 2. Orchestrator Card
+## 2. Planner Agent Card
+Extends the Agent Card for planning specialists.
+- Spawned during the planning stage to read docs, dissect requirements, and propose decompositions before any code is written.
+- Emit structured `plan_proposed` artifacts with dependencies, risks, required helper roles, and doc refs before handing off to execution agents.
+- Never create branches, PRs, or touch code; focus on authoring plan summaries and surfacing missing context so downstream agents inherit consistent instructions.
+
+## 3. Coding Agent Card
+Extends the Agent Card for implementation work.
+- Operate on orchestrator-assigned branches (`feature/[task-id]`, `fix/[task-id]`, `hotfix/[task-id]`) and log the branch name and base branch to the task room before editing.
+- Run the orchestrator-approved validation commands, summarize the tests run, and share artifacts before announcing that a PR is ready.
+- Create the PR, attach the test summary, link to branch and reviewers, and publish the URL+status in the task channel so the orchestrator can move the task to Review.
+
+## 4. Orchestrator Card
 Central controller ("super admin")
 - One orchestrator/DroidSwarm instance per project
 - Subscribes to privileged `operator` room for `task_created` events
@@ -30,7 +42,7 @@ Central controller ("super admin")
 - Observes all rooms, broadcasts system messages
 - Manages lifecycle (terminate room/agent on done)
 
-## 3. Next.js Application Card – DroidSwarm Dashboard
+## 5. Next.js Application Card – DroidSwarm Dashboard
 Local UI for task management & visibility
 - Scoped to a single project/DroidSwarm instance
 - Prompts for a username using lowercase letters, numbers, and underscores only, then stores it in a cookie for MVP identity
@@ -48,7 +60,7 @@ Local UI for task management & visibility
 - Uses WebSocket client to our custom server
 - Tech: Next.js 15+, TypeScript, Tailwind + shadcn/ui, Zustand/TanStack Query
 
-## 4. WebSocket Server Card – Agent Communication Hub
+## 6. WebSocket Server Card – Agent Communication Hub
 Node.js + TypeScript real-time server
 - One server instance per project/DroidSwarm in MVP
 - ws://localhost:8765
@@ -62,7 +74,7 @@ Node.js + TypeScript real-time server
 - Supports heartbeat, rate limiting, and a privileged `operator` room for dashboard/orchestrator control traffic
 - Core classes: RoomManager, Room
 
-## 5. Initial Setup Card
+## 7. Initial Setup Card
 Bootstrap/install workflow for local environments
 - Verifies required runtimes and tools are installed
 - Installs missing app dependencies where possible
@@ -72,14 +84,14 @@ Bootstrap/install workflow for local environments
 - Initializes or inspects project documentation based on greenfield vs existing-project mode
 - Writes baseline configuration so the board and socket server point at the same datastore
 
-## 6. Database Schema Card
+## 8. Database Schema Card
 Canonical SQLite schema for the system
 - Defines tables for projects, users, tasks, channels, messages, sessions, traces, guardrails, handoffs, usage, connections, and audit events
 - Adds session checkpoints and limit events for safe recovery and operability
 - Ensures major records are scoped by `project_id`
 - Gives setup, orchestrator, dashboard, and socket server a shared persistence contract
 
-## 7. Message Protocol Card
+## 9. Message Protocol Card
 Canonical communication protocol for agents and orchestrator
 - Defines the typed JSON envelope and compact message taxonomy
 - Keeps operational coordination machine-readable and auditable
@@ -88,13 +100,13 @@ Canonical communication protocol for agents and orchestrator
 - Includes structured limit and checkpoint events for throttling, rollover, and recovery
 - Supports optional controlled shorthand for compressed agent summaries with frontend translation
 
-## 8. Droidspeak Card
+## 10. Droidspeak Card
 Controlled shorthand spec for compressed agent summaries
 - Defines `droidspeak-v1` grammar, vocabulary, validation, and translation rules
 - Keeps shorthand constrained enough for frontend expansion and audit review
 - Explicitly prevents shorthand from replacing canonical structured protocol fields
 
-## 9. Project Documentation Strategy Card
+## 11. Project Documentation Strategy Card
 Documentation strategy for target projects managed by a swarm
 - Defines greenfield vs existing-project documentation behavior
 - Separates long-lived project docs from tasks and optional initiative plans

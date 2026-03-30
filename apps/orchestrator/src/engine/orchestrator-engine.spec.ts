@@ -32,6 +32,8 @@ const TEST_CONFIG: OrchestratorConfig = {
   orchestratorRules: '',
   droidspeakRules: '',
   agentRules: '',
+  plannerRules: '',
+  codingRules: '',
   dbPath: ':memory:',
   schedulerMaxTaskDepth: 4,
   schedulerMaxFanOut: 3,

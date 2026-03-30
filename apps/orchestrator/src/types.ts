@@ -30,6 +30,8 @@ export interface OrchestratorConfig {
   orchestratorRules: string;
   droidspeakRules: string;
   agentRules: string;
+  plannerRules: string;
+  codingRules: string;
   dbPath: string;
   schedulerMaxTaskDepth: number;
   schedulerMaxFanOut: number;

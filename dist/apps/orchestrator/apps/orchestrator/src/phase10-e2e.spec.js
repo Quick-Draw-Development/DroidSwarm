@@ -54,6 +54,8 @@ const DEFAULT_CONFIG = {
   orchestratorRules: "",
   droidspeakRules: "",
   agentRules: "",
+  plannerRules: "",
+  codingRules: "",
   dbPath: "",
   schedulerMaxTaskDepth: 4,
   schedulerMaxFanOut: 3,

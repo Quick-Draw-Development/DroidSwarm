@@ -143,6 +143,8 @@ const loadConfig = () => {
     orchestratorRules: specs.orchestrator,
     droidspeakRules: specs.droidspeak,
     agentRules: specs.agent,
+    plannerRules: specs.planner,
+    codingRules: specs.coding,
     dbPath: env.DROIDSWARM_DB_PATH ?? import_node_path.default.resolve(process.cwd(), "data", "droidswarm.db"),
     schedulerMaxTaskDepth: toPositiveInt(env.DROIDSWARM_SCHEDULER_MAX_TASK_DEPTH, 4),
     schedulerMaxFanOut: toPositiveInt(env.DROIDSWARM_SCHEDULER_MAX_FAN_OUT, 3),

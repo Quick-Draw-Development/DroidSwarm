@@ -31,6 +31,8 @@ const createTestConfig = (overrides: Partial<OrchestratorConfig> = {}): Orchestr
   orchestratorRules: '',
   droidspeakRules: '',
   agentRules: '',
+  plannerRules: '',
+  codingRules: '',
   dbPath: '',
   schedulerMaxTaskDepth: 4,
   schedulerMaxFanOut: 3,

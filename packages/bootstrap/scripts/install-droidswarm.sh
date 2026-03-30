@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
+export COPYFILE_DISABLE=1
 
 err() {
   printf 'Error: %s\n' "$*" >&2

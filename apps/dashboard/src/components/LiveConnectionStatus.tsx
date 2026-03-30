@@ -9,6 +9,7 @@ export function LiveConnectionStatus() {
   const [status, setStatus] = useState<'connecting' | 'connected' | 'offline'>('connecting');
   const [socketUrl, setSocketUrl] = useState(DEFAULT_SOCKET_URL);
   const [projectId, setProjectId] = useState(DEFAULT_PROJECT_ID);
+  const [isProjectResolved, setIsProjectResolved] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -27,6 +28,11 @@ export function LiveConnectionStatus() {
       })
       .catch(() => {
         // keep using the defaults
+      })
+      .finally(() => {
+        if (active) {
+          setIsProjectResolved(true);
+        }
       });
     return () => {
       active = false;
@@ -34,6 +40,10 @@ export function LiveConnectionStatus() {
   }, []);
 
   useEffect(() => {
+    if (!isProjectResolved) {
+      return;
+    }
+
     setStatus('connecting');
     const socket = new WebSocket(socketUrl);
 
@@ -61,7 +71,7 @@ export function LiveConnectionStatus() {
     return () => {
       socket.close();
     };
-  }, [socketUrl, projectId]);
+  }, [socketUrl, projectId, isProjectResolved]);
 
   return <span className={`status-pill status-${status}`}>{status}</span>;
 }

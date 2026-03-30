@@ -156,7 +156,8 @@ rm -f "$TMP_ARCHIVE"
 
 SOCKET_RUNTIME_SOURCE="$WORKSPACE_SOURCE_ROOT/dist/apps/socket-server"
 ORCHESTRATOR_RUNTIME_SOURCE="$WORKSPACE_SOURCE_ROOT/dist/apps/orchestrator"
-DIST_DIR="$WORKSPACE_SOURCE_ROOT/dist/apps/dashboard/.next"
+DASHBOARD_DIST_SOURCE="$WORKSPACE_SOURCE_ROOT/dist/apps/dashboard/.next"
+DIST_DIR="$DASHBOARD_DIST_SOURCE"
 DASHBOARD_RUNTIME_SOURCE="$DIST_DIR/standalone"
 DASHBOARD_STATIC_SOURCE="$DIST_DIR/static"
 DASHBOARD_PUBLIC_SOURCE="$WORKSPACE_SOURCE_ROOT/apps/dashboard/public"
@@ -208,6 +209,11 @@ if [[ -d "$DASHBOARD_STATIC_SOURCE" ]]; then
 fi
 if [[ -d "$DASHBOARD_PUBLIC_SOURCE" ]]; then
   cp -R "$DASHBOARD_PUBLIC_SOURCE" "$INSTALL_ROOT/runtime/dashboard/public"
+fi
+if [[ -d "$DASHBOARD_DIST_SOURCE" ]]; then
+  DASHBOARD_RUNTIME_DIST="$INSTALL_ROOT/runtime/dashboard/dist/apps/dashboard/.next"
+  mkdir -p "$DASHBOARD_RUNTIME_DIST"
+  cp -R "$DASHBOARD_DIST_SOURCE/." "$DASHBOARD_RUNTIME_DIST"
 fi
 
 chmod +x "$INSTALL_ROOT/bin/DroidSwarm" "$INSTALL_ROOT/libexec/droidswarm-daemon.sh" "$INSTALL_ROOT/bin/update-droidswarm" "$INSTALL_ROOT/scripts/update-droidswarm.sh"

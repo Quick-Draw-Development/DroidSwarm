@@ -10,12 +10,18 @@ const startOrchestrator = () => {
   process.on("SIGTERM", shutdown);
   orchestrator.start();
 };
-const bootstrapWorker = () => {
-  require("./worker");
+const bootstrapWorker = (mode2) => {
+  if (mode2 === "worker") {
+    require("./worker");
+  } else {
+    require("./verifier");
+  }
 };
-const isWorkerMode = process.argv[2] === "worker";
-if (isWorkerMode) {
-  bootstrapWorker();
+const mode = process.argv[2];
+if (mode === "worker") {
+  bootstrapWorker("worker");
+} else if (mode === "verifier") {
+  bootstrapWorker("verifier");
 } else {
   startOrchestrator();
 }

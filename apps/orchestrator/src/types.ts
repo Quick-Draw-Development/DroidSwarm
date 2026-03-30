@@ -141,7 +141,8 @@ export interface ExecutionEventRecord {
     | 'checkpoint_created'
     | 'verification_requested'
     | 'agent_result'
-    | 'plan_proposed';
+    | 'plan_proposed'
+    | 'verification_fix_task_created';
   detail: string;
   metadata?: Record<string, unknown>;
   createdAt: string;

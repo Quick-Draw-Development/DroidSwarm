@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { AgentSupervisor, defaultRoleInstructions } from '../AgentSupervisor';
 import type { OrchestratorPersistenceService } from '../persistence/service';
 import type {
+  ArtifactRecord,
   CheckpointRecord,
   CodexAgentResult,
   OrchestratorConfig,
@@ -478,6 +479,42 @@ export class TaskScheduler {
     this.persistenceService.setTaskStatus(task.taskId, 'waiting_on_dependency');
   }
 
+  private queueVerificationFixTask(
+    parent: PersistedTask,
+    summary: string | undefined,
+    artifacts: ArtifactRecord[],
+  ): void {
+    const fixTaskId = randomUUID();
+    const logRefs = artifacts.map((artifact) => ({
+      artifactId: artifact.artifactId,
+      summary: artifact.summary,
+      kind: artifact.kind,
+    }));
+    const fixTask = this.persistenceService.createTask({
+      taskId: fixTaskId,
+      name: `${parent.name} → verification fix`,
+      priority: parent.priority,
+      parentTaskId: parent.taskId,
+      metadata: {
+        stage: 'verification_fix',
+        task_type: 'verification_fix',
+        failure_summary: summary,
+        verification_log_refs: logRefs,
+      },
+    });
+    this.readyQueue.add(fixTask.taskId);
+    this.persistenceService.recordExecutionEvent(
+      'verification_fix_task_created',
+      `Queued verification fix task ${fixTask.taskId}`,
+      {
+        parentTaskId: parent.taskId,
+        fixTaskId: fixTask.taskId,
+        failureSummary: summary,
+        verificationLogCount: artifacts.length,
+      },
+    );
+  }
+
   private enqueueCheckpoint(task: PersistedTask, attemptId: string, result: CodexAgentResult): void {
     const payload = this.buildCheckpointPayload(result);
     if (!payload) {
@@ -606,10 +643,14 @@ export class TaskScheduler {
     } else {
       this.persistenceService.setTaskStatus(task.taskId, 'failed');
       this.persistenceService.setTaskStatus(parent.taskId, 'waiting_on_human');
-      this.scheduleRetry(task.taskId);
+      const failureArtifacts = this.persistenceService
+        .getArtifactsForTask(task.taskId)
+        .filter((artifact) => artifact.kind === 'verification_log');
+      this.queueVerificationFixTask(parent, result.summary, failureArtifacts);
     }
 
     this.resolveParentIfReady(task);
+    this.schedule();
   }
 
   private handleReviewResult(

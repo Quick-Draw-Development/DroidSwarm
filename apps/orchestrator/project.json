@@ -115,6 +115,12 @@
         "command": "node --import tsx --test apps/orchestrator/src/**/*.spec.ts"
       }
     },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc --noEmit -p apps/orchestrator/tsconfig.app.json"
+      }
+    },
     "typecheck": {
       "executor": "nx:run-commands",
       "options": {

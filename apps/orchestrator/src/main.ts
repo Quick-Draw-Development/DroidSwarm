@@ -14,14 +14,20 @@ const startOrchestrator = (): void => {
   orchestrator.start();
 };
 
-const bootstrapWorker = (): void => {
-  require('./worker');
+const bootstrapWorker = (mode: 'worker' | 'verifier'): void => {
+  if (mode === 'worker') {
+    require('./worker');
+  } else {
+    require('./verifier');
+  }
 };
 
-const isWorkerMode = process.argv[2] === 'worker';
+const mode = process.argv[2];
 
-if (isWorkerMode) {
-  bootstrapWorker();
+if (mode === 'worker') {
+  bootstrapWorker('worker');
+} else if (mode === 'verifier') {
+  bootstrapWorker('verifier');
 } else {
   startOrchestrator();
 }

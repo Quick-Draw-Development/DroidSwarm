@@ -372,6 +372,37 @@ class TaskScheduler {
     this.readyQueue.add(child.taskId);
     this.persistenceService.setTaskStatus(task.taskId, "waiting_on_dependency");
   }
+  queueVerificationFixTask(parent, summary, artifacts) {
+    const fixTaskId = (0, import_node_crypto.randomUUID)();
+    const logRefs = artifacts.map((artifact) => ({
+      artifactId: artifact.artifactId,
+      summary: artifact.summary,
+      kind: artifact.kind
+    }));
+    const fixTask = this.persistenceService.createTask({
+      taskId: fixTaskId,
+      name: `${parent.name} \u2192 verification fix`,
+      priority: parent.priority,
+      parentTaskId: parent.taskId,
+      metadata: {
+        stage: "verification_fix",
+        task_type: "verification_fix",
+        failure_summary: summary,
+        verification_log_refs: logRefs
+      }
+    });
+    this.readyQueue.add(fixTask.taskId);
+    this.persistenceService.recordExecutionEvent(
+      "verification_fix_task_created",
+      `Queued verification fix task ${fixTask.taskId}`,
+      {
+        parentTaskId: parent.taskId,
+        fixTaskId: fixTask.taskId,
+        failureSummary: summary,
+        verificationLogCount: artifacts.length
+      }
+    );
+  }
   enqueueCheckpoint(task, attemptId, result) {
     const payload = this.buildCheckpointPayload(result);
     if (!payload) {
@@ -478,9 +509,11 @@ class TaskScheduler {
     } else {
       this.persistenceService.setTaskStatus(task.taskId, "failed");
       this.persistenceService.setTaskStatus(parent.taskId, "waiting_on_human");
-      this.scheduleRetry(task.taskId);
+      const failureArtifacts = this.persistenceService.getArtifactsForTask(task.taskId).filter((artifact) => artifact.kind === "verification_log");
+      this.queueVerificationFixTask(parent, result.summary, failureArtifacts);
     }
     this.resolveParentIfReady(task);
+    this.schedule();
   }
   handleReviewResult(task, attemptId, agentName, result) {
     const parentId = task.parentTaskId;

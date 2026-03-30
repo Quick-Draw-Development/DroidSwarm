@@ -55,7 +55,8 @@ class AgentSupervisor {
       return null;
     }
     const agentName = this.nextAgentName(role);
-    const child = (0, import_node_child_process.fork)(this.entryScript, ["worker", JSON.stringify({
+    const mode = role === "tester" ? "verifier" : "worker";
+    const child = (0, import_node_child_process.fork)(this.entryScript, [mode, JSON.stringify({
       task,
       role,
       agentName,

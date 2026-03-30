@@ -70,7 +70,8 @@ export class AgentSupervisor {
     }
 
     const agentName = this.nextAgentName(role);
-    const child = fork(this.entryScript, ['worker', JSON.stringify({
+    const mode = role === 'tester' ? 'verifier' : 'worker';
+    const child = fork(this.entryScript, [mode, JSON.stringify({
       task,
       role,
       agentName,

@@ -7,7 +7,7 @@ import WebSocket from 'ws';
 import { loadConfig } from './config';
 import { buildAgentStatusUpdate, buildArtifactCreatedMessage } from './messages';
 import { buildAuthMessage, parseEnvelope } from './protocol';
-import type { CodexAgentResult, TaskRecord } from './types';
+import type { TaskRecord, WorkerResult } from './types';
 
 interface VerifierOptions {
   task: TaskRecord;
@@ -165,7 +165,7 @@ const runVerifier = async (): Promise<void> => {
       socket,
       buildArtifactCreatedMessage(config, options.task.taskId, options.task.taskId, options.agentName, {
         kind: 'verification_log',
-        title: `${command.label} ${result.exitCode === 0 ? 'passed' : 'failed'}`,
+        summary: `${command.label} ${result.exitCode === 0 ? 'passed' : 'failed'}`,
         content: trimLog(artifactContent),
       }),
     );
@@ -176,20 +176,34 @@ const runVerifier = async (): Promise<void> => {
     ? 'Verifier droid completed lint/test/build without errors.'
     : `Verifier detected problems in ${failedCommands.map((command) => command.label).join(', ')}.`;
   const statusCode = failedCommands.length === 0 ? 'agent_completed' : 'agent_failed';
-  const overallStatus: CodexAgentResult['status'] = failedCommands.length === 0 ? 'completed' : 'blocked';
-
-  const finalResult: CodexAgentResult = {
-    status: overallStatus,
+  const finalResult: WorkerResult = {
+    success: failedCommands.length === 0,
+    engine: 'mux-local',
     summary,
-    requested_agents: [],
+    timedOut: false,
+    durationMs: 0,
+    activity: {
+      filesRead: [],
+      filesChanged: [],
+      commandsRun: commandResults.map((result) => result.label),
+      toolCalls: [],
+    },
+    checkpointDelta: {
+      factsAdded: [],
+      decisionsAdded: [],
+      openQuestions: [],
+      risksFound: failedCommands.length === 0 ? [] : ['nx_verification_failed'],
+      nextBestActions: [],
+      evidenceRefs: [],
+    },
     artifacts: commandResults.map((result) => ({
       kind: 'nx_command_summary',
-      title: result.label,
+      summary: result.label,
       content: trimLog(`code=${result.exitCode} output:\n${result.output}`),
     })),
-    doc_updates: [],
-    branch_actions: [],
-    reason_code: failedCommands.length === 0 ? undefined : 'nx_verification_failed',
+    spawnRequests: [],
+    budget: {},
+    metadata: failedCommands.length === 0 ? undefined : { reasonCode: 'nx_verification_failed' },
   };
 
   sendMessage(

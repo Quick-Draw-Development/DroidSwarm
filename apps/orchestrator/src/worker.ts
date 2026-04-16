@@ -3,7 +3,7 @@ import WebSocket from 'ws';
 
 import { loadConfig } from './config';
 import { buildAgentPrompt } from './agent-prompt';
-import { runCodexPrompt } from './codex-runner';
+import type { WorkerRequest } from '@shared-workers';
 import {
   buildArtifactCreatedMessage,
   buildAgentStatusUpdate,
@@ -12,16 +12,28 @@ import {
   buildAgentToolResponseMessage,
 } from './messages';
 import { buildAuthMessage, parseEnvelope } from './protocol';
-import type { CodexAgentResult, MessageEnvelope, OrchestratorConfig, TaskRecord } from './types';
+import type { MessageEnvelope, TaskRecord, TaskScope, WorkerEngine, WorkerHeartbeat, WorkerResult } from './types';
 import { CompressionShape, StatusUpdatePayload, ToolResponsePayload, UsageShape } from '@protocol';
+import { LocalLlamaAdapter } from './adapters/worker/local-llama.adapter';
+import { CodexCloudAdapter } from './adapters/worker/codex-cloud.adapter';
+import { CodexCliAdapter } from './adapters/worker/codex-cli.adapter';
+import { MuxWorkerAdapter } from './adapters/worker/mux-worker.adapter';
 
 interface WorkerOptions {
   task: TaskRecord;
   role: string;
   agentName: string;
+  attemptId: string;
   parentSummary?: string;
   parentDroidspeak?: string;
   model?: string;
+  engine?: WorkerEngine;
+  scope?: TaskScope;
+  skillPacks?: string[];
+  skillTexts?: string[];
+  readOnly?: boolean;
+  instructions?: string;
+  workspacePath?: string;
 }
 
 const parseOptions = (): WorkerOptions => {
@@ -68,6 +80,45 @@ const sendMessage = (socket: WebSocket, message: MessageEnvelope | ReturnType<ty
   socket.send(JSON.stringify(message));
 };
 
+const buildHeartbeatPayload = (heartbeat: WorkerHeartbeat): Record<string, unknown> => ({
+  heartbeat,
+  result: undefined,
+});
+
+const resolveScope = (config: ReturnType<typeof loadConfig>, options: WorkerOptions): TaskScope => ({
+  projectId: options.scope?.projectId ?? options.task.projectId ?? config.projectId,
+  repoId: options.scope?.repoId ?? options.task.repoId ?? config.repoId,
+  rootPath: options.workspacePath ?? options.scope?.rootPath ?? options.task.rootPath ?? config.projectRoot,
+  branch: options.scope?.branch ?? options.task.branchName ?? config.defaultBranch,
+  workspaceId: options.scope?.workspaceId ?? options.task.workspaceId,
+});
+
+const getAdapter = (config: ReturnType<typeof loadConfig>, engine: WorkerEngine, workspacePath: string) => {
+  switch (engine) {
+    case 'local-llama':
+      return new LocalLlamaAdapter({ baseUrl: config.llamaBaseUrl, timeoutMs: config.llamaTimeoutMs });
+    case 'codex-cloud':
+      return new CodexCloudAdapter({
+        apiBaseUrl: config.codexApiBaseUrl,
+        apiKey: config.codexApiKey,
+        model: config.codexCloudModel,
+      });
+    case 'codex-cli':
+      return new CodexCliAdapter({
+        config,
+        projectRoot: workspacePath,
+      });
+    case 'mux-local':
+      return new MuxWorkerAdapter({
+        command: process.env.DROIDSWARM_MUX_WORKER_CMD ?? process.execPath,
+        args: process.env.DROIDSWARM_MUX_WORKER_ARGS ? process.env.DROIDSWARM_MUX_WORKER_ARGS.split(' ') : ['-e', 'console.log(process.argv.slice(1).join(" "))'],
+        cwd: workspacePath,
+      });
+    default:
+      return new LocalLlamaAdapter({ baseUrl: config.llamaBaseUrl, timeoutMs: config.llamaTimeoutMs });
+  }
+};
+
 const runWorker = async (): Promise<void> => {
   const config = loadConfig();
   const options = parseOptions();
@@ -102,7 +153,7 @@ const runWorker = async (): Promise<void> => {
 
   console.log(`[Worker ${options.agentName}] notifying orchestrator of start`);
 
-  const promptContent = buildAgentPrompt({
+  const promptContent = options.instructions ?? buildAgentPrompt({
     task: options.task,
     role: options.role,
     agentName: options.agentName,
@@ -113,7 +164,10 @@ const runWorker = async (): Promise<void> => {
     specRules: config.agentRules,
     specDroidspeak: config.droidspeakRules,
   });
-  const modelOverride = options.model ?? config.codexModel;
+  const scope = resolveScope(config, options);
+  const engine = options.engine ?? 'local-llama';
+  const modelOverride = options.model
+    ?? (engine === 'local-llama' ? config.llamaModel : engine === 'codex-cloud' ? config.codexCloudModel : config.codexModel);
   const reportLLMCall = (payload: ToolResponsePayload, usage?: UsageShape): void => {
     sendMessage(
       socket,
@@ -129,15 +183,55 @@ const runWorker = async (): Promise<void> => {
   };
 
   const llmStart = Date.now();
-  let result: CodexAgentResult;
+  const heartbeatInterval = setInterval(() => {
+    const heartbeat: WorkerHeartbeat = {
+      runId: options.task.taskId,
+      taskId: options.task.taskId,
+      attemptId: options.attemptId,
+      engine,
+      timestamp: new Date().toISOString(),
+      elapsedMs: Date.now() - llmStart,
+      status: 'running',
+      lastActivity: `running ${options.role}`,
+    };
+    sendMessage(
+      socket,
+      buildAgentStatusUpdate(
+        config,
+        options.task.taskId,
+        options.task.taskId,
+        options.agentName,
+        'execution',
+        'agent_heartbeat',
+        `Heartbeat from ${options.agentName}`,
+        undefined,
+        buildHeartbeatPayload(heartbeat),
+      ),
+    );
+  }, Math.max(1000, Math.floor(config.heartbeatMs / 2)));
+
+  let result: WorkerResult;
   try {
-    console.log(`[Worker ${options.agentName}] launching Codex prompt (${options.role})`);
-    result = await runCodexPrompt({
-      config,
-      projectRoot: config.projectRoot,
-      prompt: promptContent,
+    console.log(`[Worker ${options.agentName}] launching ${engine} adapter (${options.role})`);
+    const adapter = getAdapter(config, engine, scope.rootPath);
+    const request: WorkerRequest = {
+      runId: options.task.taskId,
+      taskId: options.task.taskId,
+      attemptId: options.attemptId,
+      role: options.role,
+      instructions: promptContent,
+      scope,
+      engine,
       model: modelOverride,
-    });
+      skillPacks: options.skillPacks,
+      readOnly: options.readOnly,
+      context: {
+        parentSummary: options.parentSummary,
+        parentCheckpoint: options.parentDroidspeak,
+        resumePacket: options.skillTexts?.join('\n\n'),
+      },
+    };
+    result = await adapter.run(request);
   } catch (error) {
     const latencyMs = Date.now() - llmStart;
     reportLLMCall({
@@ -152,14 +246,33 @@ const runWorker = async (): Promise<void> => {
         error: error instanceof Error ? error.message : 'Codex execution failed.',
       },
     });
-    const errorResult: CodexAgentResult = {
-      status: 'blocked',
+    const errorResult: WorkerResult = {
+      success: false,
+      engine: 'codex-cloud',
+      model: modelOverride,
       summary: error instanceof Error ? error.message : 'Codex execution failed.',
-      requested_agents: [],
+      timedOut: false,
+      durationMs: latencyMs,
+      activity: {
+        filesRead: [],
+        filesChanged: [],
+        commandsRun: [],
+        toolCalls: [],
+      },
+      checkpointDelta: {
+        factsAdded: [],
+        decisionsAdded: [],
+        openQuestions: [],
+        risksFound: ['codex_exec_failed'],
+        nextBestActions: [],
+        evidenceRefs: [],
+      },
       artifacts: [],
-      doc_updates: [],
-      branch_actions: [],
-      reason_code: 'codex_exec_failed',
+      spawnRequests: [],
+      budget: {},
+      metadata: {
+        reasonCode: 'codex_exec_failed',
+      },
     };
     sendMessage(
       socket,
@@ -177,13 +290,15 @@ const runWorker = async (): Promise<void> => {
     );
     socket.close();
     return;
+  } finally {
+    clearInterval(heartbeatInterval);
   }
 
   const latencyMs = Date.now() - llmStart;
   const usage: UsageShape = {};
-  if (result.metrics?.tokens !== undefined) {
-    usage.total_tokens = result.metrics.tokens;
-    usage.output_tokens = result.metrics.tokens;
+  if (result.budget.tokensOut !== undefined) {
+    usage.total_tokens = result.budget.tokensOut;
+    usage.output_tokens = result.budget.tokensOut;
   }
   const usagePayload: UsageShape | undefined = Object.keys(usage).length > 0 ? usage : undefined;
   reportLLMCall(
@@ -194,17 +309,17 @@ const runWorker = async (): Promise<void> => {
         tool_name: 'codex_agent',
         prompt: promptContent,
         output: result.summary,
-        tokens: result.metrics?.tokens,
-        tool_calls: result.metrics?.tool_calls,
+        tokens: result.budget.tokensOut,
+        tool_calls: result.activity.toolCalls.length,
         latency_ms: latencyMs,
-        duration_ms: result.metrics?.duration_ms ?? latencyMs,
+        duration_ms: result.durationMs || latencyMs,
         model: modelOverride ?? 'codex_agent',
       },
     },
     usagePayload,
   );
 
-  console.log(`[Worker ${options.agentName}] Codex completed with status ${result.status}`);
+  console.log(`[Worker ${options.agentName}] Codex completed with success=${result.success}`);
 
   for (const artifact of result.artifacts) {
     sendMessage(
@@ -213,14 +328,22 @@ const runWorker = async (): Promise<void> => {
     );
   }
 
-  for (const request of result.requested_agents) {
+  for (const request of result.spawnRequests) {
+    const normalizedRequest = {
+      role: request.role,
+      reason: request.reason,
+      instructions: request.instructions ?? request.reason,
+    };
     sendMessage(
       socket,
-      buildSpawnRequestedMessage(config, options.task.taskId, options.task.taskId, options.agentName, request),
+      buildSpawnRequestedMessage(config, options.task.taskId, options.task.taskId, options.agentName, normalizedRequest),
     );
   }
 
-  if (result.clarification_question) {
+  const clarificationQuestion = typeof result.metadata?.clarificationQuestion === 'string'
+    ? result.metadata.clarificationQuestion
+    : result.checkpointDelta.openQuestions[0];
+  if (clarificationQuestion) {
     sendMessage(
       socket,
       buildClarificationRequest(
@@ -228,10 +351,14 @@ const runWorker = async (): Promise<void> => {
         options.task.taskId,
         options.task.taskId,
         options.task.createdByUserId,
-        result.clarification_question,
+        clarificationQuestion,
       ),
     );
   }
+
+  const compression = typeof result.metadata?.compression === 'object' && result.metadata.compression !== null
+    ? result.metadata.compression as CompressionShape
+    : undefined;
 
   sendMessage(
     socket,
@@ -241,9 +368,9 @@ const runWorker = async (): Promise<void> => {
       options.task.taskId,
       options.agentName,
       'execution',
-      result.status === 'completed' ? 'agent_completed' : 'agent_blocked',
+      result.success ? 'agent_completed' : 'agent_blocked',
       result.summary,
-      result.compression as unknown as CompressionShape,
+      compression,
       { result },
     ),
   );

@@ -1,0 +1,31 @@
+{
+  "name": "blink-bridge",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/blink-bridge/src",
+  "projectType": "application",
+  "targets": {
+    "build": {
+      "executor": "@nx/esbuild:esbuild",
+      "outputs": [
+        "{options.outputPath}"
+      ],
+      "options": {
+        "platform": "node",
+        "outputPath": "dist/apps/blink-bridge",
+        "format": [
+          "cjs"
+        ],
+        "bundle": false,
+        "main": "apps/blink-bridge/src/main.ts",
+        "tsConfig": "apps/blink-bridge/tsconfig.app.json"
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc --noEmit -p apps/blink-bridge/tsconfig.app.json"
+      }
+    }
+  },
+  "tags": []
+}

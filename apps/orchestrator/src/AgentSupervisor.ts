@@ -6,7 +6,9 @@ import type {
   OrchestratorConfig,
   RequestedAgent,
   SpawnedAgent,
+  TaskScope,
   TaskRecord,
+  WorkerEngine,
 } from './types';
 
 interface AgentSupervisorCallbacks {
@@ -20,6 +22,16 @@ interface ActiveAgent {
   agentName: string;
   role: string;
   attemptId: string;
+}
+
+export interface AgentLaunchOptions {
+  engine?: WorkerEngine;
+  scope?: TaskScope;
+  skillPacks?: string[];
+  skillTexts?: string[];
+  readOnly?: boolean;
+  instructions?: string;
+  workspacePath?: string;
 }
 
 export const defaultRoleInstructions = (task: TaskRecord): RequestedAgent[] => {
@@ -64,6 +76,7 @@ export class AgentSupervisor {
     parentSummary?: string,
     parentDroidspeak?: string,
     model?: string,
+    options?: AgentLaunchOptions,
   ): SpawnedAgent | null {
     if (!this.canSpawn(task)) {
       return null;
@@ -75,9 +88,17 @@ export class AgentSupervisor {
       task,
       role,
       agentName,
+      attemptId,
       parentSummary,
       parentDroidspeak,
       model,
+      engine: options?.engine,
+      scope: options?.scope,
+      skillPacks: options?.skillPacks,
+      skillTexts: options?.skillTexts,
+      readOnly: options?.readOnly,
+      instructions: options?.instructions,
+      workspacePath: options?.workspacePath,
     })], {
       env: process.env,
       stdio: ['ignore', 'pipe', 'pipe', 'ipc'],

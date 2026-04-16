@@ -7,6 +7,16 @@ DROIDSWARM_SWARMS_DIR="${DROIDSWARM_SWARMS_DIR:-$DROIDSWARM_HOME/swarms}"
 DROIDSWARM_RUN_DIR="${DROIDSWARM_RUN_DIR:-$DROIDSWARM_HOME/run}"
 DROIDSWARM_LOG_DIR="${DROIDSWARM_LOG_DIR:-$DROIDSWARM_HOME/logs}"
 DROIDSWARM_INSTALL_DIR="${DROIDSWARM_INSTALL_DIR:-$DROIDSWARM_HOME/install}"
+DROIDSWARM_SERVICE_CONFIG="${DROIDSWARM_SERVICE_CONFIG:-$DROIDSWARM_HOME/services.env}"
+DROIDSWARM_RUNTIME_DIR="${DROIDSWARM_RUNTIME_DIR:-$DROIDSWARM_INSTALL_DIR/runtime}"
+DROIDSWARM_BIN_INSTALL_DIR="${DROIDSWARM_BIN_INSTALL_DIR:-$DROIDSWARM_INSTALL_DIR/bin}"
+DROIDSWARM_MODELS_DIR="${DROIDSWARM_MODELS_DIR:-$DROIDSWARM_HOME/models}"
+DROIDSWARM_DEFAULT_BLINK_SERVER_BIN="${DROIDSWARM_DEFAULT_BLINK_SERVER_BIN:-$DROIDSWARM_BIN_INSTALL_DIR/blink-server}"
+DROIDSWARM_DEFAULT_MUX_BIN="${DROIDSWARM_DEFAULT_MUX_BIN:-$DROIDSWARM_BIN_INSTALL_DIR/mux}"
+DROIDSWARM_DEFAULT_LLAMA_SERVER_BIN="${DROIDSWARM_DEFAULT_LLAMA_SERVER_BIN:-$DROIDSWARM_BIN_INSTALL_DIR/llama-server}"
+DROIDSWARM_DEFAULT_LLAMA_MODEL="${DROIDSWARM_DEFAULT_LLAMA_MODEL:-$DROIDSWARM_MODELS_DIR/default.gguf}"
+DROIDSWARM_DEFAULT_BLINK_BRIDGE_ENTRY="${DROIDSWARM_DEFAULT_BLINK_BRIDGE_ENTRY:-$DROIDSWARM_RUNTIME_DIR/blink-bridge/main.js}"
+DROIDSWARM_DEFAULT_WORKER_HOST_ENTRY="${DROIDSWARM_DEFAULT_WORKER_HOST_ENTRY:-$DROIDSWARM_RUNTIME_DIR/worker-host/main.js}"
 
 now_utc() {
   date -u +"%Y-%m-%dT%H:%M:%SZ"
@@ -18,7 +28,10 @@ ensure_runtime_dirs() {
     "$DROIDSWARM_SWARMS_DIR" \
     "$DROIDSWARM_RUN_DIR" \
     "$DROIDSWARM_LOG_DIR" \
-    "$DROIDSWARM_INSTALL_DIR"
+    "$DROIDSWARM_INSTALL_DIR" \
+    "$DROIDSWARM_RUNTIME_DIR" \
+    "$DROIDSWARM_BIN_INSTALL_DIR" \
+    "$DROIDSWARM_MODELS_DIR"
 }
 
 err() {
@@ -174,6 +187,14 @@ component_log_file() {
   printf '%s/%s.%s.log\n' "$DROIDSWARM_LOG_DIR" "$1" "$2"
 }
 
+service_pid_file() {
+  printf '%s/%s.pid\n' "$2" "$1"
+}
+
+service_status_file() {
+  printf '%s/%s.status\n' "$2" "$1"
+}
+
 swarm_exists() {
   [[ -d "$(swarm_dir "$1")" ]]
 }
@@ -248,6 +269,68 @@ PY
   fi
 
   return 0
+}
+
+port_is_listening() {
+  local port="$1"
+  if [[ -z "$port" ]]; then
+    return 1
+  fi
+
+  if command -v node >/dev/null 2>&1; then
+    node - "$port" <<'NODE' >/dev/null 2>&1
+const net = require('net');
+const port = Number(process.argv[2]);
+const socket = net.createConnection({ host: '127.0.0.1', port });
+socket.setTimeout(1000);
+socket.once('connect', () => {
+  socket.destroy();
+  process.exit(0);
+});
+socket.once('timeout', () => {
+  socket.destroy();
+  process.exit(1);
+});
+socket.once('error', () => process.exit(1));
+NODE
+    return $?
+  fi
+
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$port" <<'PY' >/dev/null 2>&1
+import socket
+import sys
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock.settimeout(1)
+try:
+    sock.connect(("127.0.0.1", int(sys.argv[1])))
+except OSError:
+    sys.exit(1)
+finally:
+    sock.close()
+PY
+    return $?
+  fi
+
+  return 1
+}
+
+wait_for_port() {
+  local port="$1"
+  local retries="${2:-20}"
+  local delay="${3:-1}"
+  local attempt=0
+
+  while [[ "$attempt" -lt "$retries" ]]; do
+    if port_is_listening "$port"; then
+      return 0
+    fi
+    sleep "$delay"
+    attempt=$((attempt + 1))
+  done
+
+  return 1
 }
 
 next_available_port() {

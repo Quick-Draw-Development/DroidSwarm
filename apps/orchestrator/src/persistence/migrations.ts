@@ -194,4 +194,243 @@ export const migrations: SchemaMigration[] = [
       `);
     },
   },
+  {
+    version: 4,
+    description: 'Project registry, task chat, worker durability, and scoped write metadata',
+    apply: (database) => {
+      database.exec(`
+        ALTER TABLE runs ADD COLUMN repo_id TEXT;
+      `);
+    },
+  },
+  {
+    version: 5,
+    description: 'Nullable-safe scope columns and multi-project support',
+    apply: (database) => {
+      const tryExec = (statement: string): void => {
+        try {
+          database.exec(statement);
+        } catch {
+          // Column or table already exists on previously migrated databases.
+        }
+      };
+
+      tryExec('ALTER TABLE runs ADD COLUMN root_path TEXT;');
+      tryExec('ALTER TABLE runs ADD COLUMN branch TEXT;');
+      tryExec('ALTER TABLE runs ADD COLUMN workspace_id TEXT;');
+
+      tryExec('ALTER TABLE tasks ADD COLUMN project_id TEXT;');
+      tryExec('ALTER TABLE tasks ADD COLUMN repo_id TEXT;');
+      tryExec('ALTER TABLE tasks ADD COLUMN root_path TEXT;');
+      tryExec('ALTER TABLE tasks ADD COLUMN branch TEXT;');
+      tryExec('ALTER TABLE tasks ADD COLUMN workspace_id TEXT;');
+
+      tryExec('ALTER TABLE task_attempts ADD COLUMN project_id TEXT;');
+      tryExec('ALTER TABLE task_attempts ADD COLUMN repo_id TEXT;');
+      tryExec('ALTER TABLE task_attempts ADD COLUMN root_path TEXT;');
+      tryExec('ALTER TABLE task_attempts ADD COLUMN branch TEXT;');
+      tryExec('ALTER TABLE task_attempts ADD COLUMN workspace_id TEXT;');
+
+      tryExec('ALTER TABLE artifacts ADD COLUMN project_id TEXT;');
+      tryExec('ALTER TABLE artifacts ADD COLUMN repo_id TEXT;');
+      tryExec('ALTER TABLE artifacts ADD COLUMN root_path TEXT;');
+      tryExec('ALTER TABLE artifacts ADD COLUMN branch TEXT;');
+      tryExec('ALTER TABLE artifacts ADD COLUMN workspace_id TEXT;');
+
+      tryExec('ALTER TABLE checkpoints ADD COLUMN project_id TEXT;');
+      tryExec('ALTER TABLE checkpoints ADD COLUMN repo_id TEXT;');
+      tryExec('ALTER TABLE checkpoints ADD COLUMN root_path TEXT;');
+      tryExec('ALTER TABLE checkpoints ADD COLUMN branch TEXT;');
+      tryExec('ALTER TABLE checkpoints ADD COLUMN workspace_id TEXT;');
+
+      tryExec('ALTER TABLE budget_events ADD COLUMN project_id TEXT;');
+      tryExec('ALTER TABLE budget_events ADD COLUMN repo_id TEXT;');
+      tryExec('ALTER TABLE budget_events ADD COLUMN root_path TEXT;');
+      tryExec('ALTER TABLE budget_events ADD COLUMN branch TEXT;');
+      tryExec('ALTER TABLE budget_events ADD COLUMN workspace_id TEXT;');
+
+      database.exec(`
+        UPDATE tasks
+        SET project_id = COALESCE(project_id, (SELECT runs.project_id FROM runs WHERE runs.run_id = tasks.run_id))
+        WHERE project_id IS NULL;
+
+        UPDATE task_attempts
+        SET project_id = COALESCE(project_id, (SELECT tasks.project_id FROM tasks WHERE tasks.task_id = task_attempts.task_id))
+        WHERE project_id IS NULL;
+
+        UPDATE artifacts
+        SET project_id = COALESCE(project_id, (SELECT tasks.project_id FROM tasks WHERE tasks.task_id = artifacts.task_id))
+        WHERE project_id IS NULL;
+
+        UPDATE checkpoints
+        SET project_id = COALESCE(project_id, (SELECT tasks.project_id FROM tasks WHERE tasks.task_id = checkpoints.task_id))
+        WHERE project_id IS NULL;
+
+        UPDATE budget_events
+        SET project_id = COALESCE(project_id, (SELECT runs.project_id FROM runs WHERE runs.run_id = budget_events.run_id))
+        WHERE project_id IS NULL;
+
+        CREATE TABLE IF NOT EXISTS projects (
+          project_id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          description TEXT,
+          metadata_json TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS project_repos (
+          repo_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          root_path TEXT NOT NULL,
+          default_branch TEXT NOT NULL,
+          main_branch TEXT NOT NULL,
+          develop_branch TEXT NOT NULL,
+          allowed_roots_json TEXT NOT NULL,
+          metadata_json TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY(project_id) REFERENCES projects(project_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS project_checkpoints (
+          project_checkpoint_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          repo_id TEXT NOT NULL,
+          run_id TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          facts_json TEXT NOT NULL,
+          decisions_json TEXT NOT NULL,
+          open_questions_json TEXT NOT NULL,
+          component_summaries_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY(project_id) REFERENCES projects(project_id),
+          FOREIGN KEY(repo_id) REFERENCES project_repos(repo_id),
+          FOREIGN KEY(run_id) REFERENCES runs(run_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS project_facts (
+          fact_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          repo_id TEXT NOT NULL,
+          scope TEXT NOT NULL,
+          statement TEXT NOT NULL,
+          confidence REAL NOT NULL,
+          evidence_refs_json TEXT NOT NULL,
+          status TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY(project_id) REFERENCES projects(project_id),
+          FOREIGN KEY(repo_id) REFERENCES project_repos(repo_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS project_decisions (
+          decision_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          repo_id TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          why TEXT NOT NULL,
+          alternatives_rejected_json TEXT NOT NULL,
+          evidence_refs_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY(project_id) REFERENCES projects(project_id),
+          FOREIGN KEY(repo_id) REFERENCES project_repos(repo_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS project_components (
+          component_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          repo_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          metadata_json TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY(project_id) REFERENCES projects(project_id),
+          FOREIGN KEY(repo_id) REFERENCES project_repos(repo_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS project_chat_bindings (
+          binding_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          task_id TEXT NOT NULL,
+          provider TEXT NOT NULL,
+          external_thread_id TEXT NOT NULL,
+          metadata_json TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS task_chat_messages (
+          message_id TEXT PRIMARY KEY,
+          task_id TEXT NOT NULL,
+          run_id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          repo_id TEXT,
+          root_path TEXT,
+          branch TEXT,
+          workspace_id TEXT,
+          source TEXT NOT NULL,
+          external_thread_id TEXT,
+          external_message_id TEXT,
+          author_type TEXT NOT NULL,
+          author_id TEXT NOT NULL,
+          body TEXT NOT NULL,
+          metadata_json TEXT,
+          created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS worker_results (
+          worker_result_id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL,
+          task_id TEXT NOT NULL,
+          attempt_id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          repo_id TEXT NOT NULL,
+          root_path TEXT NOT NULL,
+          branch TEXT NOT NULL,
+          workspace_id TEXT,
+          engine TEXT NOT NULL,
+          model TEXT,
+          success INTEGER NOT NULL,
+          summary TEXT NOT NULL,
+          payload_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY(run_id) REFERENCES runs(run_id),
+          FOREIGN KEY(task_id) REFERENCES tasks(task_id),
+          FOREIGN KEY(attempt_id) REFERENCES task_attempts(attempt_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS worker_heartbeats (
+          heartbeat_id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL,
+          task_id TEXT NOT NULL,
+          attempt_id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          repo_id TEXT NOT NULL,
+          root_path TEXT NOT NULL,
+          branch TEXT NOT NULL,
+          workspace_id TEXT,
+          engine TEXT NOT NULL,
+          heartbeat_status TEXT NOT NULL,
+          elapsed_ms INTEGER NOT NULL,
+          last_activity TEXT,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY(run_id) REFERENCES runs(run_id),
+          FOREIGN KEY(task_id) REFERENCES tasks(task_id),
+          FOREIGN KEY(attempt_id) REFERENCES task_attempts(attempt_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_projects_name ON projects(name);
+        CREATE INDEX IF NOT EXISTS idx_project_repos_project ON project_repos(project_id);
+        CREATE INDEX IF NOT EXISTS idx_tasks_project_repo ON tasks(project_id, repo_id);
+        CREATE INDEX IF NOT EXISTS idx_attempts_scope ON task_attempts(project_id, repo_id, branch);
+        CREATE INDEX IF NOT EXISTS idx_artifacts_scope ON artifacts(project_id, repo_id, branch);
+        CREATE INDEX IF NOT EXISTS idx_checkpoints_scope ON checkpoints(project_id, repo_id, branch);
+        CREATE INDEX IF NOT EXISTS idx_task_chat_messages_task ON task_chat_messages(task_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_worker_results_attempt ON worker_results(attempt_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_worker_heartbeats_attempt ON worker_heartbeats(attempt_id, created_at);
+      `);
+    },
+  },
 ];

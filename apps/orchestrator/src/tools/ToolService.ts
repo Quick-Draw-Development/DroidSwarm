@@ -84,7 +84,7 @@ export class ToolService {
     if (!target) {
       throw new Error('file_read requires a path parameter');
     }
-    const resolved = this.resolveProjectPath(target);
+    const resolved = this.resolveProjectPath(request.taskId, target);
     const content = await fs.readFile(resolved, 'utf-8');
     return {
       status: 'success',
@@ -103,7 +103,7 @@ export class ToolService {
     if (!target) {
       throw new Error('file_write requires a path parameter');
     }
-    const resolved = this.resolveProjectPath(target);
+    const resolved = this.resolveProjectPath(request.taskId, target);
     await fs.mkdir(path.dirname(resolved), { recursive: true });
     await fs.writeFile(resolved, content, 'utf-8');
     return {
@@ -120,7 +120,7 @@ export class ToolService {
     const command = this.asString(request.parameters?.command) ?? 'npx';
     const candidateArgs = ensureStringArray(request.parameters?.args);
     const args = candidateArgs.length > 0 ? candidateArgs : ['nx', '--version'];
-    const execution = await this.runCommand(command, args);
+    const execution = await this.runCommand(request.taskId, command, args);
     return {
       status: 'success',
       result: {
@@ -177,9 +177,9 @@ export class ToolService {
     };
   }
 
-  private resolveProjectPath(relativePath: string): string {
-    const candidate = path.resolve(this.config.projectRoot, relativePath);
-    const root = path.resolve(this.config.projectRoot);
+  private resolveProjectPath(taskId: string, relativePath: string): string {
+    const root = this.resolveTaskRoot(taskId);
+    const candidate = path.resolve(root, relativePath);
     if (!candidate.startsWith(root)) {
       throw new Error('Tool access outside of project root is forbidden');
     }
@@ -193,10 +193,21 @@ export class ToolService {
     return undefined;
   }
 
-  private async runCommand(command: string, args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  private resolveTaskRoot(taskId: string): string {
+    const task = this.persistence.getTask(taskId);
+    const root = task?.rootPath ?? this.config.projectRoot;
+    const allowedRoots = this.config.allowedRepoRoots.map((entry) => path.resolve(entry));
+    const resolvedRoot = path.resolve(root);
+    if (!allowedRoots.some((entry) => resolvedRoot === entry || resolvedRoot.startsWith(`${entry}${path.sep}`))) {
+      throw new Error(`Task root ${resolvedRoot} is outside the configured repo allowlist`);
+    }
+    return resolvedRoot;
+  }
+
+  private async runCommand(taskId: string, command: string, args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }> {
     return new Promise((resolve, reject) => {
       const child = spawn(command, args, {
-        cwd: this.config.projectRoot,
+        cwd: this.resolveTaskRoot(taskId),
         env: process.env,
       });
       let stdout = '';

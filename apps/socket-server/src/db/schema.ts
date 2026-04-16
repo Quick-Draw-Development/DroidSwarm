@@ -177,5 +177,35 @@ export const applySchema = (database: Database.Database): void => {
       created_by_id TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS project_chat_bindings (
+      binding_id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      task_id TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      external_thread_id TEXT NOT NULL,
+      metadata_json TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS task_chat_messages (
+      message_id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      run_id TEXT,
+      project_id TEXT NOT NULL,
+      repo_id TEXT,
+      root_path TEXT,
+      branch TEXT,
+      workspace_id TEXT,
+      source TEXT NOT NULL,
+      external_thread_id TEXT,
+      external_message_id TEXT,
+      author_type TEXT NOT NULL,
+      author_id TEXT NOT NULL,
+      body TEXT NOT NULL,
+      metadata_json TEXT,
+      created_at TEXT NOT NULL
+    );
   `);
 };

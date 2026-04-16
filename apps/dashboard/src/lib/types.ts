@@ -138,3 +138,69 @@ export interface ProjectIdentity {
   projectId: string;
   projectName: string;
 }
+
+export interface ProjectSummary {
+  projectId: string;
+  name: string;
+  description?: string;
+  updatedAt: string;
+}
+
+export interface RepoSummary {
+  repoId: string;
+  projectId: string;
+  name: string;
+  rootPath: string;
+  defaultBranch: string;
+}
+
+export interface WorkerHeartbeatSummary {
+  attemptId: string;
+  engine: string;
+  status: string;
+  elapsedMs: number;
+  lastActivity?: string;
+  createdAt: string;
+}
+
+export interface RoutingDecisionSummary {
+  attemptId: string;
+  engine?: string;
+  model?: string;
+  reason?: string;
+  role?: string;
+  readOnly?: boolean;
+  complexity?: string;
+  confidence?: number;
+}
+
+export interface ProjectMemorySummary {
+  facts: Array<{
+    id: string;
+    statement: string;
+    confidence: number;
+    status: string;
+    createdAt: string;
+  }>;
+  decisions: Array<{
+    id: string;
+    summary: string;
+    why: string;
+    createdAt: string;
+  }>;
+  checkpoints: Array<{
+    id: string;
+    summary: string;
+    createdAt: string;
+  }>;
+}
+
+export interface TaskChatSummary {
+  id: string;
+  taskId: string;
+  source: string;
+  authorType: string;
+  authorId: string;
+  body: string;
+  createdAt: string;
+}

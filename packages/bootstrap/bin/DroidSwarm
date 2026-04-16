@@ -118,6 +118,10 @@ Options:
   --main-branch NAME
   --production-branch NAME
   --repo-url URL
+  --blink-port PORT
+  --mux-port PORT
+  --llama-port PORT
+  --llama-model PATH
   --env KEY=VALUE           Repeatable
   --config KEY=VALUE        Repeatable
   --foreground
@@ -447,8 +451,10 @@ cmd_swarm() {
   local agent_count main_branch production_branch repo_url foreground dry_run
   local dashboard_port_explicit ws_port_explicit
   local node_bin operator_token socket_server_entry orchestrator_entry dashboard_server_entry
+  local blink_bridge_entry worker_host_entry
   local dashboard_static_dir dashboard_public_dir dashboard_workdir
   local specs_dir
+  local blink_port mux_port llama_port llama_model
   project_root="$(pwd)"
   project_name=""
   project_id=""
@@ -473,6 +479,12 @@ cmd_swarm() {
   dashboard_static_dir=""
   dashboard_public_dir=""
   dashboard_workdir=""
+  blink_bridge_entry=""
+  worker_host_entry=""
+  blink_port=""
+  mux_port=""
+  llama_port=""
+  llama_model="${DROIDSWARM_LLAMA_MODEL:-}"
 
   local -a env_pairs=()
   local -a config_pairs=()
@@ -530,6 +542,26 @@ cmd_swarm() {
         shift
         require_value "--repo-url" "${1:-}"
         repo_url="$1"
+        ;;
+      --blink-port)
+        shift
+        require_value "--blink-port" "${1:-}"
+        blink_port="$1"
+        ;;
+      --mux-port)
+        shift
+        require_value "--mux-port" "${1:-}"
+        mux_port="$1"
+        ;;
+      --llama-port)
+        shift
+        require_value "--llama-port" "${1:-}"
+        llama_port="$1"
+        ;;
+      --llama-model)
+        shift
+        require_value "--llama-model" "${1:-}"
+        llama_model="$1"
         ;;
       --env)
         shift
@@ -639,9 +671,10 @@ cmd_swarm() {
   local state_dir log_file
   state_dir="$(swarm_dir "$swarm_id")"
   log_file="$(swarm_log_file "$swarm_id")"
-  local workspace_root install_runtime_root
+  local workspace_root install_runtime_root install_models_root
   workspace_root="$(cd "$ROOT_DIR/../.." 2>/dev/null && pwd || true)"
   install_runtime_root="$ROOT_DIR/runtime"
+  install_models_root="${DROIDSWARM_MODELS_DIR:-$DROIDSWARM_HOME/models}"
   specs_dir="$ROOT_DIR/specs"
 
   if [[ -z "$node_bin" || ! -x "$node_bin" ]]; then
@@ -668,6 +701,14 @@ cmd_swarm() {
     "$install_runtime_root/dashboard/public" \
     "$install_runtime_root/dashboard/apps/dashboard/public" \
     "$workspace_root/apps/dashboard/public" || true)"
+  blink_bridge_entry="$(resolve_runtime_value "${DROIDSWARM_BLINK_BRIDGE_ENTRY:-}" \
+    "${DROIDSWARM_DEFAULT_BLINK_BRIDGE_ENTRY:-$install_runtime_root/blink-bridge/main.js}" \
+    "$install_runtime_root/blink-bridge/main.js" \
+    "$workspace_root/dist/apps/blink-bridge/main.js" || true)"
+  worker_host_entry="$(resolve_runtime_value "${DROIDSWARM_WORKER_HOST_ENTRY:-}" \
+    "${DROIDSWARM_DEFAULT_WORKER_HOST_ENTRY:-$install_runtime_root/worker-host/main.js}" \
+    "$install_runtime_root/worker-host/main.js" \
+    "$workspace_root/dist/apps/worker-host/main.js" || true)"
 
   if [[ -z "$socket_server_entry" ]]; then
     err "Missing socket-server build artifact."
@@ -694,6 +735,24 @@ cmd_swarm() {
 
   if [[ -z "$operator_token" ]]; then
     operator_token="$(uuid)"
+  fi
+
+  if [[ -f "$DROIDSWARM_SERVICE_CONFIG" ]]; then
+    # shellcheck disable=SC1090
+    source "$DROIDSWARM_SERVICE_CONFIG"
+  fi
+
+  if [[ -z "$blink_port" ]]; then
+    blink_port="${DROIDSWARM_BLINK_SERVER_PORT:-$(next_available_port 8950)}"
+  fi
+  if [[ -z "$mux_port" ]]; then
+    mux_port="${DROIDSWARM_MUX_PORT:-$(next_available_port 8960)}"
+  fi
+  if [[ -z "$llama_port" ]]; then
+    llama_port="${DROIDSWARM_LLAMA_PORT:-$(next_available_port 11434)}"
+  fi
+  if [[ -z "$llama_model" ]]; then
+    llama_model="${DROIDSWARM_LLAMA_MODEL:-${DROIDSWARM_DEFAULT_LLAMA_MODEL:-$install_models_root/default.gguf}}"
   fi
 
   info "Swarm ID: $swarm_id"
@@ -731,8 +790,15 @@ DROIDSWARM_DASHBOARD_SERVER_ENTRY=$(printf '%q' "$dashboard_server_entry")
 DROIDSWARM_DASHBOARD_STATIC_DIR=$(printf '%q' "$dashboard_static_dir")
 DROIDSWARM_DASHBOARD_PUBLIC_DIR=$(printf '%q' "$dashboard_public_dir")
 DROIDSWARM_DASHBOARD_WORKDIR=$(printf '%q' "$dashboard_workdir")
+DROIDSWARM_BLINK_BRIDGE_ENTRY=$(printf '%q' "$blink_bridge_entry")
+DROIDSWARM_WORKER_HOST_ENTRY=$(printf '%q' "$worker_host_entry")
 DROIDSWARM_VERSION=$(printf '%q' "$DROIDSWARM_VERSION")
 DROIDSWARM_SPECS_DIR=$(printf '%q' "$specs_dir")
+DROIDSWARM_BLINK_SERVER_PORT=$(printf '%q' "$blink_port")
+DROIDSWARM_MUX_PORT=$(printf '%q' "$mux_port")
+DROIDSWARM_LLAMA_PORT=$(printf '%q' "$llama_port")
+DROIDSWARM_LLAMA_MODEL=$(printf '%q' "$llama_model")
+DROIDSWARM_SERVICE_CONFIG=$(printf '%q' "$DROIDSWARM_SERVICE_CONFIG")
 EOF
 
   write_env_assignment_file "$state_dir/env.list" "${env_pairs[@]-}"
@@ -826,14 +892,26 @@ EOF
       continue
     fi
 
-    local socket_component_status orch_component_status
+    local socket_component_status orch_component_status blink_component_status mux_component_status llama_component_status
     socket_component_status="-"
     orch_component_status="-"
+    blink_component_status="-"
+    mux_component_status="-"
+    llama_component_status="-"
     if [[ -f "$(component_status_file "socket-server" "$(swarm_dir "$swarm_id")")" ]]; then
       socket_component_status="$(<"$(component_status_file "socket-server" "$(swarm_dir "$swarm_id")")")"
     fi
     if [[ -f "$(component_status_file "orchestrator" "$(swarm_dir "$swarm_id")")" ]]; then
       orch_component_status="$(<"$(component_status_file "orchestrator" "$(swarm_dir "$swarm_id")")")"
+    fi
+    if [[ -f "$(service_status_file "blink-server" "$(swarm_dir "$swarm_id")")" ]]; then
+      blink_component_status="$(<"$(service_status_file "blink-server" "$(swarm_dir "$swarm_id")")")"
+    fi
+    if [[ -f "$(service_status_file "mux" "$(swarm_dir "$swarm_id")")" ]]; then
+      mux_component_status="$(<"$(service_status_file "mux" "$(swarm_dir "$swarm_id")")")"
+    fi
+    if [[ -f "$(service_status_file "llama.cpp" "$(swarm_dir "$swarm_id")")" ]]; then
+      llama_component_status="$(<"$(service_status_file "llama.cpp" "$(swarm_dir "$swarm_id")")")"
     fi
 
     found="1"
@@ -847,6 +925,10 @@ EOF
       "$uptime" \
       "$socket_component_status" \
       "$orch_component_status"
+    printf '  sidecars: blink=%s mux=%s llama=%s\n' \
+      "$blink_component_status" \
+      "$mux_component_status" \
+      "$llama_component_status"
   done
 
   if [[ "$found" != "1" ]]; then
@@ -958,6 +1040,23 @@ shutdown_one() {
       sleep 1
       if is_pid_running "$component_pid"; then
         kill -9 "$component_pid" 2>/dev/null || true
+      fi
+    fi
+  done
+
+  for service in blink-server mux llama.cpp; do
+    local service_pid_path
+    service_pid_path="$(service_pid_file "$service" "$state_dir")"
+    if [[ ! -f "$service_pid_path" ]]; then
+      continue
+    fi
+    local service_pid
+    service_pid="$(<"$service_pid_path")"
+    if [[ -n "$service_pid" && "$service_pid" != "-" ]] && is_pid_running "$service_pid"; then
+      kill "$service_pid" 2>/dev/null || true
+      sleep 1
+      if is_pid_running "$service_pid"; then
+        kill -9 "$service_pid" 2>/dev/null || true
       fi
     fi
   done

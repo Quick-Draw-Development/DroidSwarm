@@ -165,6 +165,49 @@ export class SqlitePersistence implements PersistencePort {
         });
     }
 
+    const contentValue = typeof payload.content === 'string' ? payload.content : undefined;
+    if (message.task_id && contentValue) {
+      const externalMessageId = typeof payload.external_message_id === 'string' ? payload.external_message_id : null;
+      if (externalMessageId) {
+        const existing = this.database.prepare(`
+          SELECT message_id
+          FROM task_chat_messages
+          WHERE task_id = @taskId AND source = @source AND external_message_id = @externalMessageId
+          LIMIT 1
+        `).get({
+          taskId: message.task_id,
+          source: message.from.actor_type === 'agent' ? 'agent' : 'system',
+          externalMessageId,
+        }) as { message_id?: string } | undefined;
+        if (existing?.message_id) {
+          this.persistSpecializedMessage(message);
+          return;
+        }
+      }
+      this.database.prepare(`
+        INSERT OR REPLACE INTO task_chat_messages (
+          message_id, task_id, run_id, project_id, source, external_thread_id, external_message_id,
+          author_type, author_id, body, metadata_json, created_at
+        ) VALUES (
+          @messageId, @taskId, @runId, @projectId, @source, @externalThreadId, @externalMessageId,
+          @authorType, @authorId, @body, @metadataJson, @createdAt
+        )
+      `).run({
+        messageId: message.message_id,
+        taskId: message.task_id,
+        runId: message.trace_id ?? null,
+        projectId: message.project_id,
+        source: message.from.actor_type === 'agent' ? 'agent' : 'system',
+        externalThreadId: typeof payload.external_thread_id === 'string' ? payload.external_thread_id : null,
+        externalMessageId: typeof payload.external_message_id === 'string' ? payload.external_message_id : null,
+        authorType: message.from.actor_type === 'agent' ? 'agent' : 'system',
+        authorId: message.from.actor_id,
+        body: contentValue,
+        metadataJson: asJson(payload),
+        createdAt: message.timestamp,
+      });
+    }
+
     this.persistSpecializedMessage(message);
   }
 

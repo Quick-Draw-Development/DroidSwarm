@@ -16,6 +16,7 @@ import type { Database } from 'better-sqlite3';
 import type { OrchestratorConfig, RunRecord } from './types';
 import { finalizeRunOnShutdown } from './run-shutdown';
 import { ToolService } from './tools/ToolService';
+import { ProjectRegistryService } from './services/project-registry.service';
 
 export class DroidSwarmOrchestratorClient {
   private readonly registry = new WorkerRegistry();
@@ -38,7 +39,7 @@ export class DroidSwarmOrchestratorClient {
     this.supervisor = new AgentSupervisor(
       config,
       this.registry,
-      path.resolve(__dirname, 'main.js'),
+      this.config.workerHostEntry ?? path.resolve(__dirname, 'main.js'),
     );
   }
 
@@ -47,7 +48,15 @@ export class DroidSwarmOrchestratorClient {
     this.runLifecycle.recoverInterruptedRuns();
     const activeRuns = this.persistence.runs.listActiveRuns();
     if (activeRuns.length === 0) {
-      this.currentRun = this.persistence.createRun(this.config.projectId);
+      this.currentRun = this.persistence.createRun(this.config.projectId, {
+        repoId: this.config.repoId,
+        rootPath: this.config.projectRoot,
+        branch: this.config.defaultBranch,
+        metadata: {
+          project_id: this.config.projectId,
+          repo_id: this.config.repoId,
+        },
+      });
       this.log('created run', this.currentRun.runId);
     } else {
       if (activeRuns.length > 1) {
@@ -58,6 +67,19 @@ export class DroidSwarmOrchestratorClient {
     }
     this.runLifecycle.startRun(this.currentRun);
     this.persistenceService = new OrchestratorPersistenceService(this.persistence, this.currentRun);
+    new ProjectRegistryService(this.persistenceService).registerProject({
+      projectId: this.config.projectId,
+      name: this.config.projectName,
+      repo: {
+        repoId: this.config.repoId,
+        name: this.config.projectName,
+        rootPath: this.config.projectRoot,
+        defaultBranch: this.config.defaultBranch,
+        mainBranch: this.config.gitPolicy.mainBranch,
+        developBranch: this.config.gitPolicy.developBranch,
+        allowedRoots: this.config.allowedRepoRoots,
+      },
+    });
     this.scheduler = new TaskScheduler(this.persistenceService, this.supervisor, this.config);
     const toolService = new ToolService(this.config, this.persistenceService);
 

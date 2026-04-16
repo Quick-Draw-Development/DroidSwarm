@@ -7,7 +7,9 @@
     "lib": "lib"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "fix:lockfile": "node scripts/fix-workspace-lockfile.js",
+    "postinstall": "node scripts/fix-workspace-lockfile.js"
   },
   "repository": {
     "type": "git",
@@ -40,7 +42,9 @@
     "prettier": "^3.8.1",
     "tslib": "^2.3.0",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "protocol": "file:packages/protocol",
+    "protocol-alias": "file:packages/protocol-alias"
   },
   "engines": {
     "node": "25.8.0"

@@ -1,0 +1,31 @@
+{
+  "name": "worker-host",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/worker-host/src",
+  "projectType": "application",
+  "targets": {
+    "build": {
+      "executor": "@nx/esbuild:esbuild",
+      "outputs": [
+        "{options.outputPath}"
+      ],
+      "options": {
+        "platform": "node",
+        "outputPath": "dist/apps/worker-host",
+        "format": [
+          "cjs"
+        ],
+        "bundle": false,
+        "main": "apps/worker-host/src/main.ts",
+        "tsConfig": "apps/worker-host/tsconfig.app.json"
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc --noEmit -p apps/worker-host/tsconfig.app.json"
+      }
+    }
+  },
+  "tags": []
+}

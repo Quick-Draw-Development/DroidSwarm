@@ -9,12 +9,35 @@ export type {
   ToolRequestPayload,
   ToolResponsePayload,
 } from '@protocol';
+export type {
+  CheckpointDelta,
+  GitPolicy,
+  ProjectCheckpoint,
+  ProjectDecision,
+  ProjectFact,
+  RepoTarget,
+  RoutingDecision,
+  TaskChatMessage,
+  TaskScope,
+  WorkerArtifact,
+  WorkerEngine,
+  WorkerHeartbeat,
+  WorkerResult,
+} from '@shared-types';
+export type { LegacyCodexAgentResult } from '@shared-workers';
+export type CodexAgentResult = import('@shared-workers').LegacyCodexAgentResult;
 
 export interface OrchestratorConfig {
   environment: 'development' | 'test' | 'production';
   projectId: string;
   projectName: string;
   projectRoot: string;
+  repoId: string;
+  defaultBranch: string;
+  developBranch: string;
+  allowedRepoRoots: string[];
+  workspaceRoot: string;
+  workerHostEntry?: string;
   operatorToken?: string;
   agentName: string;
   agentRole: string;
@@ -22,8 +45,24 @@ export interface OrchestratorConfig {
   heartbeatMs: number;
   reconnectMs: number;
   codexBin: string;
+  codexCloudModel?: string;
+  codexApiBaseUrl?: string;
+  codexApiKey?: string;
   codexModel?: string;
   codexSandboxMode: 'read-only' | 'workspace-write' | 'danger-full-access';
+  llamaBaseUrl: string;
+  llamaModel: string;
+  llamaTimeoutMs: number;
+  muxBaseUrl?: string;
+  muxToken?: string;
+  slackBotToken?: string;
+  slackApiBaseUrl?: string;
+  blinkApiBaseUrl?: string;
+  blinkApiToken?: string;
+  prAutomationEnabled: boolean;
+  prRemoteName: string;
+  prBaseUrl?: string;
+  gitPolicy: import('@shared-types').GitPolicy;
   maxAgentsPerTask: number;
   maxConcurrentAgents: number;
   specDir: string;
@@ -53,6 +92,10 @@ export interface ModelRoutingConfig {
 
 export interface TaskRecord {
   taskId: string;
+  projectId?: string;
+  repoId?: string;
+  rootPath?: string;
+  workspaceId?: string;
   title: string;
   description: string;
   taskType: string;
@@ -84,31 +127,6 @@ export interface RequestedAgent {
   instructions: string;
 }
 
-export interface CodexAgentResult {
-  status: 'completed' | 'blocked' | 'needs_help';
-  summary: string;
-  requested_agents: RequestedAgent[];
-  artifacts: Array<{
-    kind: string;
-    title: string;
-    content: string;
-  }>;
-  doc_updates: string[];
-  branch_actions: string[];
-  clarification_question?: string;
-  reason_code?: string;
-  compression?: {
-    scheme: 'droidspeak-v1';
-    compressed_content: string;
-  };
-  metrics?: {
-    tokens?: number;
-    tool_calls?: number;
-    tools?: string[];
-    duration_ms?: number;
-  };
-}
-
 export interface SpawnedAgent {
   agentName: string;
   taskId: string;
@@ -119,6 +137,10 @@ export interface SpawnedAgent {
 export interface RunRecord {
   runId: string;
   projectId: string;
+  repoId?: string;
+  rootPath?: string;
+  branch?: string;
+  workspaceId?: string;
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   createdAt: string;
   updatedAt: string;
@@ -153,6 +175,11 @@ export interface ExecutionEventRecord {
 export interface PersistedTask {
   taskId: string;
   runId: string;
+  projectId?: string;
+  repoId?: string;
+  rootPath?: string;
+  branch?: string;
+  workspaceId?: string;
   parentTaskId?: string;
   name: string;
   status:
@@ -176,6 +203,11 @@ export interface TaskAttemptRecord {
   attemptId: string;
   taskId: string;
   runId: string;
+  projectId?: string;
+  repoId?: string;
+  rootPath?: string;
+  branch?: string;
+  workspaceId?: string;
   agentName: string;
   status: 'running' | 'completed' | 'failed' | 'blocked';
   createdAt: string;
@@ -188,6 +220,11 @@ export interface ArtifactRecord {
   attemptId: string;
   taskId: string;
   runId: string;
+  projectId?: string;
+  repoId?: string;
+  rootPath?: string;
+  branch?: string;
+  workspaceId?: string;
   kind: string;
   summary: string;
   content: string;
@@ -206,6 +243,11 @@ export interface CheckpointRecord {
   checkpointId: string;
   taskId: string;
   runId: string;
+  projectId?: string;
+  repoId?: string;
+  rootPath?: string;
+  branch?: string;
+  workspaceId?: string;
   attemptId?: string;
   payloadJson: string;
   createdAt: string;
@@ -225,9 +267,32 @@ export interface CheckpointVectorRecord {
 export interface BudgetEventRecord {
   eventId: string;
   runId: string;
+  projectId?: string;
+  repoId?: string;
+  rootPath?: string;
+  branch?: string;
+  workspaceId?: string;
   taskId?: string;
   detail: string;
   consumed: number;
+  createdAt: string;
+}
+
+export interface WorkerResultRecord {
+  workerResultId: string;
+  runId: string;
+  taskId: string;
+  attemptId: string;
+  projectId: string;
+  repoId: string;
+  rootPath: string;
+  branch: string;
+  workspaceId?: string;
+  engine: string;
+  model?: string;
+  success: boolean;
+  summary: string;
+  payloadJson: string;
   createdAt: string;
 }
 

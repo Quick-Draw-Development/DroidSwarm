@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { defaultGitPolicy } from '@shared-git';
 
 import { loadSpecCards } from './specs';
 import type { OrchestratorConfig, TaskPolicy } from './types';
@@ -59,6 +60,12 @@ const envSchema = z.object({
   DROIDSWARM_PROJECT_ID: z.string().optional(),
   DROIDSWARM_PROJECT_NAME: z.string().optional(),
   DROIDSWARM_PROJECT_ROOT: z.string().optional(),
+  DROIDSWARM_REPO_ID: z.string().optional(),
+  DROIDSWARM_DEFAULT_BRANCH: z.string().optional(),
+  DROIDSWARM_DEVELOP_BRANCH: z.string().optional(),
+  DROIDSWARM_ALLOWED_REPO_ROOTS: z.string().optional(),
+  DROIDSWARM_WORKSPACE_ROOT: z.string().optional(),
+  DROIDSWARM_WORKER_HOST_ENTRY: z.string().optional(),
   DROIDSWARM_OPERATOR_TOKEN: z.string().optional(),
   DROIDSWARM_ORCHESTRATOR_NAME: z.string().optional(),
   DROIDSWARM_ORCHESTRATOR_ROLE: z.string().optional(),
@@ -66,6 +73,9 @@ const envSchema = z.object({
   DROIDSWARM_ORCHESTRATOR_HEARTBEAT_MS: z.string().optional(),
   DROIDSWARM_ORCHESTRATOR_RECONNECT_MS: z.string().optional(),
   DROIDSWARM_CODEX_BIN: z.string().optional(),
+  DROIDSWARM_CODEX_CLOUD_MODEL: z.string().optional(),
+  DROIDSWARM_CODEX_API_BASE_URL: z.string().optional(),
+  DROIDSWARM_CODEX_API_KEY: z.string().optional(),
   DROIDSWARM_CODEX_MODEL: z.string().optional(),
   DROIDSWARM_CODEX_SANDBOX_MODE: z.enum([
     'read-only',
@@ -90,12 +100,34 @@ const envSchema = z.object({
   DROIDSWARM_MODEL_VERIFICATION: z.string().optional(),
   DROIDSWARM_MODEL_CODE: z.string().optional(),
   DROIDSWARM_MODEL_DEFAULT: z.string().optional(),
+  DROIDSWARM_LLAMA_BASE_URL: z.string().optional(),
+  DROIDSWARM_LLAMA_MODEL: z.string().optional(),
+  DROIDSWARM_LLAMA_TIMEOUT_MS: z.string().optional(),
+  DROIDSWARM_MUX_BASE_URL: z.string().optional(),
+  DROIDSWARM_MUX_TOKEN: z.string().optional(),
+  DROIDSWARM_SLACK_BOT_TOKEN: z.string().optional(),
+  DROIDSWARM_SLACK_API_BASE_URL: z.string().optional(),
+  DROIDSWARM_BLINK_API_BASE_URL: z.string().optional(),
+  DROIDSWARM_BLINK_API_TOKEN: z.string().optional(),
+  DROIDSWARM_PR_AUTOMATION_ENABLED: z.string().optional(),
+  DROIDSWARM_PR_REMOTE_NAME: z.string().optional(),
+  DROIDSWARM_PR_BASE_URL: z.string().optional(),
+  DROIDSWARM_GIT_MAIN_BRANCH: z.string().optional(),
+  DROIDSWARM_GIT_DEVELOP_BRANCH: z.string().optional(),
+  DROIDSWARM_GIT_FEATURE_PREFIX: z.string().optional(),
+  DROIDSWARM_GIT_HOTFIX_PREFIX: z.string().optional(),
+  DROIDSWARM_GIT_RELEASE_PREFIX: z.string().optional(),
+  DROIDSWARM_GIT_SUPPORT_PREFIX: z.string().optional(),
   DROIDSWARM_BUDGET_MAX_CONSUMED: z.string().optional(),
 });
 
 export const loadConfig = (): OrchestratorConfig => {
   const env = envSchema.parse(process.env);
   const environment = env.NODE_ENV;
+  const droidswarmHome = process.env.DROIDSWARM_HOME ?? path.resolve(process.env.HOME ?? process.cwd(), '.droidswarm');
+  const installDir = process.env.DROIDSWARM_INSTALL_DIR ?? path.resolve(droidswarmHome, 'install');
+  const runtimeDir = process.env.DROIDSWARM_RUNTIME_DIR ?? path.resolve(installDir, 'runtime');
+  const modelsDir = process.env.DROIDSWARM_MODELS_DIR ?? path.resolve(droidswarmHome, 'models');
   const host = env.DROIDSWARM_SOCKET_HOST ?? '127.0.0.1';
   const port = toPositiveInt(env.DROIDSWARM_SOCKET_PORT, 8765);
   const specDir = env.DROIDSWARM_SPECS_DIR ?? path.resolve(__dirname, '..', '..', '..', 'packages', 'bootstrap', 'specs');
@@ -109,11 +141,33 @@ export const loadConfig = (): OrchestratorConfig => {
   const policyAllowedTools =
     parseOptionalCommaList(env.DROIDSWARM_POLICY_ALLOWED_TOOLS) ?? (allowedTools.length > 0 ? allowedTools : undefined);
 
+  const projectRoot = env.DROIDSWARM_PROJECT_ROOT ?? process.cwd();
+  const repoId = env.DROIDSWARM_REPO_ID ?? `${env.DROIDSWARM_PROJECT_ID ?? 'droidswarm'}-repo`;
+  const defaultBranch = env.DROIDSWARM_DEFAULT_BRANCH ?? env.DROIDSWARM_GIT_MAIN_BRANCH ?? 'main';
+  const developBranch = env.DROIDSWARM_DEVELOP_BRANCH ?? env.DROIDSWARM_GIT_DEVELOP_BRANCH ?? 'develop';
+  const allowedRepoRoots = parseCommaList(env.DROIDSWARM_ALLOWED_REPO_ROOTS);
+  const gitPolicy = {
+    mainBranch: env.DROIDSWARM_GIT_MAIN_BRANCH ?? defaultGitPolicy.mainBranch,
+    developBranch: env.DROIDSWARM_GIT_DEVELOP_BRANCH ?? defaultGitPolicy.developBranch,
+    prefixes: {
+      feature: env.DROIDSWARM_GIT_FEATURE_PREFIX ?? defaultGitPolicy.prefixes.feature,
+      hotfix: env.DROIDSWARM_GIT_HOTFIX_PREFIX ?? defaultGitPolicy.prefixes.hotfix,
+      release: env.DROIDSWARM_GIT_RELEASE_PREFIX ?? defaultGitPolicy.prefixes.release,
+      support: env.DROIDSWARM_GIT_SUPPORT_PREFIX ?? defaultGitPolicy.prefixes.support,
+    },
+  };
+
   return {
     environment,
     projectId: env.DROIDSWARM_PROJECT_ID ?? 'droidswarm',
     projectName: env.DROIDSWARM_PROJECT_NAME ?? 'DroidSwarm',
-    projectRoot: env.DROIDSWARM_PROJECT_ROOT ?? process.cwd(),
+    projectRoot,
+    repoId,
+    defaultBranch,
+    developBranch,
+    allowedRepoRoots: allowedRepoRoots.length > 0 ? allowedRepoRoots : [projectRoot],
+    workspaceRoot: env.DROIDSWARM_WORKSPACE_ROOT ?? path.resolve(projectRoot, '.droidswarm', 'workspaces'),
+    workerHostEntry: env.DROIDSWARM_WORKER_HOST_ENTRY ?? path.resolve(runtimeDir, 'worker-host', 'main.js'),
     operatorToken: env.DROIDSWARM_OPERATOR_TOKEN,
     agentName: env.DROIDSWARM_ORCHESTRATOR_NAME ?? 'Orchestrator',
     agentRole: env.DROIDSWARM_ORCHESTRATOR_ROLE ?? 'control-plane',
@@ -121,8 +175,24 @@ export const loadConfig = (): OrchestratorConfig => {
     heartbeatMs: toPositiveInt(env.DROIDSWARM_ORCHESTRATOR_HEARTBEAT_MS, 15_000),
     reconnectMs: toPositiveInt(env.DROIDSWARM_ORCHESTRATOR_RECONNECT_MS, 5_000),
     codexBin: env.DROIDSWARM_CODEX_BIN ?? 'codex',
+    codexCloudModel: env.DROIDSWARM_CODEX_CLOUD_MODEL ?? env.DROIDSWARM_CODEX_MODEL,
+    codexApiBaseUrl: env.DROIDSWARM_CODEX_API_BASE_URL,
+    codexApiKey: env.DROIDSWARM_CODEX_API_KEY,
     codexModel: env.DROIDSWARM_CODEX_MODEL,
     codexSandboxMode: env.DROIDSWARM_CODEX_SANDBOX_MODE,
+    llamaBaseUrl: env.DROIDSWARM_LLAMA_BASE_URL ?? process.env.DROIDSWARM_LLAMA_BASE_URL ?? 'http://127.0.0.1:11434',
+    llamaModel: env.DROIDSWARM_LLAMA_MODEL ?? path.resolve(modelsDir, 'default.gguf'),
+    llamaTimeoutMs: toPositiveInt(env.DROIDSWARM_LLAMA_TIMEOUT_MS, 60_000),
+    muxBaseUrl: env.DROIDSWARM_MUX_BASE_URL,
+    muxToken: env.DROIDSWARM_MUX_TOKEN,
+    slackBotToken: env.DROIDSWARM_SLACK_BOT_TOKEN,
+    slackApiBaseUrl: env.DROIDSWARM_SLACK_API_BASE_URL ?? 'https://slack.com/api',
+    blinkApiBaseUrl: env.DROIDSWARM_BLINK_API_BASE_URL,
+    blinkApiToken: env.DROIDSWARM_BLINK_API_TOKEN,
+    prAutomationEnabled: env.DROIDSWARM_PR_AUTOMATION_ENABLED === '1' || env.DROIDSWARM_PR_AUTOMATION_ENABLED === 'true',
+    prRemoteName: env.DROIDSWARM_PR_REMOTE_NAME ?? 'origin',
+    prBaseUrl: env.DROIDSWARM_PR_BASE_URL,
+    gitPolicy,
     maxAgentsPerTask: toPositiveInt(env.DROIDSWARM_MAX_AGENTS_PER_TASK, 4),
     maxConcurrentAgents: toPositiveInt(env.DROIDSWARM_MAX_CONCURRENT_AGENTS, 12),
     specDir,

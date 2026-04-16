@@ -8,15 +8,26 @@ import type {
   CodexAgentResult,
   OrchestratorConfig,
   PersistedTask,
-  RequestedAgent,
   TaskPolicy,
   TaskRecord,
   TaskDependencyRecord,
   VerificationOutcomeRecord,
+  WorkerResult,
 } from '../types';
+import type { SpawnRequest } from '@shared-types';
+import { RoutingService } from '../services/routing.service';
+import { WorkerResultService } from '../services/worker-result.service';
+import { BranchPolicyService } from '../services/branch-policy.service';
+import { WorkspaceService } from '../services/workspace.service';
+import { SkillPackService } from '../services/skill-pack.service';
+import { PRAutomationService } from '../services/pr-automation.service';
 
 const buildTaskRecord = (task: PersistedTask): TaskRecord => ({
   taskId: task.taskId,
+  projectId: task.projectId,
+  repoId: task.repoId,
+  rootPath: task.rootPath,
+  workspaceId: task.workspaceId,
   title: task.name,
   description: typeof task.metadata?.description === 'string' ? task.metadata.description : '',
   taskType: typeof task.metadata?.task_type === 'string' ? task.metadata.task_type : 'task',
@@ -78,6 +89,12 @@ export class TaskScheduler {
   private readonly pendingCheckpoints = new Map<string, PendingCheckpoint>();
   private readonly artifactCriticQueue = new Set<string>();
   private readonly tasksAwaitingCritic = new Set<string>();
+  private readonly routingService = new RoutingService();
+  private readonly workerResultService = new WorkerResultService();
+  private readonly branchPolicyService: BranchPolicyService;
+  private readonly workspaceService: WorkspaceService;
+  private readonly skillPackService: SkillPackService;
+  private readonly prAutomationService: PRAutomationService;
   private events?: TaskSchedulerEvents;
   private budgetLimitReached = false;
 
@@ -85,7 +102,12 @@ export class TaskScheduler {
     private readonly persistenceService: OrchestratorPersistenceService,
     private readonly supervisor: AgentSupervisor,
     private readonly config: OrchestratorConfig,
-  ) {}
+  ) {
+    this.branchPolicyService = new BranchPolicyService(this.config.gitPolicy);
+    this.workspaceService = new WorkspaceService(this.config);
+    this.skillPackService = new SkillPackService(this.config);
+    this.prAutomationService = new PRAutomationService(this.config);
+  }
 
   setEvents(events: TaskSchedulerEvents): void {
     this.events = events;
@@ -101,12 +123,13 @@ export class TaskScheduler {
     attemptId: string,
     agentName: string,
     role: string,
-    result: CodexAgentResult,
+    rawResult: WorkerResult | CodexAgentResult,
   ): void {
     const task = this.persistenceService.getTask(taskId);
     if (!task) {
       return;
     }
+    const result = this.workerResultService.normalize(rawResult);
 
     this.clearRetry(task.taskId);
     if (!this.applyUsageConstraints(task, attemptId, result)) {
@@ -114,11 +137,12 @@ export class TaskScheduler {
       return;
     }
 
-    const attemptStatus = result.status === 'completed' ? 'completed' : 'failed';
+    const attemptStatus = result.success ? 'completed' : 'failed';
     this.persistenceService.updateAttemptStatus(attemptId, attemptStatus, {
-      reason_code: result.reason_code,
+      reason_code: this.getReasonCode(result),
       summary: result.summary,
     });
+    this.persistenceService.recordWorkerResult(taskId, attemptId, result);
 
     const stage = typeof task.metadata?.stage === 'string' ? task.metadata.stage : undefined;
     if (stage === 'artifact_verification') {
@@ -135,23 +159,23 @@ export class TaskScheduler {
       return;
     }
 
-    const limitedRequests = result.requested_agents.slice(0, this.config.schedulerMaxFanOut);
+    const limitedRequests = result.spawnRequests.slice(0, this.config.schedulerMaxFanOut);
     if (limitedRequests.length > 0) {
       const created = this.createChildTasks(
         task,
         limitedRequests,
         result.summary,
-        result.compression?.compressed_content,
+        this.getCompression(result),
       );
       if (created) {
         this.persistenceService.setTaskStatus(task.taskId, 'waiting_on_dependency');
       }
-      if (limitedRequests.length < result.requested_agents.length) {
+      if (limitedRequests.length < result.spawnRequests.length) {
         this.log(
-          `truncated ${result.requested_agents.length - limitedRequests.length} requested agents for ${taskId}`,
+          `truncated ${result.spawnRequests.length - limitedRequests.length} requested agents for ${taskId}`,
         );
       }
-    } else if (result.status === 'completed') {
+    } else if (result.success) {
       this.persistenceService.setTaskStatus(taskId, 'in_review');
       this.startVerification(task, result.summary);
     } else {
@@ -350,14 +374,53 @@ export class TaskScheduler {
     }
 
     const attemptId = randomUUID();
-    const model = this.selectModelForTask(task, role);
+    const routingDecision = this.routingService.decide(task, role);
+    const model = routingDecision.model ?? this.selectModelForTask(task, role);
+    const branch = this.resolveBranch(task, routingDecision.readOnly, record.branchName);
+    const repoId = task.repoId ?? this.config.repoId;
+    const rootPath = task.rootPath ?? this.config.projectRoot;
+    if (!routingDecision.readOnly) {
+      this.branchPolicyService.validateWriteScope({
+        projectId: task.projectId ?? this.config.projectId,
+        repoId,
+        rootPath,
+        branch,
+        workspaceId: task.workspaceId,
+        baseBranch: this.branchPolicyService.expectedBaseBranch(branch) ?? undefined,
+      });
+      this.prAutomationService.ensureBranch(rootPath, branch, this.branchPolicyService.expectedBaseBranch(branch) ?? this.config.defaultBranch);
+    }
+    const workspace = this.workspaceService.ensureWorkspace(task, attemptId, branch, routingDecision.readOnly);
+    const skillPackNames = this.skillPackService.resolveNames(role, routingDecision.skillPacks);
+    const skillTexts = this.skillPackService.resolve(role, routingDecision.skillPacks);
     const spawned = this.supervisor.startAgentForTask(
-      record,
+      {
+        ...record,
+        branchName: branch,
+        repoId,
+        rootPath: workspace.path,
+        workspaceId: workspace.workspaceId,
+      },
       role,
       attemptId,
       parentSummary,
       parentDroidspeak,
       model,
+      {
+        engine: routingDecision.engine,
+        scope: {
+          projectId: task.projectId ?? this.config.projectId,
+          repoId,
+          rootPath: workspace.path,
+          branch,
+          workspaceId: workspace.workspaceId,
+        },
+        skillPacks: skillPackNames,
+        skillTexts,
+        readOnly: routingDecision.readOnly,
+        instructions,
+        workspacePath: workspace.path,
+      },
     );
     if (!spawned) {
       this.readyQueue.add(task.taskId);
@@ -376,15 +439,47 @@ export class TaskScheduler {
         parent_droidspeak: parentDroidspeak,
         effective_policy: effectivePolicy,
         effective_model: model,
+        routing_decision: routingDecision,
+        skill_packs: skillPackNames,
+        skill_texts: skillTexts,
+        read_only: routingDecision.readOnly,
+        mux_session_id: workspace.muxSessionId,
+      },
+      {
+        projectId: task.projectId ?? this.config.projectId,
+        repoId,
+        rootPath: workspace.path,
+        branch,
+        workspaceId: workspace.workspaceId,
       },
     );
+    this.persistenceService.updateTaskMetadata(task.taskId, {
+      ...(task.metadata ?? {}),
+      workspace_id: workspace.workspaceId,
+      branch,
+      repo_id: repoId,
+      root_path: workspace.path,
+      routing_decision: routingDecision,
+    });
     this.persistenceService.recordAssignment(spawned.agentName, attemptId);
     this.persistenceService.setTaskStatus(task.taskId, 'running');
   }
 
+  private resolveBranch(task: PersistedTask, readOnly: boolean, branchName?: string): string {
+    if (readOnly) {
+      return task.branch ?? branchName ?? this.config.defaultBranch;
+    }
+    const candidate = task.branch ?? branchName;
+    if (candidate && /^((feature|hotfix|release|support)\/)/.test(candidate)) {
+      return candidate;
+    }
+    const slug = task.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || task.taskId.toLowerCase();
+    return `${this.config.gitPolicy.prefixes.feature}${slug}`;
+  }
+
   private createChildTasks(
     task: PersistedTask,
-    requests: RequestedAgent[],
+    requests: SpawnRequest[],
     parentSummary: string,
     parentDroidspeak?: string,
   ): boolean {
@@ -417,6 +512,10 @@ export class TaskScheduler {
           agent_reason: request.reason,
           parent_summary: parentSummary,
           parent_droidspeak: parentDroidspeak,
+          project_id: task.projectId ?? this.config.projectId,
+          repo_id: task.repoId ?? this.config.repoId,
+          root_path: task.rootPath ?? this.config.projectRoot,
+          branch: task.branch ?? this.config.defaultBranch,
         },
       });
       this.persistenceService.addDependency(task.taskId, childId);
@@ -515,7 +614,7 @@ export class TaskScheduler {
     );
   }
 
-  private enqueueCheckpoint(task: PersistedTask, attemptId: string, result: CodexAgentResult): void {
+  private enqueueCheckpoint(task: PersistedTask, attemptId: string, result: WorkerResult): void {
     const payload = this.buildCheckpointPayload(result);
     if (!payload) {
       return;
@@ -533,14 +632,15 @@ export class TaskScheduler {
     this.persistCheckpoint(task.taskId, attemptId, result.summary, payload);
   }
 
-  private buildCheckpointPayload(result: CodexAgentResult): Record<string, unknown> | undefined {
-    if (!result.compression) {
+  private buildCheckpointPayload(result: WorkerResult): Record<string, unknown> | undefined {
+    const compression = this.getCompressionPayload(result);
+    if (!compression && result.checkpointDelta.factsAdded.length === 0 && result.checkpointDelta.decisionsAdded.length === 0 && result.checkpointDelta.openQuestions.length === 0) {
       return undefined;
     }
-
     return {
-      compression: result.compression,
+      compression,
       summary: result.summary,
+      checkpoint_delta: result.checkpointDelta,
     };
   }
 
@@ -605,7 +705,7 @@ export class TaskScheduler {
     task: PersistedTask,
     attemptId: string,
     agentName: string,
-    result: CodexAgentResult,
+    result: WorkerResult,
   ): void {
     const parentId = task.parentTaskId;
     if (!parentId) {
@@ -617,7 +717,7 @@ export class TaskScheduler {
       return;
     }
 
-    const normalizedStatus = this.mapResultToOutcomeStatus(result.status);
+    const normalizedStatus = this.mapResultToOutcomeStatus(result);
     this.persistenceService.recordVerificationOutcome({
       taskId: parent.taskId,
       attemptId,
@@ -636,7 +736,7 @@ export class TaskScheduler {
       agentName,
     );
 
-    if (result.status === 'completed') {
+    if (result.success) {
       this.persistenceService.setTaskStatus(task.taskId, 'completed');
       this.persistenceService.setTaskStatus(parent.taskId, 'verified');
       this.startReview(parent, result.summary);
@@ -657,7 +757,7 @@ export class TaskScheduler {
     task: PersistedTask,
     attemptId: string,
     agentName: string,
-    result: CodexAgentResult,
+    result: WorkerResult,
   ): void {
     const parentId = task.parentTaskId;
     if (!parentId) {
@@ -669,7 +769,7 @@ export class TaskScheduler {
       return;
     }
 
-    const normalizedStatus = this.mapResultToOutcomeStatus(result.status);
+    const normalizedStatus = this.mapResultToOutcomeStatus(result);
     this.persistenceService.recordVerificationOutcome({
       taskId: parent.taskId,
       attemptId,
@@ -688,9 +788,12 @@ export class TaskScheduler {
       agentName,
     );
 
-    if (result.status === 'completed') {
+    if (result.success) {
       this.persistenceService.setTaskStatus(task.taskId, 'completed');
       this.persistenceService.setTaskStatus(parent.taskId, 'verified');
+      if (parent.rootPath) {
+        this.prAutomationService.finalizeTask(parent, parent.rootPath);
+      }
     } else {
       this.persistenceService.setTaskStatus(task.taskId, 'failed');
       this.persistenceService.setTaskStatus(parent.taskId, 'waiting_on_human');
@@ -704,7 +807,7 @@ export class TaskScheduler {
     task: PersistedTask,
     attemptId: string,
     agentName: string,
-    result: CodexAgentResult,
+    result: WorkerResult,
   ): void {
     const parentId = task.parentTaskId;
     if (!parentId) {
@@ -716,7 +819,7 @@ export class TaskScheduler {
       return;
     }
 
-    const normalizedStatus = this.mapResultToOutcomeStatus(result.status);
+    const normalizedStatus = this.mapResultToOutcomeStatus(result);
     this.persistenceService.recordVerificationOutcome({
       taskId: parent.taskId,
       attemptId,
@@ -735,7 +838,7 @@ export class TaskScheduler {
       agentName,
     );
 
-    if (result.status === 'completed') {
+    if (result.success) {
       this.tasksAwaitingCritic.delete(parent.taskId);
       const artifactId = typeof task.metadata?.artifact_id === 'string' ? task.metadata.artifact_id : undefined;
       if (artifactId) {
@@ -804,6 +907,10 @@ export class TaskScheduler {
         task_type: stage,
         description,
         parent_summary: parentSummary,
+        project_id: parent.projectId ?? this.config.projectId,
+        repo_id: parent.repoId ?? this.config.repoId,
+        root_path: parent.rootPath ?? this.config.projectRoot,
+        branch: parent.branch ?? this.config.defaultBranch,
         ...extraMetadata,
       },
     });
@@ -973,7 +1080,7 @@ export class TaskScheduler {
     return this.persistenceService.listDependents(task.taskId).length;
   }
 
-  private enforceTaskPolicy(task: PersistedTask, requests: RequestedAgent[]): boolean {
+  private enforceTaskPolicy(task: PersistedTask, requests: SpawnRequest[]): boolean {
     const policy = this.resolveTaskPolicy(task);
 
     if (policy.maxDepth != null) {
@@ -1010,9 +1117,13 @@ export class TaskScheduler {
     return true;
   }
 
-  private applyUsageConstraints(task: PersistedTask, attemptId: string, result: CodexAgentResult): boolean {
+  private applyUsageConstraints(task: PersistedTask, attemptId: string, result: WorkerResult): boolean {
     const policy = this.resolveTaskPolicy(task);
-    const metrics = result.metrics;
+    const metrics = {
+      tokens: (result.budget.tokensIn ?? 0) + (result.budget.tokensOut ?? 0),
+      tool_calls: result.activity.toolCalls.length,
+      tools: result.activity.toolCalls.map((toolCall) => toolCall.tool),
+    };
     const existingUsage = (task.metadata?.usage ?? {}) as Record<string, number | undefined>;
     let tokensTotal = existingUsage.tokens ?? 0;
     let toolCallsTotal = existingUsage.tool_calls ?? 0;
@@ -1101,25 +1212,60 @@ export class TaskScheduler {
     return true;
   }
 
-  private mapResultToOutcomeStatus(status: CodexAgentResult['status']): VerificationOutcomeRecord['status'] {
-    if (status === 'completed') {
+  private mapResultToOutcomeStatus(result: WorkerResult): VerificationOutcomeRecord['status'] {
+    if (result.success) {
       return 'passed';
     }
-    if (status === 'blocked') {
+    if (result.timedOut || this.getReasonCode(result)) {
       return 'blocked';
     }
     return 'failed';
   }
 
-  private buildOutcomeDetails(result: CodexAgentResult): string | undefined {
+  private buildOutcomeDetails(result: WorkerResult): string | undefined {
     const fragments: string[] = [];
-    if (result.reason_code) {
-      fragments.push(result.reason_code);
+    if (this.getReasonCode(result)) {
+      fragments.push(this.getReasonCode(result) ?? '');
     }
-    if (result.clarification_question) {
-      fragments.push(`clarification: ${result.clarification_question}`);
+    const clarification = this.getClarificationQuestion(result);
+    if (clarification) {
+      fragments.push(`clarification: ${clarification}`);
     }
     return fragments.length > 0 ? fragments.join(' | ') : undefined;
+  }
+
+  private getCompression(result: WorkerResult): string | undefined {
+    return this.getCompressionPayload(result)?.compressed_content;
+  }
+
+  private getCompressionPayload(result: WorkerResult): CheckpointPayload['compression'] | undefined {
+    const compression = result.metadata?.compression;
+    if (
+      typeof compression === 'object' &&
+      compression !== null &&
+      typeof (compression as { compressed_content?: string }).compressed_content === 'string'
+    ) {
+      return {
+        compressed_content: (compression as { compressed_content: string }).compressed_content,
+      };
+    }
+    if (!result.summary) {
+      return undefined;
+    }
+    return {
+      compressed_content: result.summary,
+    };
+  }
+
+  private getReasonCode(result: WorkerResult): string | undefined {
+    return typeof result.metadata?.reasonCode === 'string' ? result.metadata.reasonCode : undefined;
+  }
+
+  private getClarificationQuestion(result: WorkerResult): string | undefined {
+    if (typeof result.metadata?.clarificationQuestion === 'string') {
+      return result.metadata.clarificationQuestion;
+    }
+    return result.checkpointDelta.openQuestions[0];
   }
 
   private recordPolicyViolation(task: PersistedTask, detail: string, consumed: number): void {

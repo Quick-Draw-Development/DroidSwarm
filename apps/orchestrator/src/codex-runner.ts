@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
-import type { CodexAgentResult, OrchestratorConfig } from './types';
+import type { LegacyCodexAgentResult, OrchestratorConfig } from './types';
 import { codexAgentOutputSchema } from './codex-schema';
 
 const createTempWorkspace = (): string => mkdtempSync(path.join(tmpdir(), 'droidswarm-codex-'));
@@ -13,7 +13,7 @@ export const runCodexPrompt = async (input: {
   prompt: string;
   projectRoot: string;
   model?: string;
-}): Promise<CodexAgentResult> => {
+}): Promise<LegacyCodexAgentResult> => {
   const tempDir = createTempWorkspace();
   const schemaPath = path.join(tempDir, 'schema.json');
   const outputPath = path.join(tempDir, 'result.json');
@@ -71,7 +71,7 @@ export const runCodexPrompt = async (input: {
   });
 
   try {
-    return JSON.parse(readFileSync(outputPath, 'utf8')) as CodexAgentResult;
+    return JSON.parse(readFileSync(outputPath, 'utf8')) as LegacyCodexAgentResult;
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }

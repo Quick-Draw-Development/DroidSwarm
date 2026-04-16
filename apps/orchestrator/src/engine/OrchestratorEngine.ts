@@ -13,12 +13,12 @@ import {
 import { buildTaskIntakeAccepted } from '../protocol';
 import { isCancellationMessage, resolveTaskFromMessage } from '../task-events';
 import type {
-  CodexAgentResult,
   ExecutionEventRecord,
   MessageEnvelope,
   OrchestratorConfig,
   PersistedTask,
   SpawnedAgent,
+  WorkerResult,
 } from '../types';
 import { buildReviewAnnouncement } from '../operator-notifications';
 import { WorkerRegistry } from '../worker-registry';
@@ -33,6 +33,9 @@ import { RunLifecycleService } from '../run-lifecycle';
 import type { TaskSchedulerEvents } from '../scheduler/TaskScheduler';
 import type { ToolRequest } from '../tools/types';
 import { ToolService } from '../tools/ToolService';
+import { WorkerResultService } from '../services/worker-result.service';
+import { CheckpointMergeService } from '../services/checkpoint-merge.service';
+import { TaskChatService } from '../services/task-chat.service';
 
 export interface OrchestratorEngineOptions {
   config: OrchestratorConfig;
@@ -50,6 +53,9 @@ export interface OrchestratorEngineOptions {
 export class OrchestratorEngine implements TaskSchedulerEvents {
   private readonly prefix = '[OrchestratorEngine]';
   private readonly agentAttemptMap = new Map<string, { attemptId: string; role: string }>();
+  private readonly workerResultService = new WorkerResultService();
+  private readonly checkpointMergeService = new CheckpointMergeService(this.options.persistenceService);
+  private readonly taskChatService = new TaskChatService(this.options.persistenceService);
 
   constructor(
     private readonly options: OrchestratorEngineOptions,
@@ -182,16 +188,43 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
 
     const statusCode = this.asString(payload.status_code) ?? 'agent_unknown';
     const summary = this.asString(payload.content) ?? '';
+    if (statusCode === 'agent_heartbeat') {
+      const heartbeatPayload = typeof payload.heartbeat === 'object' && payload.heartbeat !== null
+        ? payload.heartbeat as Parameters<OrchestratorPersistenceService['recordWorkerHeartbeat']>[0]
+        : undefined;
+      if (heartbeatPayload) {
+        this.options.persistenceService.recordWorkerHeartbeat(heartbeatPayload);
+      }
+      return;
+    }
     const payloadResult = typeof payload.result === 'object' && payload.result !== null
-      ? (payload.result as CodexAgentResult)
+      ? payload.result
       : undefined;
-    const result: CodexAgentResult = payloadResult ?? {
-      status: this.mapStatusFromCode(statusCode),
+    const result: WorkerResult = payloadResult
+      ? this.workerResultService.normalize(payloadResult)
+      : {
+      success: this.mapStatusFromCode(statusCode),
+      engine: 'codex-cloud',
+      timedOut: false,
+      durationMs: 0,
       summary,
-      requested_agents: [],
+      activity: {
+        filesRead: [],
+        filesChanged: [],
+        commandsRun: [],
+        toolCalls: [],
+      },
+      checkpointDelta: {
+        factsAdded: [],
+        decisionsAdded: [],
+        openQuestions: [],
+        risksFound: [],
+        nextBestActions: [],
+        evidenceRefs: [],
+      },
       artifacts: [],
-      doc_updates: [],
-      branch_actions: [],
+      spawnRequests: [],
+      budget: {},
     };
 
     this.recordExecutionEvent(
@@ -202,10 +235,27 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
         attemptId,
         agentName,
         role,
-        status: result.status,
+        success: result.success,
+        engine: result.engine,
         summary: result.summary,
       },
     );
+
+    if (typeof this.options.persistenceService.getRunRecord === 'function') {
+      this.checkpointMergeService.merge(result);
+      this.taskChatService.append({
+        taskId,
+        runId: this.options.persistenceService.getRunRecord().runId,
+        projectId: this.options.config.projectId,
+        source: 'agent',
+        authorType: 'agent',
+        authorId: agentName,
+        body: result.summary,
+        metadata: {
+          engine: result.engine,
+        },
+      });
+    }
 
     this.options.scheduler.handleAgentResult(taskId, attemptId, agentName, role, result);
   }
@@ -227,6 +277,10 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
         task_type: task.taskType,
         created_by: task.createdByUserId,
         branch_name: task.branchName,
+        project_id: this.options.config.projectId,
+        repo_id: this.options.config.repoId,
+        root_path: this.options.config.projectRoot,
+        branch: task.branchName ?? this.options.config.defaultBranch,
       },
     });
     this.options.gateway.send(
@@ -439,17 +493,8 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
     return typeof value === 'string' ? value : undefined;
   }
 
-  private mapStatusFromCode(code: string): CodexAgentResult['status'] {
-    if (code === 'agent_completed') {
-      return 'completed';
-    }
-    if (code === 'agent_failed') {
-      return 'blocked';
-    }
-    if (code === 'agent_blocked') {
-      return 'blocked';
-    }
-    return 'blocked';
+  private mapStatusFromCode(code: string): boolean {
+    return code === 'agent_completed';
   }
 
   private recordExecutionEvent(

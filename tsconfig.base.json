@@ -32,6 +32,51 @@
     ],
     "bootstrap": [
       "packages/bootstrap/src/index.ts"
+    ],
+    "@shared-types": [
+      "packages/shared-types/src/index.ts"
+    ],
+    "@shared-workers": [
+      "packages/shared-workers/src/index.ts"
+    ],
+    "@shared-routing": [
+      "packages/shared-routing/src/index.ts"
+    ],
+    "@shared-git": [
+      "packages/shared-git/src/index.ts"
+    ],
+    "@shared-memory": [
+      "packages/shared-memory/src/index.ts"
+    ],
+    "@shared-projects": [
+      "packages/shared-projects/src/index.ts"
+    ],
+    "@shared-chat": [
+      "packages/shared-chat/src/index.ts"
+    ],
+    "@shared-skills": [
+      "packages/shared-skills/src/index.ts"
+    ],
+    "@shared-config": [
+      "packages/shared-config/src/index.ts"
+    ],
+    "@shared-persistence": [
+      "packages/shared-persistence/src/index.ts"
+    ],
+    "@shared-tracing": [
+      "packages/shared-tracing/src/index.ts"
+    ],
+    "@shared-mux": [
+      "packages/shared-mux/src/index.ts"
+    ],
+    "@shared-llm": [
+      "packages/shared-llm/src/index.ts"
+    ],
+    "@shared-codex": [
+      "packages/shared-codex/src/index.ts"
+    ],
+    "@shared-blink": [
+      "packages/shared-blink/src/index.ts"
     ]
     }
   },

@@ -45,6 +45,75 @@ append_path_export() {
   printf '%s\n' "$rc_file"
 }
 
+command_path() {
+  local candidate="${1:-}"
+  if [[ -n "$candidate" && -x "$candidate" ]]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+
+  if [[ -n "$candidate" ]] && command -v "$candidate" >/dev/null 2>&1; then
+    command -v "$candidate"
+    return 0
+  fi
+
+  return 1
+}
+
+run_install_command() {
+  local name="$1"
+  local install_cmd="${2:-}"
+
+  if [[ -z "$install_cmd" ]]; then
+    return 1
+  fi
+
+  printf 'Installing %s...\n' "$name"
+  /bin/bash -lc "$install_cmd"
+}
+
+write_assignment() {
+  local file="$1"
+  local key="$2"
+  local value="${3:-}"
+  printf '%s=%q\n' "$key" "$value" >>"$file"
+}
+
+resolve_service_binary() {
+  local env_value="$1"
+  local install_cmd="$2"
+  shift 2
+
+  local path_value=""
+  if path_value="$(command_path "$env_value" 2>/dev/null)"; then
+    printf '%s\n' "$path_value"
+    return 0
+  fi
+
+  local candidate
+  for candidate in "$@"; do
+    if path_value="$(command_path "$candidate" 2>/dev/null)"; then
+      printf '%s\n' "$path_value"
+      return 0
+    fi
+  done
+
+  if run_install_command "$candidate" "$install_cmd"; then
+    if path_value="$(command_path "$env_value" 2>/dev/null)"; then
+      printf '%s\n' "$path_value"
+      return 0
+    fi
+    for candidate in "$@"; do
+      if path_value="$(command_path "$candidate" 2>/dev/null)"; then
+        printf '%s\n' "$path_value"
+        return 0
+      fi
+    done
+  fi
+
+  return 1
+}
+
 github_archive_url() {
   local repo_url="$1"
   local ref="${2:-}"
@@ -78,6 +147,11 @@ BIN_DIR="${DROIDSWARM_BIN_DIR:-$HOME/.local/bin}"
 SOURCE_DIR=""
 DEFAULT_REPO_URL="${DROIDSWARM_DEFAULT_REPO_URL:-https://github.com/Quick-Draw-Development/DroidSwarm}"
 WORKSPACE_SOURCE_ROOT=""
+SERVICE_HOME="${DROIDSWARM_HOME:-$HOME/.droidswarm}"
+SERVICE_CONFIG_FILE="${DROIDSWARM_SERVICE_CONFIG:-$SERVICE_HOME/services.env}"
+RUNTIME_DIR="$INSTALL_ROOT/runtime"
+INSTALL_BIN_DIR="$INSTALL_ROOT/bin"
+MODELS_DIR="${DROIDSWARM_MODELS_DIR:-$SERVICE_HOME/models}"
 
 print_help() {
   cat <<'EOF'
@@ -128,7 +202,8 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-mkdir -p "$INSTALL_ROOT" "$BIN_DIR"
+mkdir -p "$INSTALL_ROOT" "$BIN_DIR" "$SERVICE_HOME"
+mkdir -p "$MODELS_DIR"
 
 if [[ -z "$REPO_URL" && -n "$DEFAULT_REPO_URL" ]]; then
   REPO_URL="$DEFAULT_REPO_URL"
@@ -151,6 +226,8 @@ rm -f "$TMP_ARCHIVE"
 
 SOCKET_RUNTIME_SOURCE="$WORKSPACE_SOURCE_ROOT/dist/apps/socket-server"
 ORCHESTRATOR_RUNTIME_SOURCE="$WORKSPACE_SOURCE_ROOT/dist/apps/orchestrator"
+BLINK_BRIDGE_RUNTIME_SOURCE="$WORKSPACE_SOURCE_ROOT/dist/apps/blink-bridge"
+WORKER_HOST_RUNTIME_SOURCE="$WORKSPACE_SOURCE_ROOT/dist/apps/worker-host"
 DIST_DIR="$WORKSPACE_SOURCE_ROOT/dist/apps/dashboard/.next"
 DASHBOARD_RUNTIME_SOURCE="$DIST_DIR/standalone"
 DASHBOARD_STATIC_SOURCE="$DIST_DIR/static"
@@ -185,7 +262,7 @@ cp -R "$SOURCE_DIR/specs/." "$INSTALL_ROOT/specs/"
 if [[ -f "$WORKSPACE_SOURCE_ROOT/VERSION" ]]; then
   cp "$WORKSPACE_SOURCE_ROOT/VERSION" "$INSTALL_ROOT/VERSION"
 fi
-rm -rf "$INSTALL_ROOT/runtime/socket-server" "$INSTALL_ROOT/runtime/orchestrator" "$INSTALL_ROOT/runtime/dashboard"
+rm -rf "$INSTALL_ROOT/runtime/socket-server" "$INSTALL_ROOT/runtime/orchestrator" "$INSTALL_ROOT/runtime/dashboard" "$INSTALL_ROOT/runtime/blink-bridge" "$INSTALL_ROOT/runtime/worker-host"
 mkdir -p "$INSTALL_ROOT/runtime/socket-server" "$INSTALL_ROOT/runtime/orchestrator" "$INSTALL_ROOT/runtime/dashboard/.next"
 cp -R "$SOCKET_RUNTIME_SOURCE/." "$INSTALL_ROOT/runtime/socket-server/"
 (
@@ -197,6 +274,14 @@ cp -R "$ORCHESTRATOR_RUNTIME_SOURCE/." "$INSTALL_ROOT/runtime/orchestrator/"
   cd "$INSTALL_ROOT/runtime/orchestrator"
   npm install --production >/dev/null 2>&1 || true
 )
+if [[ -d "$BLINK_BRIDGE_RUNTIME_SOURCE" ]]; then
+  mkdir -p "$INSTALL_ROOT/runtime/blink-bridge"
+  cp -R "$BLINK_BRIDGE_RUNTIME_SOURCE/." "$INSTALL_ROOT/runtime/blink-bridge/"
+fi
+if [[ -d "$WORKER_HOST_RUNTIME_SOURCE" ]]; then
+  mkdir -p "$INSTALL_ROOT/runtime/worker-host"
+  cp -R "$WORKER_HOST_RUNTIME_SOURCE/." "$INSTALL_ROOT/runtime/worker-host/"
+fi
 if [[ -d "$WORKSPACE_SOURCE_ROOT/dist/packages/protocol" ]]; then
   mkdir -p "$INSTALL_ROOT/runtime/packages/protocol"
   cp -R "$WORKSPACE_SOURCE_ROOT/dist/packages/protocol/." "$INSTALL_ROOT/runtime/packages/protocol/"
@@ -206,6 +291,19 @@ if [[ -d "$WORKSPACE_SOURCE_ROOT/dist/packages/protocol-alias" ]]; then
   cp -R "$WORKSPACE_SOURCE_ROOT/dist/packages/protocol-alias/." "$INSTALL_ROOT/runtime/packages/protocol-alias/"
 fi
 cp -R "$DASHBOARD_RUNTIME_SOURCE/." "$INSTALL_ROOT/runtime/dashboard/"
+if [[ -d "$DASHBOARD_DIST_SOURCE" ]]; then
+  DASHBOARD_RUNTIME_DIST="$INSTALL_ROOT/runtime/dashboard/.next"
+  rm -rf "$DASHBOARD_RUNTIME_DIST"
+  mkdir -p "$DASHBOARD_RUNTIME_DIST"
+  if command -v tar >/dev/null 2>&1; then
+    (
+      cd "$DASHBOARD_DIST_SOURCE"
+      tar -cf - . | (cd "$DASHBOARD_RUNTIME_DIST" && tar -xpf -)
+    )
+  else
+    cp -R "$DASHBOARD_DIST_SOURCE/." "$DASHBOARD_RUNTIME_DIST"
+  fi
+fi
 if [[ -d "$DASHBOARD_STATIC_SOURCE" ]]; then
   cp -R "$DASHBOARD_STATIC_SOURCE" "$INSTALL_ROOT/runtime/dashboard/.next/"
 fi
@@ -222,6 +320,74 @@ fi
 chmod +x "$INSTALL_ROOT/bin/DroidSwarm" "$INSTALL_ROOT/libexec/droidswarm-daemon.sh" "$INSTALL_ROOT/bin/update-droidswarm" "$INSTALL_ROOT/scripts/update-droidswarm.sh"
 ln -sf "$INSTALL_ROOT/bin/DroidSwarm" "$BIN_DIR/DroidSwarm"
 
+BLINK_SERVER_BIN="${DROIDSWARM_BLINK_SERVER_BIN:-$INSTALL_BIN_DIR/blink-server}"
+MUX_BIN="${DROIDSWARM_MUX_BIN:-$INSTALL_BIN_DIR/mux}"
+LLAMA_SERVER_BIN="${DROIDSWARM_LLAMA_SERVER_BIN:-$INSTALL_BIN_DIR/llama-server}"
+LLAMA_MODEL="${DROIDSWARM_LLAMA_MODEL:-$MODELS_DIR/default.gguf}"
+BLINK_SERVER_INSTALL_CMD="${DROIDSWARM_BLINK_SERVER_INSTALL_CMD:-}"
+MUX_INSTALL_CMD="${DROIDSWARM_MUX_INSTALL_CMD:-}"
+LLAMA_INSTALL_CMD="${DROIDSWARM_LLAMA_INSTALL_CMD:-}"
+LLAMA_MODEL_DOWNLOAD_CMD="${DROIDSWARM_LLAMA_MODEL_DOWNLOAD_CMD:-}"
+BLINK_SERVER_PORT="${DROIDSWARM_BLINK_SERVER_PORT:-8950}"
+MUX_PORT="${DROIDSWARM_MUX_PORT:-8960}"
+LLAMA_PORT="${DROIDSWARM_LLAMA_PORT:-11434}"
+
+if ! BLINK_SERVER_BIN="$(resolve_service_binary "$BLINK_SERVER_BIN" "$BLINK_SERVER_INSTALL_CMD" blink-server blink 2>/dev/null)"; then
+  err "Blink server is required. Set DROIDSWARM_BLINK_SERVER_BIN or DROIDSWARM_BLINK_SERVER_INSTALL_CMD."
+  exit 1
+fi
+
+if ! MUX_BIN="$(resolve_service_binary "$MUX_BIN" "$MUX_INSTALL_CMD" mux 2>/dev/null)"; then
+  err "Mux is required. Set DROIDSWARM_MUX_BIN or DROIDSWARM_MUX_INSTALL_CMD."
+  exit 1
+fi
+
+if [[ -z "$LLAMA_INSTALL_CMD" && -z "$LLAMA_SERVER_BIN" ]] && command -v brew >/dev/null 2>&1; then
+  LLAMA_INSTALL_CMD="brew install llama.cpp"
+fi
+
+if ! LLAMA_SERVER_BIN="$(resolve_service_binary "$LLAMA_SERVER_BIN" "$LLAMA_INSTALL_CMD" llama-server 2>/dev/null)"; then
+  err "llama.cpp server is required. Set DROIDSWARM_LLAMA_SERVER_BIN or DROIDSWARM_LLAMA_INSTALL_CMD."
+  exit 1
+fi
+
+if [[ -z "$LLAMA_MODEL" || ! -f "$LLAMA_MODEL" ]]; then
+  if [[ -n "$LLAMA_MODEL_DOWNLOAD_CMD" ]]; then
+    printf 'Provisioning llama.cpp model...\n'
+    /bin/bash -lc "$LLAMA_MODEL_DOWNLOAD_CMD"
+  fi
+fi
+
+if [[ -z "$LLAMA_MODEL" || ! -f "$LLAMA_MODEL" ]]; then
+  err "Missing llama.cpp model file. Set DROIDSWARM_LLAMA_MODEL and optionally DROIDSWARM_LLAMA_MODEL_DOWNLOAD_CMD."
+  exit 1
+fi
+
+BLINK_SERVER_START_CMD="${DROIDSWARM_BLINK_SERVER_START_CMD:-$BLINK_SERVER_BIN --host 127.0.0.1 --port $BLINK_SERVER_PORT}"
+MUX_START_CMD="${DROIDSWARM_MUX_START_CMD:-$MUX_BIN serve --host 127.0.0.1 --port $MUX_PORT}"
+LLAMA_START_CMD="${DROIDSWARM_LLAMA_START_CMD:-$LLAMA_SERVER_BIN --host 127.0.0.1 --port $LLAMA_PORT -m $LLAMA_MODEL}"
+
+: >"$SERVICE_CONFIG_FILE"
+write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_BLINK_SERVER_BIN" "$BLINK_SERVER_BIN"
+write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_MUX_BIN" "$MUX_BIN"
+write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_LLAMA_SERVER_BIN" "$LLAMA_SERVER_BIN"
+write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_LLAMA_MODEL" "$LLAMA_MODEL"
+write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_RUNTIME_DIR" "$RUNTIME_DIR"
+write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_BIN_INSTALL_DIR" "$INSTALL_BIN_DIR"
+write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_MODELS_DIR" "$MODELS_DIR"
+write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_DEFAULT_BLINK_SERVER_BIN" "$INSTALL_BIN_DIR/blink-server"
+write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_DEFAULT_MUX_BIN" "$INSTALL_BIN_DIR/mux"
+write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_DEFAULT_LLAMA_SERVER_BIN" "$INSTALL_BIN_DIR/llama-server"
+write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_DEFAULT_LLAMA_MODEL" "$MODELS_DIR/default.gguf"
+write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_DEFAULT_BLINK_BRIDGE_ENTRY" "$RUNTIME_DIR/blink-bridge/main.js"
+write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_DEFAULT_WORKER_HOST_ENTRY" "$RUNTIME_DIR/worker-host/main.js"
+write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_BLINK_SERVER_PORT" "$BLINK_SERVER_PORT"
+write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_MUX_PORT" "$MUX_PORT"
+write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_LLAMA_PORT" "$LLAMA_PORT"
+write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_BLINK_SERVER_START_CMD" "$BLINK_SERVER_START_CMD"
+write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_MUX_START_CMD" "$MUX_START_CMD"
+write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_LLAMA_START_CMD" "$LLAMA_START_CMD"
+
 PATH_UPDATE_MESSAGE="Make sure $BIN_DIR is on your PATH."
 UPDATED_RC_FILE=""
 CURRENT_SHELL_NAME="$(basename "${SHELL:-}")"
@@ -235,6 +401,7 @@ Installed DroidSwarm CLI.
 Binary: $BIN_DIR/DroidSwarm
 Install root: $INSTALL_ROOT
 Source: $SOURCE_DIR
+Service config: $SERVICE_CONFIG_FILE
 
 $PATH_UPDATE_MESSAGE
 

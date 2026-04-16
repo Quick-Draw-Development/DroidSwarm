@@ -2,13 +2,13 @@ import { randomUUID } from 'node:crypto';
 import type { UsageShape } from '@protocol';
 
 import type {
-  CodexAgentResult,
   MessageEnvelope,
   OrchestratorConfig,
   RequestedAgent,
   SpawnedAgent,
   ToolRequestPayload,
   ToolResponsePayload,
+  WorkerArtifact,
 } from './types';
 
 const nowIso = (): string => new Date().toISOString();
@@ -75,7 +75,7 @@ export const buildArtifactCreatedMessage = (
   taskId: string,
   roomId: string,
   agentName: string,
-  artifact: CodexAgentResult['artifacts'][number],
+  artifact: WorkerArtifact,
 ): MessageEnvelope => ({
   message_id: randomUUID(),
   project_id: config.projectId,
@@ -88,8 +88,8 @@ export const buildArtifactCreatedMessage = (
     artifact_id: randomUUID(),
     task_id: taskId,
     kind: artifact.kind,
-    summary: artifact.title,
-    content: artifact.content,
+    summary: artifact.summary,
+    content: artifact.content ?? artifact.path ?? artifact.uri ?? artifact.summary,
   },
 });
 

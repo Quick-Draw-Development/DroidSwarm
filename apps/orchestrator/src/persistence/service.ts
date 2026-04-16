@@ -8,10 +8,16 @@ import type {
   ExecutionEventRecord,
   OperatorControlActionRecord,
   PersistedTask,
+  ProjectCheckpoint,
+  ProjectDecision,
+  ProjectFact,
   RunRecord,
+  TaskChatMessage,
   TaskAttemptRecord,
   TaskDependencyRecord,
   VerificationOutcomeRecord,
+  WorkerHeartbeat,
+  WorkerResult,
 } from '../types';
 import { buildEmbedding } from '../utils/embeddings';
 
@@ -51,6 +57,20 @@ export class OrchestratorPersistenceService {
     private readonly run: RunRecord,
   ) {}
 
+  private resolveScope(overrides?: Partial<Pick<RunRecord, 'projectId' | 'repoId' | 'rootPath' | 'branch' | 'workspaceId'>>): Pick<RunRecord, 'projectId' | 'repoId' | 'rootPath' | 'branch' | 'workspaceId'> {
+    return {
+      projectId: overrides?.projectId ?? this.run.projectId,
+      repoId: overrides?.repoId ?? this.run.repoId,
+      rootPath: overrides?.rootPath ?? this.run.rootPath,
+      branch: overrides?.branch ?? this.run.branch,
+      workspaceId: overrides?.workspaceId ?? this.run.workspaceId,
+    };
+  }
+
+  getRunRecord(): RunRecord {
+    return this.run;
+  }
+
   createTask(task: {
     taskId: string;
     name: string;
@@ -59,9 +79,21 @@ export class OrchestratorPersistenceService {
     metadata?: Record<string, unknown>;
     status?: PersistedTask['status'];
   }): PersistedTask {
+    const scope = this.resolveScope({
+      projectId: typeof task.metadata?.project_id === 'string' ? task.metadata.project_id : undefined,
+      repoId: typeof task.metadata?.repo_id === 'string' ? task.metadata.repo_id : undefined,
+      rootPath: typeof task.metadata?.root_path === 'string' ? task.metadata.root_path : undefined,
+      branch: typeof task.metadata?.branch === 'string' ? task.metadata.branch : undefined,
+      workspaceId: typeof task.metadata?.workspace_id === 'string' ? task.metadata.workspace_id : undefined,
+    });
     const record: PersistedTask = {
       taskId: task.taskId,
       runId: this.run.runId,
+      projectId: scope.projectId,
+      repoId: scope.repoId,
+      rootPath: scope.rootPath,
+      branch: scope.branch,
+      workspaceId: scope.workspaceId,
       parentTaskId: task.parentTaskId,
       name: task.name,
     status: task.status ?? 'queued',
@@ -80,11 +112,23 @@ export class OrchestratorPersistenceService {
     agentName: string,
     role: string,
     metadata?: Record<string, unknown>,
+    scope?: {
+      projectId?: string;
+      repoId?: string;
+      rootPath?: string;
+      branch?: string;
+      workspaceId?: string;
+    },
   ): TaskAttemptRecord {
     const attempt: TaskAttemptRecord = {
       attemptId,
       taskId: task.taskId,
       runId: this.run.runId,
+      projectId: scope?.projectId ?? task.projectId,
+      repoId: scope?.repoId ?? task.repoId,
+      rootPath: scope?.rootPath ?? task.rootPath,
+      branch: scope?.branch ?? task.branch,
+      workspaceId: scope?.workspaceId ?? task.workspaceId,
       agentName,
       status: 'running',
       metadata: metadata ? { role, ...metadata } : { role },
@@ -198,6 +242,11 @@ export class OrchestratorPersistenceService {
       attemptId: input.attemptId,
       taskId: input.taskId,
       runId: this.run.runId,
+      projectId: this.run.projectId,
+      repoId: this.run.repoId,
+      rootPath: this.run.rootPath,
+      branch: this.run.branch,
+      workspaceId: this.run.workspaceId,
       kind: input.kind,
       summary: input.summary,
       content: input.content,
@@ -223,6 +272,11 @@ export class OrchestratorPersistenceService {
       checkpointId,
       taskId,
       runId: this.run.runId,
+      projectId: this.run.projectId,
+      repoId: this.run.repoId,
+      rootPath: this.run.rootPath,
+      branch: this.run.branch,
+      workspaceId: this.run.workspaceId,
       attemptId: attemptId ?? undefined,
       payloadJson: JSON.stringify(payload),
       createdAt: nowIso(),
@@ -284,6 +338,11 @@ export class OrchestratorPersistenceService {
     this.persistence.budgets.record({
       eventId: randomUUID(),
       runId: this.run.runId,
+      projectId: this.run.projectId,
+      repoId: this.run.repoId,
+      rootPath: this.run.rootPath,
+      branch: this.run.branch,
+      workspaceId: this.run.workspaceId,
       taskId: taskId ?? null,
       detail,
       consumed,
@@ -334,5 +393,112 @@ export class OrchestratorPersistenceService {
 
   searchCheckpoints(query: string, limit: number): CheckpointVectorRecord[] {
     return this.persistence.vectors.search(query, Math.max(1, limit));
+  }
+
+  upsertProject(project: { projectId: string; name: string; description?: string; metadata?: Record<string, unknown> }): void {
+    this.persistence.projects.upsert({
+      ...project,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    });
+  }
+
+  upsertProjectRepo(repo: {
+    repoId: string;
+    projectId: string;
+    name: string;
+    rootPath: string;
+    defaultBranch: string;
+    mainBranch: string;
+    developBranch: string;
+    allowedRoots: string[];
+    metadata?: Record<string, unknown>;
+  }): void {
+    this.persistence.projectRepos.upsert({
+      ...repo,
+      id: repo.repoId,
+      branch: repo.defaultBranch,
+      workspaceId: undefined,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    });
+  }
+
+  listProjectFacts(projectId: string): ProjectFact[] {
+    return this.persistence.memory.listFacts(projectId);
+  }
+
+  listProjectDecisions(projectId: string): ProjectDecision[] {
+    return this.persistence.memory.listDecisions(projectId);
+  }
+
+  listProjectCheckpoints(projectId: string): ProjectCheckpoint[] {
+    return this.persistence.memory.listCheckpoints(projectId);
+  }
+
+  recordProjectFact(fact: ProjectFact): void {
+    this.persistence.memory.recordFact(fact);
+  }
+
+  recordProjectDecision(decision: ProjectDecision): void {
+    this.persistence.memory.recordDecision(decision);
+  }
+
+  recordProjectCheckpoint(checkpoint: ProjectCheckpoint): void {
+    this.persistence.memory.recordCheckpoint(checkpoint);
+  }
+
+  recordTaskChatMessage(message: TaskChatMessage & { repoId?: string; rootPath?: string; branch?: string; workspaceId?: string }): void {
+    this.persistence.chat.create(message);
+  }
+
+  listTaskChatMessages(taskId: string): TaskChatMessage[] {
+    return this.persistence.chat.listByTask(taskId);
+  }
+
+  recordWorkerResult(taskId: string, attemptId: string, result: WorkerResult): void {
+    const task = this.getTask(taskId);
+    const scope = this.resolveScope(task ?? undefined);
+    if (!scope.repoId || !scope.rootPath || !scope.branch) {
+      return;
+    }
+    this.persistence.workers.recordResult({
+      workerResultId: randomUUID(),
+      runId: this.run.runId,
+      taskId,
+      attemptId,
+      projectId: scope.projectId,
+      repoId: scope.repoId,
+      rootPath: scope.rootPath,
+      branch: scope.branch,
+      workspaceId: scope.workspaceId,
+      engine: result.engine,
+      model: result.model,
+      success: result.success,
+      summary: result.summary,
+      payloadJson: JSON.stringify(result),
+      createdAt: nowIso(),
+    });
+  }
+
+  recordWorkerHeartbeat(heartbeat: WorkerHeartbeat): void {
+    const task = this.getTask(heartbeat.taskId);
+    const scope = this.resolveScope(task ?? undefined);
+    if (!scope.repoId || !scope.rootPath || !scope.branch) {
+      return;
+    }
+    this.persistence.workers.recordHeartbeat({
+      heartbeatId: randomUUID(),
+      ...heartbeat,
+      projectId: scope.projectId,
+      repoId: scope.repoId,
+      rootPath: scope.rootPath,
+      branch: scope.branch,
+      workspaceId: scope.workspaceId,
+    });
+  }
+
+  listWorkerHeartbeats(attemptId: string): WorkerHeartbeat[] {
+    return this.persistence.workers.listHeartbeatsByAttempt(attemptId);
   }
 }

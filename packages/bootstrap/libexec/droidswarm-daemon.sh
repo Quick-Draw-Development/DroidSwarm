@@ -48,6 +48,12 @@ mark_component_status() {
   printf '%s\n' "$status" >"$(component_status_file "$name" "$state_dir")"
 }
 
+mark_service_status() {
+  local name="$1"
+  local status="$2"
+  printf '%s\n' "$status" >"$(service_status_file "$name" "$state_dir")"
+}
+
 start_component() {
   local name="$1"
   shift
@@ -62,6 +68,31 @@ start_component() {
   local pid="$!"
   printf '%s\n' "$pid" >"$pid_file"
   mark_component_status "$name" "running"
+}
+
+start_service() {
+  local name="$1"
+  local port="$2"
+  shift 2
+
+  local log_file pid_file
+  log_file="$(component_log_file "$swarm_id" "$name")"
+  pid_file="$(service_pid_file "$name" "$state_dir")"
+
+  mark_service_status "$name" "starting"
+  "$@" >>"$log_file" 2>&1 &
+  local pid="$!"
+  printf '%s\n' "$pid" >"$pid_file"
+
+  if ! wait_for_port "$port" 20 1; then
+    mark_service_status "$name" "failed"
+    if is_pid_running "$pid"; then
+      kill "$pid" 2>/dev/null || true
+    fi
+    fail_daemon "Service failed health check: $name on port $port"
+  fi
+
+  mark_service_status "$name" "running"
 }
 
 stop_component() {
@@ -85,11 +116,36 @@ stop_component() {
   mark_component_status "$name" "stopped"
 }
 
+stop_service() {
+  local name="$1"
+  local pid_file pid
+  pid_file="$(service_pid_file "$name" "$state_dir")"
+  pid=""
+
+  if [[ -f "$pid_file" ]]; then
+    pid="$(<"$pid_file")"
+  fi
+
+  if [[ -n "$pid" ]] && is_pid_running "$pid"; then
+    kill "$pid" 2>/dev/null || true
+    sleep 1
+    if is_pid_running "$pid"; then
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+  fi
+
+  mark_service_status "$name" "stopped"
+}
+
 shutdown() {
   shutdown_requested="1"
+  stop_component "blink-bridge"
   stop_component "orchestrator"
   stop_component "dashboard"
   stop_component "socket-server"
+  stop_service "llama.cpp"
+  stop_service "mux"
+  stop_service "blink-server"
   mark_status "stopped"
   printf '%s\n' "$(now_utc)" >"$heartbeat_file"
   exit 0
@@ -99,9 +155,13 @@ fail_daemon() {
   local reason="$1"
   err "$reason"
   shutdown_requested="1"
+  stop_component "blink-bridge"
   stop_component "orchestrator"
   stop_component "dashboard"
   stop_component "socket-server"
+  stop_service "llama.cpp"
+  stop_service "mux"
+  stop_service "blink-server"
   mark_status "failed"
   printf '%s\n' "$(now_utc)" >"$heartbeat_file"
   exit 1
@@ -119,6 +179,29 @@ run_socket_server() {
   export DROIDSWARM_PROJECT_NAME
   export DROIDSWARM_OPERATOR_TOKEN
   exec "$DROIDSWARM_NODE_BIN" "$DROIDSWARM_SOCKET_SERVER_ENTRY"
+}
+
+run_blink_bridge() {
+  export NODE_ENV=production
+  export DROIDSWARM_DB_PATH
+  export DROIDSWARM_PROJECT_ID
+  export DROIDSWARM_SLACK_API_BASE_URL
+  export DROIDSWARM_SLACK_BOT_TOKEN
+  export DROIDSWARM_BLINK_API_BASE_URL
+  export DROIDSWARM_BLINK_API_TOKEN
+  exec "$DROIDSWARM_NODE_BIN" "$DROIDSWARM_BLINK_BRIDGE_ENTRY"
+}
+
+run_blink_server() {
+  exec /bin/bash -lc "$DROIDSWARM_BLINK_SERVER_START_CMD"
+}
+
+run_mux() {
+  exec /bin/bash -lc "$DROIDSWARM_MUX_START_CMD"
+}
+
+run_llama_server() {
+  exec /bin/bash -lc "$DROIDSWARM_LLAMA_START_CMD"
 }
 
 run_dashboard() {
@@ -162,6 +245,10 @@ run_orchestrator() {
   export DROIDSWARM_PROJECT_ID
   export DROIDSWARM_PROJECT_NAME
   export DROIDSWARM_OPERATOR_TOKEN
+  export DROIDSWARM_BLINK_SERVER_URL="http://127.0.0.1:${DROIDSWARM_BLINK_SERVER_PORT}"
+  export DROIDSWARM_MUX_URL="http://127.0.0.1:${DROIDSWARM_MUX_PORT}"
+  export DROIDSWARM_LLAMA_BASE_URL="http://127.0.0.1:${DROIDSWARM_LLAMA_PORT}"
+  export DROIDSWARM_LLAMA_MODEL
   exec "$DROIDSWARM_NODE_BIN" "$DROIDSWARM_ORCHESTRATOR_ENTRY"
 }
 
@@ -179,11 +266,54 @@ for required_file in \
   fi
 done
 
+if [[ -f "$DROIDSWARM_SERVICE_CONFIG" ]]; then
+  # shellcheck disable=SC1090
+  source "$DROIDSWARM_SERVICE_CONFIG"
+fi
+
+for required_var in \
+  DROIDSWARM_BLINK_SERVER_BIN \
+  DROIDSWARM_MUX_BIN \
+  DROIDSWARM_LLAMA_SERVER_BIN \
+  DROIDSWARM_BLINK_SERVER_START_CMD \
+  DROIDSWARM_MUX_START_CMD \
+  DROIDSWARM_LLAMA_START_CMD \
+  DROIDSWARM_BLINK_SERVER_PORT \
+  DROIDSWARM_MUX_PORT \
+  DROIDSWARM_LLAMA_PORT; do
+  if [[ -z "${!required_var:-}" ]]; then
+    err "Missing service configuration: $required_var"
+    exit 1
+  fi
+done
+
+for required_bin in \
+  "$DROIDSWARM_BLINK_SERVER_BIN" \
+  "$DROIDSWARM_MUX_BIN" \
+  "$DROIDSWARM_LLAMA_SERVER_BIN"; do
+  if [[ ! -x "$required_bin" ]]; then
+    err "Missing managed service binary: $required_bin"
+    exit 1
+  fi
+done
+
+if [[ -z "${DROIDSWARM_LLAMA_MODEL:-}" || ! -f "$DROIDSWARM_LLAMA_MODEL" ]]; then
+  err "Missing llama.cpp model file: ${DROIDSWARM_LLAMA_MODEL:-unset}"
+  exit 1
+fi
+
 mark_status "starting"
 printf '%s\n' "$(date +%s)" >"$started_epoch_file"
 
+start_service "blink-server" "$DROIDSWARM_BLINK_SERVER_PORT" run_blink_server
+start_service "mux" "$DROIDSWARM_MUX_PORT" run_mux
+start_service "llama.cpp" "$DROIDSWARM_LLAMA_PORT" run_llama_server
 start_component "socket-server" run_socket_server
 sleep 1
+if [[ -n "${DROIDSWARM_BLINK_BRIDGE_ENTRY:-}" && -f "$DROIDSWARM_BLINK_BRIDGE_ENTRY" ]]; then
+  start_component "blink-bridge" run_blink_bridge
+  sleep 1
+fi
 start_component "dashboard" run_dashboard
 sleep 1
 start_component "orchestrator" run_orchestrator
@@ -193,12 +323,25 @@ mark_status "running"
 while true; do
   printf '%s\n' "$(now_utc)" >"$heartbeat_file"
 
-  for component_name in socket-server dashboard orchestrator; do
+  for component_name in socket-server dashboard orchestrator blink-bridge; do
+    if [[ "$component_name" == "blink-bridge" && ! -f "$(component_pid_file "$component_name" "$state_dir")" ]]; then
+      continue
+    fi
     component_pid="$(<"$(component_pid_file "$component_name" "$state_dir")")"
     if ! is_pid_running "$component_pid"; then
       mark_component_status "$component_name" "failed"
       if [[ "$shutdown_requested" != "1" ]]; then
         fail_daemon "Component exited unexpectedly: $component_name"
+      fi
+    fi
+  done
+
+  for service_name in blink-server mux llama.cpp; do
+    service_pid="$(<"$(service_pid_file "$service_name" "$state_dir")")"
+    if ! is_pid_running "$service_pid"; then
+      mark_service_status "$service_name" "failed"
+      if [[ "$shutdown_requested" != "1" ]]; then
+        fail_daemon "Managed service exited unexpectedly: $service_name"
       fi
     fi
   done

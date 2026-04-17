@@ -1,0 +1,1 @@
+{ "name": "local_explorer", "description": "Fast read-heavy codebase explorer using local Ollama.", "model_provider": "ollama", "model": "gpt-oss:20b", "sandbox_mode": "read-only", "developer_instructions": "Focus on search, tracing call paths, and summarizing findings. Do not make edits unless explicitly asked." }

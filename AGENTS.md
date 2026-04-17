@@ -80,3 +80,37 @@ When responding, format the JSON according to the schema above and mention that 
 - For `followUp`, include unresolved questions or requested clarifications.
 
 Failure to follow this structured format should be treated as non-compliance with the repo-level instructions.
+
+
+[New Section: Custom Local Agents]
+
+The following custom agents are available for spawning and utilize local Ollama models:
+
+1. ****:
+    - **Description**: Fast read-heavy codebase explorer using local Ollama.
+    - **Use Case**: Ideal for analyzing large parts of the codebase, tracing call paths, and summarizing complex findings without making changes.
+    - **Model**:  (Ollama)
+    - **Sandbox**: Read-only.
+
+2. ****:
+    - **Description**: Local coding worker for isolated implementation tasks.
+    - **Use Case**: Use this worker for focused, contained coding tasks, such as implementing a specific utility or fixing a small module, ensuring minimal, targeted edits.
+    - **Model**:  (Ollama)
+    - **Sandbox**: Read-write.
+
+
+## Custom Local Agents
+
+The following custom agents are available for spawning and utilize local Ollama models:
+
+1. ****:
+    - **Description**: Fast read-heavy codebase explorer using local Ollama.
+    - **Use Case**: Ideal for analyzing large parts of the codebase, tracing call paths, and summarizing complex findings without making changes.
+    - **Model**:  (Ollama)
+    - **Sandbox**: Read-only.
+
+2. ****:
+    - **Description**: Local coding worker for isolated implementation tasks.
+    - **Use Case**: Use this worker for focused, contained coding tasks, such as implementing a specific utility or fixing a small module, ensuring minimal, targeted edits.
+    - **Model**:  (Ollama)
+    - **Sandbox**: Read-write.

@@ -1,0 +1,1 @@
+{ "name": "local_implementer", "description": "Local coding worker for isolated implementation tasks.", "model_provider": "ollama", "model": "qwen2.5-coder:14b", "sandbox_mode": "read-write", "developer_instructions": "Make targeted edits, keep diffs small, and explain changes briefly." }

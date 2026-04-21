@@ -297,6 +297,96 @@ ensure_service_runtime_ready() {
   fi
 }
 
+service_listener_is_adoptable() {
+  local service_name="$1"
+  local port="$2"
+  local expected_bin="$3"
+  shift 3
+
+  local listener_pid="" command_line="" expected_name="" token=""
+  listener_pid="$(listener_pid_for_port "$port" || true)"
+  [[ -n "$listener_pid" ]] || return 1
+
+  command_line="$(command_line_for_pid "$listener_pid" || true)"
+  [[ -n "$command_line" ]] || return 1
+
+  expected_name="$(basename "$expected_bin")"
+  command_line="$(printf '%s' "$command_line" | tr '[:upper:]' '[:lower:]')"
+  expected_name="$(printf '%s' "$expected_name" | tr '[:upper:]' '[:lower:]')"
+
+  if [[ -n "$expected_name" && "$command_line" == *"$expected_name"* ]]; then
+    return 0
+  fi
+
+  for token in "$@"; do
+    token="$(printf '%s' "$token" | tr '[:upper:]' '[:lower:]')"
+    if [[ -n "$token" && "$command_line" == *"$token"* ]]; then
+      return 0
+    fi
+  done
+
+  local swarm_id candidate_pid candidate_port
+  for swarm_id in $(active_swarm_ids); do
+    if ! load_swarm_env "$swarm_id"; then
+      continue
+    fi
+
+    case "$service_name" in
+      blink-server)
+        candidate_port="${DROIDSWARM_BLINK_SERVER_PORT:-}"
+        ;;
+      mux)
+        candidate_port="${DROIDSWARM_MUX_PORT:-}"
+        ;;
+      llama.cpp)
+        candidate_port="${DROIDSWARM_LLAMA_PORT:-}"
+        ;;
+      *)
+        candidate_port=""
+        ;;
+    esac
+
+    [[ "$candidate_port" == "$port" ]] || continue
+    candidate_pid=""
+    if [[ -f "$(service_pid_file "$service_name" "$(swarm_dir "$swarm_id")")" ]]; then
+      candidate_pid="$(<"$(service_pid_file "$service_name" "$(swarm_dir "$swarm_id")")")"
+    fi
+    if [[ -n "$candidate_pid" && "$candidate_pid" == "$listener_pid" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+resolve_service_binding() {
+  local service_name="$1"
+  local requested_port="$2"
+  local explicit_flag="$3"
+  local default_port="$4"
+  local expected_bin="$5"
+  shift 5
+
+  local listener_pid=""
+  if port_is_free "$requested_port"; then
+    printf 'use|%s|\n' "$requested_port"
+    return 0
+  fi
+
+  listener_pid="$(listener_pid_for_port "$requested_port" || true)"
+  if service_listener_is_adoptable "$service_name" "$requested_port" "$expected_bin" "$@"; then
+    printf 'adopt|%s|%s\n' "$requested_port" "$listener_pid"
+    return 0
+  fi
+
+  if [[ "$explicit_flag" == "1" ]]; then
+    err "$service_name port is already in use: $requested_port"
+    return 1
+  fi
+
+  printf 'use|%s|\n' "$(next_available_port "$default_port")"
+}
+
 
 write_project_metadata() {
   local project_root="$1"
@@ -747,6 +837,8 @@ cmd_swarm() {
     return 1
   fi
 
+  replace_project_swarms "$project_root" "$project_id" "$swarm_id"
+
   if [[ -z "$dashboard_port" ]]; then
     dashboard_port="${DROIDSWARM_DASHBOARD_PORT:-}"
   fi
@@ -787,10 +879,19 @@ cmd_swarm() {
   state_dir="$(swarm_dir "$swarm_id")"
   log_file="$(swarm_log_file "$swarm_id")"
   local workspace_root install_runtime_root install_models_root
+  local blink_adopt mux_adopt llama_adopt
+  local blink_adopt_pid mux_adopt_pid llama_adopt_pid
+  local blink_binding mux_binding llama_binding
   workspace_root="$(cd "$ROOT_DIR/../.." 2>/dev/null && pwd || true)"
   install_runtime_root="$ROOT_DIR/runtime"
   install_models_root="${DROIDSWARM_MODELS_DIR:-$DROIDSWARM_HOME/models}"
   specs_dir="$ROOT_DIR/specs"
+  blink_adopt="0"
+  mux_adopt="0"
+  llama_adopt="0"
+  blink_adopt_pid=""
+  mux_adopt_pid=""
+  llama_adopt_pid=""
 
   if [[ -z "$node_bin" || ! -x "$node_bin" ]]; then
     err "Node.js is required to start a swarm."
@@ -809,6 +910,7 @@ cmd_swarm() {
     "$workspace_root/dist/apps/dashboard/.next/standalone/server.js" \
     "$workspace_root/dist/apps/dashboard/.next/standalone/apps/dashboard/server.js" || true)"
   dashboard_static_dir="$(resolve_runtime_dir_value "${DROIDSWARM_DASHBOARD_STATIC_DIR:-}" \
+    "$install_runtime_root/dashboard/dist/apps/dashboard/.next/static" \
     "$install_runtime_root/dashboard/.next/static" \
     "$install_runtime_root/dashboard/apps/dashboard/.next/static" \
     "$workspace_root/dist/apps/dashboard/.next/static" || true)"
@@ -864,35 +966,23 @@ cmd_swarm() {
   if [[ -z "$blink_port" ]]; then
     blink_port="${DROIDSWARM_BLINK_SERVER_PORT:-8950}"
   fi
-  if ! port_is_free "$blink_port"; then
-    if [[ "$blink_port_explicit" == "1" ]]; then
-      err "Blink port is already in use: $blink_port"
-      return 1
-    fi
-    blink_port="$(next_available_port 8950)"
-  fi
+  blink_binding="$(resolve_service_binding "blink-server" "$blink_port" "$blink_port_explicit" 8950 "${DROIDSWARM_BLINK_SERVER_BIN:-}" "blink-server" "blink")" || return 1
+  IFS='|' read -r blink_binding_action blink_port blink_adopt_pid <<<"$blink_binding"
+  [[ "$blink_binding_action" == "adopt" ]] && blink_adopt="1"
 
   if [[ -z "$mux_port" ]]; then
     mux_port="${DROIDSWARM_MUX_PORT:-8960}"
   fi
-  if ! port_is_free "$mux_port"; then
-    if [[ "$mux_port_explicit" == "1" ]]; then
-      err "Mux port is already in use: $mux_port"
-      return 1
-    fi
-    mux_port="$(next_available_port 8960)"
-  fi
+  mux_binding="$(resolve_service_binding "mux" "$mux_port" "$mux_port_explicit" 8960 "${DROIDSWARM_MUX_BIN:-}" " mux " "/mux" "mux")" || return 1
+  IFS='|' read -r mux_binding_action mux_port mux_adopt_pid <<<"$mux_binding"
+  [[ "$mux_binding_action" == "adopt" ]] && mux_adopt="1"
 
   if [[ -z "$llama_port" ]]; then
     llama_port="${DROIDSWARM_LLAMA_PORT:-11434}"
   fi
-  if ! port_is_free "$llama_port"; then
-    if [[ "$llama_port_explicit" == "1" ]]; then
-      err "llama.cpp port is already in use: $llama_port"
-      return 1
-    fi
-    llama_port="$(next_available_port 11434)"
-  fi
+  llama_binding="$(resolve_service_binding "llama.cpp" "$llama_port" "$llama_port_explicit" 11434 "${DROIDSWARM_LLAMA_SERVER_BIN:-}" "llama-server" "llama.cpp" "llama")" || return 1
+  IFS='|' read -r llama_binding_action llama_port llama_adopt_pid <<<"$llama_binding"
+  [[ "$llama_binding_action" == "adopt" ]] && llama_adopt="1"
 
   if [[ -z "$llama_model" ]]; then
     llama_model="${DROIDSWARM_LLAMA_MODEL:-${DROIDSWARM_DEFAULT_LLAMA_MODEL:-$install_models_root/default.gguf}}"
@@ -940,6 +1030,12 @@ DROIDSWARM_SPECS_DIR=$(printf '%q' "$specs_dir")
 DROIDSWARM_BLINK_SERVER_PORT=$(printf '%q' "$blink_port")
 DROIDSWARM_MUX_PORT=$(printf '%q' "$mux_port")
 DROIDSWARM_LLAMA_PORT=$(printf '%q' "$llama_port")
+DROIDSWARM_ADOPT_BLINK_SERVER=$(printf '%q' "$blink_adopt")
+DROIDSWARM_ADOPT_BLINK_SERVER_PID=$(printf '%q' "$blink_adopt_pid")
+DROIDSWARM_ADOPT_MUX=$(printf '%q' "$mux_adopt")
+DROIDSWARM_ADOPT_MUX_PID=$(printf '%q' "$mux_adopt_pid")
+DROIDSWARM_ADOPT_LLAMA=$(printf '%q' "$llama_adopt")
+DROIDSWARM_ADOPT_LLAMA_PID=$(printf '%q' "$llama_adopt_pid")
 DROIDSWARM_LLAMA_MODEL=$(printf '%q' "$llama_model")
 DROIDSWARM_SERVICE_CONFIG=$(printf '%q' "$DROIDSWARM_SERVICE_CONFIG")
 EOF
@@ -1060,6 +1156,55 @@ print_swarm_runtime_status() {
     "$blink_component_status" \
     "$mux_component_status" \
     "$llama_component_status"
+}
+
+project_swarm_ids() {
+  local project_root="$1"
+  local project_id="$2"
+  local exclude_swarm_id="${3:-}"
+  local swarm_id candidate_root candidate_id
+
+  for swarm_id in $(active_swarm_ids); do
+    [[ -n "$exclude_swarm_id" && "$swarm_id" == "$exclude_swarm_id" ]] && continue
+    if ! load_swarm_env "$swarm_id"; then
+      continue
+    fi
+
+    candidate_root="${DROIDSWARM_PROJECT_ROOT:-}"
+    candidate_id="${DROIDSWARM_PROJECT_ID:-}"
+
+    if [[ -n "$project_root" && -n "$candidate_root" && "$candidate_root" == "$project_root" ]]; then
+      printf '%s\n' "$swarm_id"
+      continue
+    fi
+
+    if [[ -n "$project_id" && -n "$candidate_id" && "$candidate_id" == "$project_id" ]]; then
+      printf '%s\n' "$swarm_id"
+    fi
+  done
+}
+
+replace_project_swarms() {
+  local project_root="$1"
+  local project_id="$2"
+  local incoming_swarm_id="$3"
+  local existing_ids=()
+  local existing_id
+
+  for existing_id in $(project_swarm_ids "$project_root" "$project_id" "$incoming_swarm_id"); do
+    existing_ids+=("$existing_id")
+  done
+
+  if [[ "${#existing_ids[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  info "Replacing existing DroidSwarm instances for project '$project_id'"
+  for existing_id in "${existing_ids[@]}"; do
+    shutdown_one "$existing_id" || true
+    remove_swarm_artifacts "$existing_id"
+    info "Removed prior project swarm '$existing_id'"
+  done
 }
 
 swarm_runtime_status() {

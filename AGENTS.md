@@ -19,3 +19,4 @@ These commands must be used for their respective checks unless the user explicit
 - `AGENTS.md`, `CODEX.md`, and `CLAUDE.md` may add runtime launch notes only.
 - If adapter guidance conflicts with `SYSTEM_CANON.md`, `SYSTEM_CANON.md` wins.
 - Keep adapter files thin. Do not duplicate project canon here.
+- Every agent must follow the behavioral guidelines defined in `SYSTEM_CANON.md` before making code changes.

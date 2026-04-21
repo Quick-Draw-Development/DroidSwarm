@@ -362,18 +362,47 @@ ensure_blink_runtime() {
 install_runtime_dependencies() {
   local runtime_dir="$1"
   local runtime_name="$2"
+  local better_sqlite_package version_line better_sqlite_version
 
-  if [[ ! -f "$runtime_dir/package.json" ]]; then
+  if [[ -z "${DROIDSWARM_INSTALL_NODE_BIN:-}" || ! -x "${DROIDSWARM_INSTALL_NODE_BIN:-}" ]]; then
+    err "Installer is missing a valid Node.js runtime for $runtime_name dependencies."
+    exit 1
+  fi
+
+  if [[ -z "${DROIDSWARM_INSTALL_NPM_BIN:-}" || ! -x "${DROIDSWARM_INSTALL_NPM_BIN:-}" ]]; then
+    err "Installer is missing a valid npm runtime for $runtime_name dependencies."
+    exit 1
+  fi
+
+  if [[ -f "$runtime_dir/package.json" ]]; then
+    printf 'Installing runtime dependencies for %s...\n' "$runtime_name"
+    if ! (
+      cd "$runtime_dir"
+      "$DROIDSWARM_INSTALL_NPM_BIN" install --omit=dev
+      if [[ -f package.json ]] && grep -q '"better-sqlite3"' package.json; then
+        "$DROIDSWARM_INSTALL_NPM_BIN" rebuild better-sqlite3
+      fi
+    ); then
+      err "Failed to install runtime dependencies for $runtime_name."
+      exit 1
+    fi
     return 0
   fi
 
-  printf 'Installing runtime dependencies for %s...\n' "$runtime_name"
-  if ! (
-    cd "$runtime_dir"
-    npm install --omit=dev
-  ); then
-    err "Failed to install runtime dependencies for $runtime_name."
-    exit 1
+  better_sqlite_package="$runtime_dir/node_modules/better-sqlite3/package.json"
+  if [[ -f "$better_sqlite_package" ]]; then
+    version_line="$(grep -m1 '"version"' "$better_sqlite_package" || true)"
+    better_sqlite_version="$(printf '%s' "$version_line" | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
+    if [[ -n "$better_sqlite_version" && "$better_sqlite_version" != "$version_line" ]]; then
+      printf 'Reinstalling better-sqlite3 for %s with Node-aligned runtime...\n' "$runtime_name"
+      if ! (
+        cd "$runtime_dir"
+        "$DROIDSWARM_INSTALL_NPM_BIN" install --no-save "better-sqlite3@$better_sqlite_version"
+      ); then
+        err "Failed to reinstall better-sqlite3 for $runtime_name."
+        exit 1
+      fi
+    fi
   fi
 }
 
@@ -415,6 +444,38 @@ dashboard_runtime_app_root() {
   fi
 
   printf '%s\n' "$dashboard_root"
+}
+
+dashboard_runtime_dist_root() {
+  local dashboard_root="$1"
+  printf '%s\n' "$dashboard_root/dist/apps/dashboard/.next"
+}
+
+validate_dashboard_runtime_assets() {
+  local dashboard_root="$1"
+  local dashboard_dist_root manifest_dir static_root
+
+  dashboard_dist_root="$(dashboard_runtime_dist_root "$dashboard_root")"
+  manifest_dir="$dashboard_dist_root/server/app"
+  static_root="$dashboard_dist_root/static"
+
+  [[ -d "$manifest_dir" ]] || return 0
+  [[ -d "$static_root" ]] || {
+    err "Dashboard runtime is missing .next assets at $static_root"
+    exit 1
+  }
+
+  local manifest_file chunk_path relative_path
+  while IFS= read -r manifest_file; do
+    while IFS= read -r chunk_path; do
+      relative_path="${chunk_path#/_next/}"
+      if [[ ! -f "$dashboard_dist_root/$relative_path" ]]; then
+        err "Dashboard runtime is missing referenced chunk asset: $chunk_path"
+        err "Referenced by: $manifest_file"
+        exit 1
+      fi
+    done < <(rg -o '/_next/static/[^"]+' "$manifest_file" | sort -u)
+  done < <(find "$manifest_dir" -name '*page_client-reference-manifest.js' -type f | sort)
 }
 
 write_assignment() {
@@ -936,6 +997,16 @@ ensure_command "unzip" "" "Install unzip so DroidSwarm can unpack release archiv
 ensure_command "node" "" "Install Node.js 20+ so DroidSwarm runtime components can execute."
 ensure_command "npm" "" "Install npm so DroidSwarm can provision runtime dependencies."
 
+DROIDSWARM_INSTALL_NODE_BIN="$(command -v node)"
+DROIDSWARM_INSTALL_NPM_BIN="$(dirname "$DROIDSWARM_INSTALL_NODE_BIN")/npm"
+if [[ ! -x "$DROIDSWARM_INSTALL_NPM_BIN" ]]; then
+  DROIDSWARM_INSTALL_NPM_BIN="$(command -v npm)"
+fi
+if [[ ! -x "$DROIDSWARM_INSTALL_NPM_BIN" ]]; then
+  err "Unable to locate npm for the active Node.js runtime."
+  exit 1
+fi
+
 if [[ -z "$REPO_URL" && -n "$DEFAULT_REPO_URL" ]]; then
   REPO_URL="$DEFAULT_REPO_URL"
 fi
@@ -1016,20 +1087,22 @@ cp -R "$DASHBOARD_RUNTIME_SOURCE/." "$INSTALL_ROOT/runtime/dashboard/"
 install_runtime_dependencies "$INSTALL_ROOT/runtime/dashboard" "dashboard"
 normalize_dashboard_runtime "$INSTALL_ROOT/runtime/dashboard"
 dashboard_app_root="$(dashboard_runtime_app_root "$INSTALL_ROOT/runtime/dashboard")"
-mkdir -p "$dashboard_app_root/.next"
+dashboard_dist_root="$(dashboard_runtime_dist_root "$INSTALL_ROOT/runtime/dashboard")"
+mkdir -p "$dashboard_dist_root"
 if [[ -d "$DASHBOARD_STATIC_SOURCE" ]]; then
-  rm -rf "$dashboard_app_root/.next/static"
-  cp -R "$DASHBOARD_STATIC_SOURCE" "$dashboard_app_root/.next/static"
+  rm -rf "$dashboard_dist_root/static"
+  cp -R "$DASHBOARD_STATIC_SOURCE" "$dashboard_dist_root/static"
 fi
 if [[ -d "$DASHBOARD_PUBLIC_SOURCE" ]]; then
   rm -rf "$dashboard_app_root/public"
   cp -R "$DASHBOARD_PUBLIC_SOURCE" "$dashboard_app_root/public"
 fi
 if [[ -d "$DASHBOARD_DIST_SOURCE" ]]; then
-  DASHBOARD_RUNTIME_DIST="$INSTALL_ROOT/runtime/dashboard/dist/apps/dashboard/.next"
+  DASHBOARD_RUNTIME_DIST="$dashboard_dist_root"
   mkdir -p "$DASHBOARD_RUNTIME_DIST"
   cp -R "$DASHBOARD_DIST_SOURCE/." "$DASHBOARD_RUNTIME_DIST"
 fi
+validate_dashboard_runtime_assets "$INSTALL_ROOT/runtime/dashboard"
 
 chmod +x \
   "$INSTALL_ROOT/bin/DroidSwarm" \

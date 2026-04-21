@@ -195,6 +195,10 @@ service_status_file() {
   printf '%s/%s.status\n' "$2" "$1"
 }
 
+service_adopted_file() {
+  printf '%s/%s.adopted\n' "$2" "$1"
+}
+
 swarm_exists() {
   [[ -d "$(swarm_dir "$1")" ]]
 }
@@ -239,14 +243,23 @@ port_is_free() {
     node - "$port" <<'NODE' >/dev/null 2>&1
 const net = require('net');
 const port = Number(process.argv[2]);
-const host = '127.0.0.1';
-const server = net.createServer();
-server.unref();
-server.once('error', () => process.exit(1));
-server.once('listening', () => {
-  server.close(() => process.exit(0));
-});
-server.listen(port, host);
+const hosts = ['127.0.0.1', '::1'];
+let index = 0;
+const tryHost = () => {
+  if (index >= hosts.length) {
+    process.exit(0);
+  }
+  const server = net.createServer();
+  server.unref();
+  const host = hosts[index];
+  index += 1;
+  server.once('error', () => process.exit(1));
+  server.once('listening', () => {
+    server.close(() => tryHost());
+  });
+  server.listen(port, host);
+};
+tryHost();
 NODE
     return $?
   fi
@@ -257,13 +270,16 @@ import socket
 import sys
 
 port = int(sys.argv[1])
-sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-try:
-    sock.bind(('127.0.0.1', port))
-except OSError:
-    sys.exit(1)
-finally:
-    sock.close()
+checks = [('127.0.0.1', socket.AF_INET), ('::1', socket.AF_INET6)]
+for host, family in checks:
+    sock = socket.socket(family, socket.SOCK_STREAM)
+    try:
+        sock.bind((host, port))
+    except OSError:
+        sys.exit(1)
+    finally:
+        sock.close()
+sys.exit(0)
 PY
     return $?
   fi
@@ -330,6 +346,31 @@ for host in hosts:
             pass
 sys.exit(1)
 PY
+    return $?
+  fi
+
+  return 1
+}
+
+listener_pid_for_port() {
+  local port="$1"
+
+  if [[ -z "$port" ]] || ! command -v lsof >/dev/null 2>&1; then
+    return 1
+  fi
+
+  lsof -nP -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | head -n 1
+}
+
+command_line_for_pid() {
+  local pid="${1:-}"
+
+  if [[ -z "$pid" ]]; then
+    return 1
+  fi
+
+  if command -v ps >/dev/null 2>&1; then
+    ps -p "$pid" -o command= 2>/dev/null
     return $?
   fi
 

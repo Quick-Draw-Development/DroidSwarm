@@ -72,6 +72,57 @@ stop_pid() {
   fi
 }
 
+service_adoption_flag_for_name() {
+  case "$1" in
+    blink-server)
+      printf 'DROIDSWARM_ADOPT_BLINK_SERVER\n'
+      ;;
+    mux)
+      printf 'DROIDSWARM_ADOPT_MUX\n'
+      ;;
+    llama.cpp)
+      printf 'DROIDSWARM_ADOPT_LLAMA\n'
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+service_adoption_pid_var_for_name() {
+  case "$1" in
+    blink-server)
+      printf 'DROIDSWARM_ADOPT_BLINK_SERVER_PID\n'
+      ;;
+    mux)
+      printf 'DROIDSWARM_ADOPT_MUX_PID\n'
+      ;;
+    llama.cpp)
+      printf 'DROIDSWARM_ADOPT_LLAMA_PID\n'
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+service_should_adopt() {
+  local name="$1"
+  local flag_var flag_value
+  flag_var="$(service_adoption_flag_for_name "$name" || true)"
+  [[ -n "$flag_var" ]] || return 1
+  flag_value="${!flag_var:-0}"
+  [[ "$flag_value" == "1" ]]
+}
+
+service_adopted_pid() {
+  local name="$1"
+  local pid_var
+  pid_var="$(service_adoption_pid_var_for_name "$name" || true)"
+  [[ -n "$pid_var" ]] || return 1
+  printf '%s\n' "${!pid_var:-}"
+}
+
 start_component() {
   local name="$1"
   local health_port="$2"
@@ -127,7 +178,7 @@ start_service() {
   local port="$2"
   shift 2
 
-  local log_file pid_file existing_pid
+  local log_file pid_file existing_pid listener_pid
   log_file="$(component_log_file "$swarm_id" "$name")"
   pid_file="$(service_pid_file "$name" "$state_dir")"
   local attempt=1
@@ -145,6 +196,21 @@ start_service() {
       return 0
     fi
 
+    if service_should_adopt "$name"; then
+      listener_pid="$(listener_pid_for_port "$port" || true)"
+      if [[ -n "$listener_pid" ]]; then
+        local adopted_pid
+        adopted_pid="$(service_adopted_pid "$name" || true)"
+        if [[ -z "$adopted_pid" || "$adopted_pid" == "$listener_pid" ]]; then
+          printf '%s\n' "$listener_pid" >"$pid_file"
+          printf '1\n' >"$(service_adopted_file "$name" "$state_dir")"
+          mark_service_status "$name" "running"
+          printf '[%s] adopted %s on port %s (pid %s)\n' "$(now_utc)" "$name" "$port" "$listener_pid" >>"$log_file"
+          return 0
+        fi
+      fi
+    fi
+
     mark_service_status "$name" "failed"
     fail_daemon "Service port already in use before startup: $name on port $port"
   fi
@@ -156,6 +222,7 @@ start_service() {
     "$@" >>"$log_file" 2>&1 &
     pid="$!"
     printf '%s\n' "$pid" >"$pid_file"
+    rm -f "$(service_adopted_file "$name" "$state_dir")"
 
     if wait_for_port "$port" 20 1 && is_pid_running "$pid"; then
       mark_service_status "$name" "running"
@@ -233,6 +300,7 @@ maybe_restart_service() {
     fail_daemon "Service exceeded restart limit: $name"
   fi
 
+  rm -f "$(service_adopted_file "$name" "$state_dir")"
   printf '%s\n' $((restart_count + 1)) >"$restart_count_file"
   restart_service "$name" "$port" "$@"
 }
@@ -262,7 +330,11 @@ stop_service() {
     pid="$(<"$pid_file")"
   fi
 
-  stop_pid "$pid"
+  if [[ -f "$(service_adopted_file "$name" "$state_dir")" ]]; then
+    rm -f "$(service_adopted_file "$name" "$state_dir")"
+  else
+    stop_pid "$pid"
+  fi
 
   mark_service_status "$name" "stopped"
 }

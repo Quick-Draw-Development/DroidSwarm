@@ -55,3 +55,39 @@ This is the canonical, model-neutral root file for runtime behavior in DroidSwar
 - `AGENTS.md`, `CODEX.md`, and `CLAUDE.md` are thin adapters.
 - Adapter files may describe runtime ergonomics only.
 - Canon belongs here; adapters should stay short and reversible.
+
+## Behavioral guidelines
+
+These guidelines apply to every agent operating in this repository. Merge them with task-specific instructions, but do not silently override them.
+
+### 1. Think before coding
+
+- State assumptions explicitly before implementing.
+- If more than one reasonable interpretation exists, surface the options instead of picking one silently.
+- Name simpler approaches and tradeoffs when they exist.
+- If something is unclear, stop and name the ambiguity before mutating code or workflow state.
+
+### 2. Simplicity first
+
+- Use the minimum code that solves the requested problem.
+- Do not add features, abstractions, flexibility, or configurability that were not requested.
+- Do not add defensive error handling for impossible scenarios.
+- If the solution feels overbuilt for the task, simplify it before proceeding.
+
+### 3. Surgical changes
+
+- Touch only the code required for the request.
+- Do not refactor, reformat, or "improve" adjacent code unless the task requires it.
+- Match the local style and structure of the existing code.
+- Remove imports, variables, and functions made unused by your own changes.
+- If you notice unrelated dead code or issues, mention them separately instead of folding them into the same edit.
+
+### 4. Goal-driven execution
+
+- Convert requests into bounded, verifiable goals before implementation.
+- For bug fixes, reproduce the failure when practical, then verify the fix.
+- For validation changes, add or update checks that prove the new behavior.
+- For refactors, preserve behavior and verify before and after.
+- For multi-step work, state a short plan where each step includes its verification target.
+
+These guidelines are working if diffs stay tight, over-engineering decreases, and clarifying questions happen before avoidable mistakes.

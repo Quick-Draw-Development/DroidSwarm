@@ -69,6 +69,7 @@ Commands:
   swarm       Start and register a managed DroidSwarm instance
   list        List tracked swarms running on this machine
   status      Show detailed status for one managed DroidSwarm instance
+  repair      Repair the local DroidSwarm install and optionally reinstall cleanly
   shutdown    Shut down one swarm or all swarms
   version     Show the installed DroidSwarm version
   update      Refresh the installed runtime and restart swarms
@@ -79,6 +80,8 @@ Examples:
   DroidSwarm swarm --project-root "$PWD" --env OPENAI_API_KEY=example --config mode=dev
   DroidSwarm list
   DroidSwarm status --swarm-id <id>
+  DroidSwarm repair
+  DroidSwarm repair --clean
   DroidSwarm shutdown --swarm-id <id>
   DroidSwarm shutdown --all
 EOF
@@ -143,6 +146,22 @@ Options:
   --install-root DIR
   --bin-dir DIR
   --force
+  --help
+EOF
+}
+
+print_repair_help() {
+  cat <<'EOF'
+Usage:
+  DroidSwarm repair [options]
+
+Options:
+  --repo-url URL
+  --ref REF
+  --install-root DIR
+  --bin-dir DIR
+  --clean
+  --no-restart
   --help
 EOF
 }
@@ -1104,13 +1123,86 @@ cmd_update() {
     return 1
   fi
 
+  local -a update_cmd=("/bin/bash" "$script_path")
+  [[ -n "$repo_url" ]] && update_cmd+=(--repo-url "$repo_url")
+  [[ -n "$ref" ]] && update_cmd+=(--ref "$ref")
+  [[ "$force" == "1" ]] && update_cmd+=(--force)
+
   DROIDSWARM_INSTALL_ROOT="$install_root" \
     DROIDSWARM_BIN_DIR="$bin_dir" \
     DROIDSWARM_DEFAULT_REPO_URL="${repo_url:-https://github.com/Quick-Draw-Development/DroidSwarm}" \
-    /bin/bash "$script_path" \
-    ${repo_url:+--repo-url "$repo_url"} \
-    ${ref:+--ref "$ref"} \
-    $([[ "$force" == "1" ]] && printf -- '--force')
+    "${update_cmd[@]}"
+}
+
+cmd_repair() {
+  ensure_runtime_dirs
+
+  local repo_url ref install_root bin_dir
+  local clean_reinstall no_restart
+  repo_url=""
+  ref=""
+  clean_reinstall="0"
+  no_restart="0"
+  install_root="${DROIDSWARM_INSTALL_ROOT:-$HOME/.droidswarm/install}"
+  bin_dir="${DROIDSWARM_BIN_DIR:-$HOME/.local/bin}"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --repo-url)
+        shift
+        require_value "--repo-url" "${1:-}"
+        repo_url="$1"
+        ;;
+      --ref)
+        shift
+        require_value "--ref" "${1:-}"
+        ref="$1"
+        ;;
+      --install-root)
+        shift
+        require_value "--install-root" "${1:-}"
+        install_root="$1"
+        ;;
+      --bin-dir)
+        shift
+        require_value "--bin-dir" "${1:-}"
+        bin_dir="$1"
+        ;;
+      --clean)
+        clean_reinstall="1"
+        ;;
+      --no-restart)
+        no_restart="1"
+        ;;
+      --help|-h)
+        print_repair_help
+        return 0
+        ;;
+      *)
+        err "Unknown repair option: $1"
+        print_repair_help
+        return 1
+        ;;
+    esac
+    shift
+  done
+
+  local script_path="$ROOT_DIR/scripts/repair-droidswarm.sh"
+  if [[ ! -x "$script_path" ]]; then
+    err "Repair script not found: $script_path"
+    return 1
+  fi
+
+  local -a repair_cmd=("/bin/bash" "$script_path")
+  [[ -n "$repo_url" ]] && repair_cmd+=(--repo-url "$repo_url")
+  [[ -n "$ref" ]] && repair_cmd+=(--ref "$ref")
+  [[ "$clean_reinstall" == "1" ]] && repair_cmd+=(--clean)
+  [[ "$no_restart" == "1" ]] && repair_cmd+=(--no-restart)
+
+  DROIDSWARM_INSTALL_ROOT="$install_root" \
+    DROIDSWARM_BIN_DIR="$bin_dir" \
+    DROIDSWARM_DEFAULT_REPO_URL="${repo_url:-https://github.com/Quick-Draw-Development/DroidSwarm}" \
+    "${repair_cmd[@]}"
 }
 
 shutdown_one() {
@@ -1234,6 +1326,9 @@ case "$COMMAND" in
     ;;
   update)
     cmd_update "$@"
+    ;;
+  repair)
+    cmd_repair "$@"
     ;;
   list)
     cmd_list "$@"

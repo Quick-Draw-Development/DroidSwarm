@@ -4,7 +4,7 @@ set -euo pipefail
 export COPYFILE_DISABLE=1
 
 info() {
-  printf '%s\n' "$*"
+  printf '%s\n' "$*" >&2
 }
 
 warn() {
@@ -152,8 +152,8 @@ run_install_command() {
     return 1
   fi
 
-  printf 'Installing %s...\n' "$name"
-  /bin/bash -lc "$install_cmd"
+  printf 'Installing %s...\n' "$name" >&2
+  /bin/bash -lc "$install_cmd" >&2
 }
 
 default_install_command() {
@@ -273,7 +273,7 @@ install_blink_server_binary() {
   local prefix_dir="$install_root/vendor/blink"
 
   mkdir -p "$prefix_dir"
-  npm install -g --prefix "$prefix_dir" blink-server
+  npm install -g --prefix "$prefix_dir" blink-server >&2
   link_installed_binary "$prefix_dir/bin/blink-server" "$target_path"
 }
 
@@ -283,7 +283,7 @@ install_mux_binary() {
   local prefix_dir="$install_root/vendor/mux"
 
   mkdir -p "$prefix_dir"
-  npm install -g --prefix "$prefix_dir" mux
+  npm install -g --prefix "$prefix_dir" mux >&2
   link_installed_binary "$prefix_dir/bin/mux" "$target_path"
 }
 
@@ -382,6 +382,90 @@ write_assignment() {
   local key="$2"
   local value="${3:-}"
   printf '%s=%q\n' "$key" "$value" >>"$file"
+}
+
+validate_nonempty_single_line() {
+  local key="$1"
+  local value="${2:-}"
+
+  if [[ -z "$value" ]]; then
+    err "Installer resolved an empty value for $key"
+    exit 1
+  fi
+
+  if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
+    err "Installer resolved an invalid multi-line value for $key"
+    exit 1
+  fi
+}
+
+validate_positive_port() {
+  local key="$1"
+  local value="${2:-}"
+
+  if [[ ! "$value" =~ ^[0-9]+$ ]] || [[ "$value" -le 0 ]]; then
+    err "Installer resolved an invalid port for $key: $value"
+    exit 1
+  fi
+}
+
+validate_service_config() {
+  validate_nonempty_single_line "DROIDSWARM_BLINK_SERVER_BIN" "$BLINK_SERVER_BIN"
+  validate_nonempty_single_line "DROIDSWARM_MUX_BIN" "$MUX_BIN"
+  validate_nonempty_single_line "DROIDSWARM_LLAMA_SERVER_BIN" "$LLAMA_SERVER_BIN"
+  validate_nonempty_single_line "DROIDSWARM_LLAMA_MODEL" "$LLAMA_MODEL"
+  validate_nonempty_single_line "DROIDSWARM_LLAMA_MODEL_NAME" "$LLAMA_MODEL_NAME"
+  validate_nonempty_single_line "DROIDSWARM_LLAMA_MODELS_FILE" "$LLAMA_MODELS_FILE"
+  validate_nonempty_single_line "DROIDSWARM_BLINK_SERVER_START_CMD" "$BLINK_SERVER_START_CMD"
+  validate_nonempty_single_line "DROIDSWARM_MUX_START_CMD" "$MUX_START_CMD"
+  validate_nonempty_single_line "DROIDSWARM_LLAMA_START_CMD" "$LLAMA_START_CMD"
+  validate_positive_port "DROIDSWARM_BLINK_SERVER_PORT" "$BLINK_SERVER_PORT"
+  validate_positive_port "DROIDSWARM_MUX_PORT" "$MUX_PORT"
+  validate_positive_port "DROIDSWARM_LLAMA_PORT" "$LLAMA_PORT"
+
+  if [[ ! -x "$BLINK_SERVER_BIN" ]]; then
+    err "Installer resolved a non-executable Blink binary: $BLINK_SERVER_BIN"
+    exit 1
+  fi
+
+  if [[ ! -x "$MUX_BIN" ]]; then
+    err "Installer resolved a non-executable Mux binary: $MUX_BIN"
+    exit 1
+  fi
+
+  if [[ ! -x "$LLAMA_SERVER_BIN" ]]; then
+    err "Installer resolved a non-executable llama.cpp binary: $LLAMA_SERVER_BIN"
+    exit 1
+  fi
+
+  if [[ ! -f "$LLAMA_MODEL" ]]; then
+    err "Installer resolved a missing llama.cpp model file: $LLAMA_MODEL"
+    exit 1
+  fi
+
+  if [[ ! -f "$LLAMA_MODELS_FILE" ]]; then
+    err "Installer resolved a missing llama model inventory file: $LLAMA_MODELS_FILE"
+    exit 1
+  fi
+}
+
+validate_service_config_file() {
+  local file="$1"
+
+  if [[ ! -s "$file" ]]; then
+    err "Installer wrote an empty service config: $file"
+    exit 1
+  fi
+
+  if ! /bin/bash -n "$file"; then
+    err "Installer wrote invalid shell syntax to service config: $file"
+    exit 1
+  fi
+
+  if ! env -i /bin/bash -lc "set -a; source '$file'; [[ -n \"\$DROIDSWARM_BLINK_SERVER_BIN\" ]] && [[ -n \"\$DROIDSWARM_MUX_BIN\" ]] && [[ -n \"\$DROIDSWARM_LLAMA_SERVER_BIN\" ]] && [[ -n \"\$DROIDSWARM_LLAMA_MODEL\" ]]" >/dev/null 2>&1; then
+    err "Installer wrote an unreadable or incomplete service config: $file"
+    exit 1
+  fi
 }
 
 ensure_command() {
@@ -864,6 +948,8 @@ cp "$SOURCE_DIR/libexec/droidswarm-daemon.sh" "$INSTALL_ROOT/libexec/droidswarm-
 mkdir -p "$INSTALL_ROOT/scripts"
 cp "$SOURCE_DIR/scripts/update-droidswarm.sh" "$INSTALL_ROOT/bin/update-droidswarm"
 cp "$SOURCE_DIR/scripts/update-droidswarm.sh" "$INSTALL_ROOT/scripts/update-droidswarm.sh"
+cp "$SOURCE_DIR/scripts/repair-droidswarm.sh" "$INSTALL_ROOT/bin/repair-droidswarm"
+cp "$SOURCE_DIR/scripts/repair-droidswarm.sh" "$INSTALL_ROOT/scripts/repair-droidswarm.sh"
 rm -rf "$INSTALL_ROOT/specs"
 mkdir -p "$INSTALL_ROOT/specs"
 cp -R "$SOURCE_DIR/specs/." "$INSTALL_ROOT/specs/"
@@ -900,7 +986,13 @@ if [[ -d "$DASHBOARD_DIST_SOURCE" ]]; then
   cp -R "$DASHBOARD_DIST_SOURCE/." "$DASHBOARD_RUNTIME_DIST"
 fi
 
-chmod +x "$INSTALL_ROOT/bin/DroidSwarm" "$INSTALL_ROOT/libexec/droidswarm-daemon.sh" "$INSTALL_ROOT/bin/update-droidswarm" "$INSTALL_ROOT/scripts/update-droidswarm.sh"
+chmod +x \
+  "$INSTALL_ROOT/bin/DroidSwarm" \
+  "$INSTALL_ROOT/libexec/droidswarm-daemon.sh" \
+  "$INSTALL_ROOT/bin/update-droidswarm" \
+  "$INSTALL_ROOT/bin/repair-droidswarm" \
+  "$INSTALL_ROOT/scripts/update-droidswarm.sh" \
+  "$INSTALL_ROOT/scripts/repair-droidswarm.sh"
 ln -sf "$INSTALL_ROOT/bin/DroidSwarm" "$BIN_DIR/DroidSwarm"
 
 BLINK_SERVER_BIN="${DROIDSWARM_BLINK_SERVER_BIN:-$INSTALL_BIN_DIR/blink-server}"
@@ -945,6 +1037,8 @@ BLINK_SERVER_START_CMD="${DROIDSWARM_BLINK_SERVER_START_CMD:-$BLINK_SERVER_BIN -
 MUX_START_CMD="${DROIDSWARM_MUX_START_CMD:-$MUX_BIN server --port $MUX_PORT}"
 LLAMA_START_CMD="${DROIDSWARM_LLAMA_START_CMD:-$LLAMA_SERVER_BIN --host 127.0.0.1 --port $LLAMA_PORT -m $LLAMA_MODEL}"
 
+validate_service_config
+
 : >"$SERVICE_CONFIG_FILE"
 write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_BLINK_SERVER_BIN" "$BLINK_SERVER_BIN"
 write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_MUX_BIN" "$MUX_BIN"
@@ -970,6 +1064,8 @@ write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_LLAMA_BASE_URL" "http://127.
 write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_BLINK_SERVER_START_CMD" "$BLINK_SERVER_START_CMD"
 write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_MUX_START_CMD" "$MUX_START_CMD"
 write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_LLAMA_START_CMD" "$LLAMA_START_CMD"
+
+validate_service_config_file "$SERVICE_CONFIG_FILE"
 
 PATH_UPDATE_MESSAGE="Make sure $BIN_DIR is on your PATH."
 UPDATED_RC_FILE=""

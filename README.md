@@ -52,6 +52,13 @@ List active swarms:
 DroidSwarm list
 ```
 
+Repair the local install or do a clean reinstall:
+
+```bash
+DroidSwarm repair
+DroidSwarm repair --clean
+```
+
 Shut down one swarm:
 
 ```bash

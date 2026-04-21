@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import WebSocket from 'ws';
+import { COMPACT_VERB_DICTIONARY, type CompactVerb, type RoutingTelemetry } from '@shared-types';
 
 import { loadConfig } from './config';
 import { buildAgentPrompt } from './agent-prompt';
@@ -38,6 +39,9 @@ interface WorkerOptions {
   taskDigest?: TaskStateDigest;
   handoffPacket?: HandoffPacket;
   modelTier?: import('./types').ModelTier;
+  routingTelemetry?: RoutingTelemetry;
+  requiredReads?: string[];
+  compactVerbDictionary?: Record<CompactVerb, string>;
 }
 
 const parseOptions = (): WorkerOptions => {
@@ -246,14 +250,20 @@ const runWorker = async (): Promise<void> => {
         resumePacket: options.skillTexts?.join('\n\n'),
         taskDigest: options.taskDigest,
         handoffPacket: options.handoffPacket,
+        requiredReads: options.requiredReads ?? options.handoffPacket?.requiredReads,
+        modelTier: options.modelTier,
+        routingTelemetry: options.routingTelemetry,
+        compactVerbDictionary: options.compactVerbDictionary ?? COMPACT_VERB_DICTIONARY,
       },
     };
     result = await adapter.run(request);
     result.metadata = {
       ...(result.metadata ?? {}),
       modelTier: options.modelTier,
-      queueDepth: 0,
-      fallbackCount: 0,
+      queueDepth: options.routingTelemetry?.queueDepth ?? 0,
+      fallbackCount: options.routingTelemetry?.fallbackCount ?? 0,
+      routeKind: options.routingTelemetry?.routeKind,
+      escalationReason: options.routingTelemetry?.escalationReason,
     };
   } catch (error) {
     const latencyMs = Date.now() - llmStart;

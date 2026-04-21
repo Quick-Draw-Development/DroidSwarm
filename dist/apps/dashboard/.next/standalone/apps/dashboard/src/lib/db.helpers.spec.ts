@@ -13,7 +13,7 @@ describe('dashboard detail helpers', () => {
 
   it('falls back to placeholder when no handoffs exist', () => {
     const handoffs = buildTaskHandoffs([], []);
-    assert.deepEqual(handoffs, ['No handoffs recorded for this task yet.']);
+    assert.deepEqual(handoffs, []);
   });
 
   it('constructs guardrails from budgets and operator actions', () => {

@@ -102,6 +102,8 @@ class RunLifecycleService {
       if (terminalTaskStatuses.includes(task.status)) {
         continue;
       }
+      const latestDigest = this.persistence.digests.getLatestForTask(task.taskId);
+      const latestHandoff = this.persistence.handoffs.getLatest(task.taskId, run.runId);
       if (this.shouldResumeTask(task)) {
         resumedTasks.push(task.taskId);
         this.persistence.tasks.create({
@@ -109,7 +111,9 @@ class RunLifecycleService {
           status: "queued",
           metadata: {
             ...task.metadata ?? {},
-            recovery_reason: "requeued_after_restart"
+            recovery_reason: "requeued_after_restart",
+            recovery_digest_id: latestDigest?.id,
+            recovery_handoff_id: latestHandoff?.id
           },
           updatedAt: nowIso()
         });

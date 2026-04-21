@@ -5,6 +5,30 @@
   "sourceRoot": ".",
   "projectType": "application",
   "targets": {
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "npm run lint"
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "npm run typecheck"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "npm run test"
+      }
+    },
+    "build-shared-packages": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node scripts/build-shared-packages.js"
+      }
+    },
     "release-prep": {
       "executor": "nx:run-commands",
       "options": {

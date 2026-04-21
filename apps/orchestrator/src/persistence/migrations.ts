@@ -474,15 +474,27 @@ export const migrations: SchemaMigration[] = [
         );
 
         CREATE INDEX IF NOT EXISTS idx_task_state_digests_task ON task_state_digests(task_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_task_state_digests_run_task ON task_state_digests(run_id, task_id, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_handoff_packets_task ON handoff_packets(task_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_handoff_packets_run_task ON handoff_packets(run_id, task_id, created_at DESC);
       `);
 
+      tryExec('ALTER TABLE execution_events ADD COLUMN task_id TEXT;');
+      tryExec('ALTER TABLE execution_events ADD COLUMN normalized_verb TEXT;');
+      tryExec('ALTER TABLE execution_events ADD COLUMN transport_body_json TEXT;');
       tryExec('ALTER TABLE worker_results ADD COLUMN model_tier TEXT;');
       tryExec('ALTER TABLE worker_results ADD COLUMN queue_depth INTEGER;');
       tryExec('ALTER TABLE worker_results ADD COLUMN fallback_count INTEGER;');
       tryExec('ALTER TABLE worker_heartbeats ADD COLUMN model_tier TEXT;');
       tryExec('ALTER TABLE worker_heartbeats ADD COLUMN queue_depth INTEGER;');
       tryExec('ALTER TABLE worker_heartbeats ADD COLUMN fallback_count INTEGER;');
+
+      database.exec(`
+        CREATE INDEX IF NOT EXISTS idx_execution_events_task ON execution_events(task_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_execution_events_normalized_verb ON execution_events(normalized_verb, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_worker_results_task_attempt ON worker_results(task_id, attempt_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_worker_heartbeats_task_attempt ON worker_heartbeats(task_id, attempt_id, created_at DESC);
+      `);
     },
   },
 ];

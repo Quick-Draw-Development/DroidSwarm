@@ -42,6 +42,12 @@ const dictionary: Record<string, string> = {
   crit: 'critic',
 };
 
+export interface DroidspeakV2Renderable {
+  compact: string;
+  expanded: string;
+  kind: 'plan_status' | 'blocked' | 'unblocked' | 'handoff_ready' | 'verification_needed' | 'summary_emitted' | 'memory_pinned';
+}
+
 const capitalize = (value: string): string => (value ? `${value.charAt(0).toUpperCase()}${value.slice(1)}` : '');
 
 const translateSegment = (segment: string): { text: string; unknownTokens: string[] } => {
@@ -128,6 +134,12 @@ export interface DroidspeakTranslation {
   clauseCount: number;
   unknownTokens: string[];
 }
+
+export const translateDroidspeakV2 = (state: DroidspeakV2Renderable): DroidspeakTranslation => ({
+  translation: state.expanded,
+  clauseCount: 1,
+  unknownTokens: [],
+});
 
 export const translateDroidspeak = (input: string): DroidspeakTranslation => {
   const clauses = input.split(';').map((clause) => clause.trim()).filter(Boolean);

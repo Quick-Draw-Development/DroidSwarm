@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { COMPACT_VERB_DICTIONARY } from '@shared-types';
 
 import { AgentSupervisor, defaultRoleInstructions } from '../AgentSupervisor';
 import type { OrchestratorPersistenceService } from '../persistence/service';
@@ -367,7 +368,7 @@ export class TaskScheduler {
     const checkpointPayload = checkpoint ? this.parseCheckpointPayload(checkpoint) : undefined;
     const taskDigest = this.persistenceService.getLatestTaskStateDigest(task.taskId)
       ?? (task.parentTaskId ? this.persistenceService.getLatestTaskStateDigest(task.parentTaskId) : undefined);
-    const handoffPacket = this.persistenceService.listHandoffPackets(task.taskId)[0];
+    const handoffPacket = this.persistenceService.getLatestHandoffPacket(task.taskId, task.runId);
 
     const defaultAssignment = defaultRoleInstructions(record)[0];
     const role = typeof metadata.agent_role === 'string' ? metadata.agent_role : defaultAssignment.role;
@@ -388,6 +389,15 @@ export class TaskScheduler {
 
     const attemptId = randomUUID();
     const routingDecision = this.routingService.decide(task, role);
+    const routingTelemetry = {
+      modelTier: routingDecision.modelTier ?? 'local-cheap',
+      routeKind: routingDecision.routeKind ?? 'default-local',
+      queueDepth: routingDecision.queueDepth ?? 0,
+      fallbackCount: routingDecision.fallbackCount ?? 0,
+      localFirst: routingDecision.localFirst ?? true,
+      cloudEscalated: routingDecision.cloudEscalated ?? false,
+      escalationReason: routingDecision.escalationReason,
+    } as const;
     const model = routingDecision.model ?? this.selectModelForTask(task, role);
     const branch = this.resolveBranch(task, routingDecision.readOnly, record.branchName);
     const repoId = task.repoId ?? this.config.repoId;
@@ -436,6 +446,9 @@ export class TaskScheduler {
         taskDigest,
         handoffPacket,
         modelTier: routingDecision.modelTier,
+        routingTelemetry,
+        requiredReads: handoffPacket?.requiredReads ?? taskDigest?.artifactIndex.map((artifact) => artifact.artifactId) ?? [],
+        compactVerbDictionary: COMPACT_VERB_DICTIONARY,
       },
     );
     if (!spawned) {
@@ -558,6 +571,15 @@ export class TaskScheduler {
         taskId: childId,
         fromTaskId: task.taskId,
         digestId: digest.id,
+      }, {
+        taskId: childId,
+        normalizedVerb: 'handoff.ready',
+        transportBody: {
+          handoffId: handoff.id,
+          digestId: digest.id,
+          requiredReads: handoff.requiredReads,
+          toRole: request.role,
+        },
       });
       this.readyQueue.add(childId);
       childIds.push(childId);
@@ -1052,6 +1074,14 @@ export class TaskScheduler {
       taskId: task.taskId,
       digestId: digest.id,
       verificationState: digest.verificationState,
+    }, {
+      taskId: task.taskId,
+      normalizedVerb: 'memory.pinned',
+      transportBody: {
+        digestId: digest.id,
+        verificationState: digest.verificationState,
+        droidspeak: digest.droidspeak,
+      },
     });
     return digest;
   }

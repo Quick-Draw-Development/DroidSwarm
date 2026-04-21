@@ -10,7 +10,7 @@ import { SqlitePersistence } from './db/repositories';
 import { writeAuditEvent } from './logging/audit';
 import { createLogger } from './logging/Logger';
 import { buildAuthSuccessMessage, buildErrorMessage } from './protocol/messages';
-import { isOperatorOnlyMessage, parseAuthMessage, parseMessageEnvelope } from './protocol/validate';
+import { isOperatorOnlyMessage, parseAuthMessage, parseIncomingEnvelope } from './protocol/validate';
 import { RoomManager } from './rooms/RoomManager';
 import type { AuthResult, ConnectedClient, MessageEnvelope, PersistencePort, ServerConfig, WebSocketLike } from './types';
 
@@ -178,7 +178,7 @@ export class DroidSwarmSocketServer {
 
     let message: MessageEnvelope;
     try {
-      message = parseMessageEnvelope(rawMessage);
+      ({ message } = parseIncomingEnvelope(rawMessage));
     } catch (error) {
       this.sendRoomError(client, 'Invalid message envelope', 'invalid_message_envelope');
       return;

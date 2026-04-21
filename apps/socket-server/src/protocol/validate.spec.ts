@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { parseAuthMessage, parseMessageEnvelope } from './validate';
+import { parseAuthMessage, parseCanonicalEnvelope, parseIncomingEnvelope, parseMessageEnvelope } from './validate';
 
 test('parseAuthMessage accepts valid auth payloads', () => {
   const parsed = parseAuthMessage(JSON.stringify({
@@ -59,4 +59,52 @@ test('parseMessageEnvelope normalizes EnvelopeV2 compatibility fields', () => {
     plan_id: 'plan-1',
     summary: 'plan ready',
   });
+});
+
+test('parseCanonicalEnvelope preserves native EnvelopeV2 payloads', () => {
+  const parsed = parseCanonicalEnvelope(JSON.stringify({
+    id: 'env-1',
+    ts: '2026-03-12T12:00:00.000Z',
+    project_id: 'droidswarm',
+    room_id: 'task-1',
+    task_id: 'task-1',
+    agent_id: 'planner-1',
+    role: 'planner',
+    verb: 'plan.proposed',
+    body: {
+      task_id: 'task-1',
+      summary: 'native envelope',
+    },
+  }));
+
+  assert.equal(parsed.id, 'env-1');
+  assert.equal(parsed.verb, 'plan.proposed');
+  assert.deepEqual(parsed.body, {
+    task_id: 'task-1',
+    summary: 'native envelope',
+  });
+});
+
+test('parseIncomingEnvelope returns both canonical and legacy-compatible views', () => {
+  const parsed = parseIncomingEnvelope(JSON.stringify({
+    message_id: 'msg-3',
+    project_id: 'droidswarm',
+    room_id: 'task-1',
+    type: 'spawn_approved',
+    from: {
+      actor_type: 'orchestrator',
+      actor_id: 'orch-1',
+      actor_name: 'orchestrator',
+    },
+    timestamp: '2026-03-12T12:00:00.000Z',
+    payload: {
+      task_id: 'task-1',
+      approved_agents: [],
+      summary: 'spawn approved',
+    },
+  }));
+
+  assert.equal(parsed.canonical.verb, 'spawn.approved');
+  assert.equal(parsed.message.type, 'spawn_approved');
+  assert.equal(parsed.message.verb, 'spawn.approved');
 });

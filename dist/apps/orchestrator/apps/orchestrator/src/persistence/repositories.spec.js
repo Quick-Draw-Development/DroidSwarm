@@ -301,6 +301,7 @@ const nowIso = () => (/* @__PURE__ */ new Date()).toISOString();
     });
     const digest = service.getLatestTaskStateDigest(task.taskId);
     import_strict.default.equal(digest?.id, "digest-1");
+    import_strict.default.equal(service.listTaskStateDigests(task.taskId).length, 1);
     service.recordHandoffPacket({
       id: "handoff-1",
       taskId: task.taskId,
@@ -321,6 +322,7 @@ const nowIso = () => (/* @__PURE__ */ new Date()).toISOString();
     const handoffs = service.listHandoffPackets(task.taskId);
     import_strict.default.equal(handoffs.length, 1);
     import_strict.default.equal(handoffs[0].digestId, "digest-1");
+    import_strict.default.equal(service.getLatestHandoffPacket(task.taskId, run.runId)?.id, "handoff-1");
     db.close();
     (0, import_node_fs.rmSync)(tempDir, { recursive: true, force: true });
   });

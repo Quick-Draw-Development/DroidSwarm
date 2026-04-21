@@ -362,7 +362,7 @@ ensure_blink_runtime() {
 install_runtime_dependencies() {
   local runtime_dir="$1"
   local runtime_name="$2"
-  local better_sqlite_package version_line better_sqlite_version
+  local better_sqlite_package version_line better_sqlite_version rebuild_root rebuild_node_modules
 
   if [[ -z "${DROIDSWARM_INSTALL_NODE_BIN:-}" || ! -x "${DROIDSWARM_INSTALL_NODE_BIN:-}" ]]; then
     err "Installer is missing a valid Node.js runtime for $runtime_name dependencies."
@@ -395,13 +395,27 @@ install_runtime_dependencies() {
     better_sqlite_version="$(printf '%s' "$version_line" | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
     if [[ -n "$better_sqlite_version" && "$better_sqlite_version" != "$version_line" ]]; then
       printf 'Reinstalling better-sqlite3 for %s with Node-aligned runtime...\n' "$runtime_name"
+      rebuild_root="$(mktemp -d "${TMPDIR:-/tmp}/droidswarm-better-sqlite3.XXXXXX")"
+      rebuild_node_modules="$rebuild_root/node_modules"
       if ! (
-        cd "$runtime_dir"
+        cd "$rebuild_root"
+        printf '{\"name\":\"droidswarm-native-rebuild\",\"private\":true}\n' > package.json
         "$DROIDSWARM_INSTALL_NPM_BIN" install --no-save "better-sqlite3@$better_sqlite_version"
       ); then
+        rm -rf "$rebuild_root"
         err "Failed to reinstall better-sqlite3 for $runtime_name."
         exit 1
       fi
+
+      if [[ ! -d "$rebuild_node_modules/better-sqlite3" ]]; then
+        rm -rf "$rebuild_root"
+        err "Rebuilt better-sqlite3 package missing for $runtime_name."
+        exit 1
+      fi
+
+      rm -rf "$runtime_dir/node_modules/better-sqlite3"
+      cp -R "$rebuild_node_modules/better-sqlite3" "$runtime_dir/node_modules/better-sqlite3"
+      rm -rf "$rebuild_root"
     fi
   fi
 }
@@ -1070,6 +1084,7 @@ DIST_DIR="$DASHBOARD_DIST_SOURCE"
 DASHBOARD_RUNTIME_SOURCE="$DIST_DIR/standalone"
 DASHBOARD_STATIC_SOURCE="$DIST_DIR/static"
 DASHBOARD_PUBLIC_SOURCE="$WORKSPACE_SOURCE_ROOT/apps/dashboard/public"
+SHARED_RUNTIME_SOURCES=("$WORKSPACE_SOURCE_ROOT"/dist/packages/shared-*)
 
 for required_path in \
   "$SOCKET_RUNTIME_SOURCE/main.js" \
@@ -1080,6 +1095,12 @@ for required_path in \
     exit 1
   fi
 done
+
+if [[ ! -d "${SHARED_RUNTIME_SOURCES[0]}" ]]; then
+  err "Missing built shared runtime artifacts under dist/packages/shared-*"
+  err "Run: node scripts/build-shared-packages.js"
+  exit 1
+fi
 
 if [[ ! -d "$DASHBOARD_RUNTIME_SOURCE" ]]; then
   err "Missing dashboard standalone runtime: $DASHBOARD_RUNTIME_SOURCE"
@@ -1113,6 +1134,8 @@ mkdir -p "$INSTALL_ROOT/runtime/socket-server" "$INSTALL_ROOT/runtime/orchestrat
 cp -R "$SOCKET_RUNTIME_SOURCE/." "$INSTALL_ROOT/runtime/socket-server/"
 install_runtime_dependencies "$INSTALL_ROOT/runtime/socket-server" "socket-server"
 cp -R "$ORCHESTRATOR_RUNTIME_SOURCE/." "$INSTALL_ROOT/runtime/orchestrator/"
+mkdir -p "$INSTALL_ROOT/runtime/orchestrator/packages"
+cp -R "$WORKSPACE_SOURCE_ROOT"/dist/packages/shared-* "$INSTALL_ROOT/runtime/orchestrator/packages/"
 install_runtime_dependencies "$INSTALL_ROOT/runtime/orchestrator" "orchestrator"
 if [[ -d "$BLINK_BRIDGE_RUNTIME_SOURCE" ]]; then
   mkdir -p "$INSTALL_ROOT/runtime/blink-bridge"
@@ -1122,6 +1145,8 @@ fi
 if [[ -d "$WORKER_HOST_RUNTIME_SOURCE" ]]; then
   mkdir -p "$INSTALL_ROOT/runtime/worker-host"
   cp -R "$WORKER_HOST_RUNTIME_SOURCE/." "$INSTALL_ROOT/runtime/worker-host/"
+  mkdir -p "$INSTALL_ROOT/runtime/worker-host/packages"
+  cp -R "$WORKSPACE_SOURCE_ROOT"/dist/packages/shared-* "$INSTALL_ROOT/runtime/worker-host/packages/"
   install_runtime_dependencies "$INSTALL_ROOT/runtime/worker-host" "worker-host"
 fi
 cp -R "$DASHBOARD_RUNTIME_SOURCE/." "$INSTALL_ROOT/runtime/dashboard/"

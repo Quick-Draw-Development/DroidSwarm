@@ -165,7 +165,7 @@ class DroidSwarmSocketServer {
     }
     let message;
     try {
-      message = (0, import_validate.parseMessageEnvelope)(rawMessage);
+      ({ message } = (0, import_validate.parseIncomingEnvelope)(rawMessage));
     } catch (error) {
       this.sendRoomError(client, "Invalid message envelope", "invalid_message_envelope");
       return;

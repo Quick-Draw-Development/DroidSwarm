@@ -143,15 +143,18 @@ class ExecutionEventRepository {
   record(event) {
     this.database.prepare(`
         INSERT INTO execution_events (
-          event_id, run_id, event_type, detail, metadata_json, created_at
+          event_id, run_id, task_id, event_type, normalized_verb, detail, transport_body_json, metadata_json, created_at
         ) VALUES (
-          @eventId, @runId, @eventType, @detail, @metadataJson, @createdAt
+          @eventId, @runId, @taskId, @eventType, @normalizedVerb, @detail, @transportBodyJson, @metadataJson, @createdAt
         )
       `).run({
       eventId: event.eventId,
       runId: event.runId,
+      taskId: event.taskId ?? null,
       eventType: event.eventType,
+      normalizedVerb: event.normalizedVerb ?? null,
       detail: event.detail,
+      transportBodyJson: event.transportBody ? JSON.stringify(event.transportBody) : null,
       metadataJson: event.metadata ? JSON.stringify(event.metadata) : null,
       createdAt: event.createdAt
     });
@@ -990,6 +993,16 @@ class TaskStateDigestRepository {
     }
     return parseJson(row.payload_json) ?? null;
   }
+  listByTask(taskId) {
+    return this.database.prepare(`
+      SELECT * FROM task_state_digests
+      WHERE task_id = ?
+      ORDER BY created_at DESC
+    `).all(taskId).flatMap((row) => {
+      const parsed = parseJson(row.payload_json);
+      return parsed ? [parsed] : [];
+    });
+  }
 }
 class HandoffPacketRepository {
   constructor(database) {
@@ -1018,6 +1031,24 @@ class HandoffPacketRepository {
       const parsed = parseJson(row.payload_json);
       return parsed ? [parsed] : [];
     });
+  }
+  getLatest(taskId, runId) {
+    const row = runId ? this.database.prepare(`
+        SELECT * FROM handoff_packets
+        WHERE (task_id = ? OR from_task_id = ? OR to_task_id = ?)
+          AND run_id = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+      `).get(taskId, taskId, taskId, runId) : this.database.prepare(`
+        SELECT * FROM handoff_packets
+        WHERE task_id = ? OR from_task_id = ? OR to_task_id = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+      `).get(taskId, taskId, taskId);
+    if (!row) {
+      return null;
+    }
+    return parseJson(row.payload_json) ?? null;
   }
 }
 class PersistenceClient {
@@ -1086,12 +1117,15 @@ class PersistenceClient {
     this.runs.create(run);
     return run;
   }
-  recordExecutionEvent(runId, eventType, detail, metadata) {
+  recordExecutionEvent(runId, eventType, detail, metadata, options) {
     this.executionEvents.record({
       eventId: (0, import_node_crypto.randomUUID)(),
       runId,
+      taskId: options?.taskId,
       eventType,
       detail,
+      normalizedVerb: options?.normalizedVerb,
+      transportBody: options?.transportBody,
       metadata,
       createdAt: nowIso()
     });

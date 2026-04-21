@@ -76,3 +76,47 @@ var import_validate = require("./validate");
     summary: "plan ready"
   });
 });
+(0, import_node_test.default)("parseCanonicalEnvelope preserves native EnvelopeV2 payloads", () => {
+  const parsed = (0, import_validate.parseCanonicalEnvelope)(JSON.stringify({
+    id: "env-1",
+    ts: "2026-03-12T12:00:00.000Z",
+    project_id: "droidswarm",
+    room_id: "task-1",
+    task_id: "task-1",
+    agent_id: "planner-1",
+    role: "planner",
+    verb: "plan.proposed",
+    body: {
+      task_id: "task-1",
+      summary: "native envelope"
+    }
+  }));
+  import_strict.default.equal(parsed.id, "env-1");
+  import_strict.default.equal(parsed.verb, "plan.proposed");
+  import_strict.default.deepEqual(parsed.body, {
+    task_id: "task-1",
+    summary: "native envelope"
+  });
+});
+(0, import_node_test.default)("parseIncomingEnvelope returns both canonical and legacy-compatible views", () => {
+  const parsed = (0, import_validate.parseIncomingEnvelope)(JSON.stringify({
+    message_id: "msg-3",
+    project_id: "droidswarm",
+    room_id: "task-1",
+    type: "spawn_approved",
+    from: {
+      actor_type: "orchestrator",
+      actor_id: "orch-1",
+      actor_name: "orchestrator"
+    },
+    timestamp: "2026-03-12T12:00:00.000Z",
+    payload: {
+      task_id: "task-1",
+      approved_agents: [],
+      summary: "spawn approved"
+    }
+  }));
+  import_strict.default.equal(parsed.canonical.verb, "spawn.approved");
+  import_strict.default.equal(parsed.message.type, "spawn_approved");
+  import_strict.default.equal(parsed.message.verb, "spawn.approved");
+});

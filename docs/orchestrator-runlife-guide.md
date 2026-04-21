@@ -39,7 +39,18 @@ Every transition is persisted in both the `runs` table and the `execution_events
 ## Restart and recovery guarantees
 
 - On startup, `RunLifecycleService.recoverInterruptedRuns` scans for runs not in a terminal state. Running attempts are clobbered (they are marked `failed` with metadata explaining the interruption).
+- Boot is classified implicitly as `fresh` or `resumed` by durable state inspection before any new fanout is created. A run with non-terminal work is `resumed`.
+- For resumed work, the recovery path now reads the latest `TaskStateDigest` and `HandoffPacket` rows before requeueing the task. The recovered task metadata records which digest / handoff IDs were reused.
 - Tasks that were in resumable states (queued/planning/waiting) or running tasks that have a checkpoint are requeued (`status = queued`) with recovery metadata, and their IDs are fed back into the scheduler’s ready queue.
 - Tasks beyond recovery are marked `failed` (with `recovery_reason` metadata) and emit `run_recovered` events so dashboards and logs show why work was abandoned.
 - Runs are only kept in `running` status after recovery if actual resumable work exists; otherwise the run is failed with a clear reason. All terminal transitions emit events such as `run_completed`, `run_failed`, and `run_cancelled`.
 - Phase 10’s e2e test suite (`apps/orchestrator/src/phase10-e2e.spec.ts`) exercises intake → decomposition → restart/resume → verification/review → finalization and proves these guarantees against the persisted SQLite schema.
+
+## Digest and handoff lifecycle
+
+- plan creation / update refreshes the latest `TaskStateDigest`
+- checkpoint creation refreshes digest artifact and summary state
+- verification requests / outcomes refresh digest verification state
+- blocked / waiting states refresh digest risk and shorthand state
+- helper spawn approval writes a `HandoffPacket`
+- resumed tasks reuse persisted digest / handoff context before the scheduler creates new helper fanout

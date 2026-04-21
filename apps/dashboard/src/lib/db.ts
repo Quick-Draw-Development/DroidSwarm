@@ -490,6 +490,8 @@ export const listRoutingDecisionsForTask = (taskId: string): RoutingDecisionSumm
       modelTier: typeof record.modelTier === 'string' ? record.modelTier : typeof record.model_tier === 'string' ? record.model_tier : undefined,
       queueDepth: typeof record.queueDepth === 'number' ? record.queueDepth : typeof record.queue_depth === 'number' ? record.queue_depth : undefined,
       fallbackCount: typeof record.fallbackCount === 'number' ? record.fallbackCount : typeof record.fallback_count === 'number' ? record.fallback_count : undefined,
+      routeKind: typeof record.routeKind === 'string' ? record.routeKind : typeof record.route_kind === 'string' ? record.route_kind : undefined,
+      escalationReason: typeof record.escalationReason === 'string' ? record.escalationReason : typeof record.escalation_reason === 'string' ? record.escalation_reason : undefined,
       reason: typeof record.reason === 'string' ? record.reason : undefined,
       role: typeof record.role === 'string' ? record.role : undefined,
       readOnly: typeof record.readOnly === 'boolean' ? record.readOnly : undefined,
@@ -497,6 +499,62 @@ export const listRoutingDecisionsForTask = (taskId: string): RoutingDecisionSumm
       confidence: typeof record.confidence === 'number' ? record.confidence : undefined,
     }];
   });
+};
+
+const getLatestTaskDigest = (database: Database.Database, taskId: string): TaskDetails['latestDigest'] => {
+  const row = database.prepare(`
+    SELECT payload_json
+    FROM task_state_digests
+    WHERE task_id = ?
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).get(taskId) as { payload_json?: string | null } | undefined;
+  const payload = parsePayload(row?.payload_json);
+  if (!payload) {
+    return undefined;
+  }
+
+  return {
+    id: typeof payload.id === 'string' ? payload.id : taskId,
+    objective: typeof payload.objective === 'string' ? payload.objective : 'Unknown objective',
+    currentPlan: Array.isArray(payload.currentPlan) ? payload.currentPlan.filter((entry): entry is string => typeof entry === 'string') : [],
+    decisions: Array.isArray(payload.decisions) ? payload.decisions.filter((entry): entry is string => typeof entry === 'string') : [],
+    openQuestions: Array.isArray(payload.openQuestions) ? payload.openQuestions.filter((entry): entry is string => typeof entry === 'string') : [],
+    activeRisks: Array.isArray(payload.activeRisks) ? payload.activeRisks.filter((entry): entry is string => typeof entry === 'string') : [],
+    verificationState: typeof payload.verificationState === 'string' ? payload.verificationState : 'unknown',
+    lastUpdatedBy: typeof payload.lastUpdatedBy === 'string' ? payload.lastUpdatedBy : 'unknown',
+    updatedAt: typeof payload.ts === 'string' ? payload.ts : new Date(0).toISOString(),
+    droidspeak: typeof payload.droidspeak === 'object' && payload.droidspeak !== null
+      ? payload.droidspeak as { compact: string; expanded: string; kind: string }
+      : undefined,
+  };
+};
+
+const getLatestHandoffPacket = (database: Database.Database, taskId: string, runId: string): TaskDetails['latestHandoff'] => {
+  const row = database.prepare(`
+    SELECT payload_json
+    FROM handoff_packets
+    WHERE (task_id = ? OR from_task_id = ? OR to_task_id = ?)
+      AND run_id = ?
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).get(taskId, taskId, taskId, runId) as { payload_json?: string | null } | undefined;
+  const payload = parsePayload(row?.payload_json);
+  if (!payload) {
+    return undefined;
+  }
+
+  return {
+    id: typeof payload.id === 'string' ? payload.id : taskId,
+    summary: typeof payload.summary === 'string' ? payload.summary : 'No handoff summary recorded.',
+    toRole: typeof payload.toRole === 'string' ? payload.toRole : 'unknown',
+    requiredReads: Array.isArray(payload.requiredReads) ? payload.requiredReads.filter((entry): entry is string => typeof entry === 'string') : [],
+    digestId: typeof payload.digestId === 'string' ? payload.digestId : 'unknown',
+    createdAt: typeof payload.ts === 'string' ? payload.ts : new Date(0).toISOString(),
+    droidspeak: typeof payload.droidspeak === 'object' && payload.droidspeak !== null
+      ? payload.droidspeak as { compact: string; expanded: string; kind: string }
+      : undefined,
+  };
 };
 
 export const getProjectMemory = (projectId: string): ProjectMemorySummary => {
@@ -971,15 +1029,32 @@ export const getTaskDetails = (taskId: string): TaskDetails | null => {
         LIMIT 2
       `)
       .all(taskId) as Array<{ action_type: string; detail: string }>;
+    const latestDigest = getLatestTaskDigest(database, taskId);
+    const latestHandoff = getLatestHandoffPacket(database, taskId, rawRow.run_id);
+    const routingTelemetry = listRoutingDecisionsForTask(taskId)[0];
+    const inferredHandoffs = buildTaskHandoffs(
+      dependencyRows.map((row) => row.depends_on_task_id),
+      planEvents.map((row) => row.detail),
+    );
+    const canonicalHandoffs = latestHandoff
+      ? [
+        `Handoff to ${latestHandoff.toRole}: ${latestHandoff.summary}`,
+        ...(latestHandoff.requiredReads.map((read) => `Required read: ${read}`)),
+      ]
+      : [];
+    const handoffs = canonicalHandoffs.length > 0
+      ? canonicalHandoffs
+      : (inferredHandoffs.length > 0 ? inferredHandoffs : ['No handoffs recorded for this task yet.']);
 
     return {
       task,
       messages,
       activeAgents,
-      handoffs: buildTaskHandoffs(
-        dependencyRows.map((row) => row.depends_on_task_id),
-        planEvents.map((row) => row.detail),
-      ),
+      handoffs,
+      handoffSource: canonicalHandoffs.length > 0 ? 'canonical' : (inferredHandoffs.length > 0 ? 'inferred' : 'missing'),
+      latestDigest,
+      latestHandoff,
+      latestRoutingTelemetry: routingTelemetry,
       guardrails: buildTaskGuardrails(
         task.needsClarification,
         budgetEvents,
@@ -1003,9 +1078,6 @@ export const buildTaskHandoffs = (dependencies: string[], planDetails: string[])
     ...dependencies.map((id) => `Depends on ${id}`),
     ...planDetails,
   ];
-  if (handoffs.length === 0) {
-    handoffs.push('No handoffs recorded for this task yet.');
-  }
   return handoffs;
 };
 

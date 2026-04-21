@@ -324,6 +324,7 @@ describe('Orchestrator persistence repositories', () => {
 
     const digest = service.getLatestTaskStateDigest(task.taskId);
     assert.equal(digest?.id, 'digest-1');
+    assert.equal(service.listTaskStateDigests(task.taskId).length, 1);
 
     service.recordHandoffPacket({
       id: 'handoff-1',
@@ -346,6 +347,7 @@ describe('Orchestrator persistence repositories', () => {
     const handoffs = service.listHandoffPackets(task.taskId);
     assert.equal(handoffs.length, 1);
     assert.equal(handoffs[0].digestId, 'digest-1');
+    assert.equal(service.getLatestHandoffPacket(task.taskId, run.runId)?.id, 'handoff-1');
 
     db.close();
     rmSync(tempDir, { recursive: true, force: true });

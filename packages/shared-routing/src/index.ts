@@ -44,6 +44,7 @@ export class RoutingService {
         engine: 'apple-intelligence',
         model: 'apple-intelligence/local',
         modelTier: 'local-capable',
+        routeKind: 'apple-local',
         reason: 'First-class local Apple Intelligence rule matched Apple ecosystem task scope',
         role: context.role,
         readOnly,
@@ -62,6 +63,7 @@ export class RoutingService {
         engine: 'local-llama',
         model: 'llama.cpp/planner',
         modelTier: 'local-cheap',
+        routeKind: 'planner-local',
         reason: 'Local-first planning, review, and orchestration policy',
         role: context.role,
         readOnly,
@@ -81,6 +83,8 @@ export class RoutingService {
         engine: shouldEscalate ? 'codex-cloud' : 'codex-cli',
         model: shouldEscalate ? 'codex-cloud/coder' : 'codex-cli/coder',
         modelTier: shouldEscalate ? 'cloud' : 'local-capable',
+        routeKind: shouldEscalate ? 'cloud-escalated' : 'coder-local',
+        escalationReason: shouldEscalate ? 'explicit_cloud_policy_with_high_complexity' : undefined,
         reason: shouldEscalate
           ? 'Explicit cloud escalation approved after local-first complexity check'
           : 'Local-first coding helper selected by default',
@@ -100,6 +104,7 @@ export class RoutingService {
       engine: 'local-llama',
       model: 'llama.cpp/default',
       modelTier: 'local-cheap',
+      routeKind: 'default-local',
       reason: 'Default local-first execution policy',
       role: context.role,
       readOnly,

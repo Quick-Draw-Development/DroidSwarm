@@ -12,6 +12,8 @@ export type {
 } from '@protocol';
 export type {
   CheckpointDelta,
+  CompactVerb,
+  EnvelopeV2,
   HandoffPacket,
   GitPolicy,
   ModelTier,
@@ -19,6 +21,7 @@ export type {
   ProjectDecision,
   ProjectFact,
   RepoTarget,
+  RoutingTelemetry,
   RoutingDecision,
   TaskStateDigest,
   TaskChatMessage,
@@ -173,6 +176,7 @@ export interface RunRecord {
 export interface ExecutionEventRecord {
   eventId: string;
   runId: string;
+  taskId?: string;
   eventType:
     | 'run_started'
     | 'run_completed'
@@ -194,6 +198,8 @@ export interface ExecutionEventRecord {
     | 'handoff_ready'
     | 'memory_pinned';
   detail: string;
+  normalizedVerb?: import('@shared-types').CompactVerb;
+  transportBody?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
   createdAt: string;
 }

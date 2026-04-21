@@ -43,6 +43,43 @@ export interface TaskDetails {
     lastSeenAt: string;
   }>;
   handoffs: string[];
+  handoffSource: 'canonical' | 'inferred' | 'missing';
+  latestDigest?: {
+    id: string;
+    objective: string;
+    currentPlan: string[];
+    decisions: string[];
+    openQuestions: string[];
+    activeRisks: string[];
+    verificationState: string;
+    lastUpdatedBy: string;
+    updatedAt: string;
+    droidspeak?: {
+      compact: string;
+      expanded: string;
+      kind: string;
+    };
+  };
+  latestHandoff?: {
+    id: string;
+    summary: string;
+    toRole: string;
+    requiredReads: string[];
+    digestId: string;
+    createdAt: string;
+    droidspeak?: {
+      compact: string;
+      expanded: string;
+      kind: string;
+    };
+  };
+  latestRoutingTelemetry?: {
+    modelTier?: string;
+    queueDepth?: number;
+    fallbackCount?: number;
+    routeKind?: string;
+    escalationReason?: string;
+  };
   guardrails: string[];
   limits: string[];
 }
@@ -173,6 +210,8 @@ export interface RoutingDecisionSummary {
   modelTier?: string;
   queueDepth?: number;
   fallbackCount?: number;
+  routeKind?: string;
+  escalationReason?: string;
   reason?: string;
   role?: string;
   readOnly?: boolean;

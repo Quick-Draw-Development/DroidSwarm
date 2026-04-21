@@ -70,6 +70,15 @@ export default async function ChannelPage({
             </ul>
           </div>
           <div className="sidebar-card">
+            <p className="section-title">Continuity</p>
+            <ul>
+              <li>Handoff source: {details.handoffSource}</li>
+              <li>Model tier: {details.latestRoutingTelemetry?.modelTier ?? 'unassigned'}</li>
+              <li>Queue depth: {details.latestRoutingTelemetry?.queueDepth ?? 0}</li>
+              <li>Fallback count: {details.latestRoutingTelemetry?.fallbackCount ?? 0}</li>
+            </ul>
+          </div>
+          <div className="sidebar-card">
             <p className="section-title">Workflow</p>
             <ul>
               {details.guardrails.map((guardrail) => <li key={guardrail}>{guardrail}</li>)}

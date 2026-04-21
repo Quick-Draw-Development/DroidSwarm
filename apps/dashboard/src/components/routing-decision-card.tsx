@@ -8,7 +8,8 @@ export function RoutingDecisionCard({ decisions }: { decisions: RoutingDecisionS
         {decisions.map((decision) => (
           <li key={decision.attemptId}>
             {decision.role ?? 'worker'} → {decision.engine ?? 'unknown'} [{decision.modelTier ?? 'unassigned'}]
-            {' '}({decision.complexity ?? 'n/a'}, queue {decision.queueDepth ?? 0}, fallback {decision.fallbackCount ?? 0})
+            {' '}({decision.routeKind ?? decision.complexity ?? 'n/a'}, queue {decision.queueDepth ?? 0}, fallback {decision.fallbackCount ?? 0})
+            {decision.escalationReason ? ` · ${decision.escalationReason}` : ''}
           </li>
         ))}
       </ul>

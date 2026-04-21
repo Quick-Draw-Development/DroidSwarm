@@ -100,7 +100,13 @@ type SupervisorCallbacks = {
 };
 
 class StubSupervisor {
-  public readonly assigned: Array<{ agentName: string; taskId: string; role: string; attemptId: string }> = [];
+  public readonly assigned: Array<{
+    agentName: string;
+    taskId: string;
+    role: string;
+    attemptId: string;
+    options?: Record<string, unknown>;
+  }> = [];
   private readonly attemptMap = new Map<string, { agentName: string; taskId: string; role: string }>();
   private callbacks: SupervisorCallbacks = {};
 
@@ -115,9 +121,10 @@ class StubSupervisor {
     _parentSummary?: string,
     _parentDroidspeak?: string,
     model?: string,
+    options?: Record<string, unknown>,
   ): { agentName: string; taskId: string; role: string; attemptId: string } {
     const agentName = `${task.taskId}-${role}-${attemptId.slice(0, 6)}`;
-    const spawned = { agentName, taskId: task.taskId, role, attemptId };
+    const spawned = { agentName, taskId: task.taskId, role, attemptId, options };
     this.assigned.push(spawned);
     this.attemptMap.set(attemptId, spawned);
     this.callbacks.onAgentsAssigned?.(task.taskId, [spawned]);
@@ -472,6 +479,8 @@ describe('Phase 10 orchestrator flows', () => {
     const resumedSpawn = env2.supervisor.assigned[0];
     assert.ok(resumedSpawn);
     assert.equal(env2.service.getLatestTaskStateDigest(childSpawn.taskId)?.id, 'digest-before-restart');
+    assert.equal((resumedSpawn.options?.taskDigest as { id?: string } | undefined)?.id, 'digest-before-restart');
+    assert.equal(typeof (resumedSpawn.options?.handoffPacket as { id?: string } | undefined)?.id, 'string');
 
     env2.scheduler.handleAgentResult(
       resumedSpawn.taskId,

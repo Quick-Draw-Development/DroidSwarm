@@ -112,9 +112,9 @@ class StubSupervisor {
   setCallbacks(callbacks) {
     this.callbacks = { ...this.callbacks, ...callbacks };
   }
-  startAgentForTask(task, role, attemptId, _parentSummary, _parentDroidspeak, model) {
+  startAgentForTask(task, role, attemptId, _parentSummary, _parentDroidspeak, model, options) {
     const agentName = `${task.taskId}-${role}-${attemptId.slice(0, 6)}`;
-    const spawned = { agentName, taskId: task.taskId, role, attemptId };
+    const spawned = { agentName, taskId: task.taskId, role, attemptId, options };
     this.assigned.push(spawned);
     this.attemptMap.set(attemptId, spawned);
     this.callbacks.onAgentsAssigned?.(task.taskId, [spawned]);
@@ -417,6 +417,8 @@ const simpleResult = (status, summary) => ({
     const resumedSpawn = env2.supervisor.assigned[0];
     import_strict.default.ok(resumedSpawn);
     import_strict.default.equal(env2.service.getLatestTaskStateDigest(childSpawn.taskId)?.id, "digest-before-restart");
+    import_strict.default.equal(resumedSpawn.options?.taskDigest?.id, "digest-before-restart");
+    import_strict.default.equal(typeof resumedSpawn.options?.handoffPacket?.id, "string");
     env2.scheduler.handleAgentResult(
       resumedSpawn.taskId,
       resumedSpawn.attemptId,

@@ -22,6 +22,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 var import_node_crypto = require("node:crypto");
 var import_ws = __toESM(require("ws"));
+var import_shared_types = require("@shared-types");
 var import_config = require("./config");
 var import_agent_prompt = require("./agent-prompt");
 var import_messages = require("./messages");
@@ -209,15 +210,21 @@ const runWorker = async () => {
         parentCheckpoint: options.parentDroidspeak,
         resumePacket: options.skillTexts?.join("\n\n"),
         taskDigest: options.taskDigest,
-        handoffPacket: options.handoffPacket
+        handoffPacket: options.handoffPacket,
+        requiredReads: options.requiredReads ?? options.handoffPacket?.requiredReads,
+        modelTier: options.modelTier,
+        routingTelemetry: options.routingTelemetry,
+        compactVerbDictionary: options.compactVerbDictionary ?? import_shared_types.COMPACT_VERB_DICTIONARY
       }
     };
     result = await adapter.run(request);
     result.metadata = {
       ...result.metadata ?? {},
       modelTier: options.modelTier,
-      queueDepth: 0,
-      fallbackCount: 0
+      queueDepth: options.routingTelemetry?.queueDepth ?? 0,
+      fallbackCount: options.routingTelemetry?.fallbackCount ?? 0,
+      routeKind: options.routingTelemetry?.routeKind,
+      escalationReason: options.routingTelemetry?.escalationReason
     };
   } catch (error) {
     const latencyMs2 = Date.now() - llmStart;

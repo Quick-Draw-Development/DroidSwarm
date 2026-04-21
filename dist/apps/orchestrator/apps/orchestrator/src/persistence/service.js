@@ -261,8 +261,8 @@ class OrchestratorPersistenceService {
       createdAt: nowIso()
     });
   }
-  recordExecutionEvent(eventType, detail, metadata) {
-    this.persistence.recordExecutionEvent(this.run.runId, eventType, detail, metadata);
+  recordExecutionEvent(eventType, detail, metadata, options) {
+    this.persistence.recordExecutionEvent(this.run.runId, eventType, detail, metadata, options);
   }
   updateTaskMetadata(taskId, metadata) {
     const existing = this.persistence.tasks.get(taskId);
@@ -326,11 +326,17 @@ class OrchestratorPersistenceService {
   getLatestTaskStateDigest(taskId) {
     return this.persistence.digests.getLatestForTask(taskId) ?? void 0;
   }
+  listTaskStateDigests(taskId) {
+    return this.persistence.digests.listByTask(taskId);
+  }
   recordHandoffPacket(packet) {
     this.persistence.handoffs.record(packet);
   }
   listHandoffPackets(taskId) {
     return this.persistence.handoffs.listByTask(taskId);
+  }
+  getLatestHandoffPacket(taskId, runId) {
+    return this.persistence.handoffs.getLatest(taskId, runId) ?? void 0;
   }
   recordWorkerResult(taskId, attemptId, result) {
     const task = this.getTask(taskId);

@@ -91,10 +91,17 @@ describe('TaskScheduler', () => {
     const persistence = PersistenceClient.fromDatabase(database);
     const service = new OrchestratorPersistenceService(persistence, persistence.createRun('droidswarm'));
 
-    const spawnLog: Array<{ taskId: string; role: string; attemptId: string; agentName: string }> = [];
+    const spawnLog: Array<{
+      taskId: string;
+      role: string;
+      attemptId: string;
+      agentName: string;
+      model?: string;
+      options?: Record<string, unknown>;
+    }> = [];
     const supervisorStub = {
-      startAgentForTask(task, role, attemptId, _parentSummary?: string, _parentDroidspeak?: string, model?: string) {
-        spawnLog.push({ taskId: task.taskId, role, attemptId, agentName: `test-${attemptId}` });
+      startAgentForTask(task, role, attemptId, _parentSummary?: string, _parentDroidspeak?: string, model?: string, options?: Record<string, unknown>) {
+        spawnLog.push({ taskId: task.taskId, role, attemptId, agentName: `test-${attemptId}`, model, options });
         return {
           agentName: `test-${attemptId}`,
           taskId: task.taskId,
@@ -157,6 +164,14 @@ describe('TaskScheduler', () => {
     assert.equal(handoffs.length, 1);
     assert.equal(handoffs[0].toRole, 'coder');
     assert.equal(spawnLog.length, 2, 'child task should have been scheduled');
+    assert.equal((spawnLog[0].options?.modelTier as string | undefined), 'local-cheap');
+    assert.equal((spawnLog[0].options?.routingTelemetry as { routeKind?: string } | undefined)?.routeKind, 'planner-local');
+    assert.equal((spawnLog[1].options?.handoffPacket as { id?: string } | undefined)?.id, handoffs[0].id);
+    assert.equal((spawnLog[1].options?.requiredReads as string[] | undefined)?.[0], handoffs[0].requiredReads[0]);
+    assert.equal(
+      ((spawnLog[1].options?.compactVerbDictionary as Record<string, string> | undefined) ?? {})['handoff.ready'],
+      'A helper handoff is ready.',
+    );
 
     const childAttempt = spawnLog[1];
     const childResult: CodexAgentResult = {

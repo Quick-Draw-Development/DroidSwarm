@@ -108,8 +108,8 @@ const createTestConfig = (overrides = {}) => ({
     const service = new import_service.OrchestratorPersistenceService(persistence, persistence.createRun("droidswarm"));
     const spawnLog = [];
     const supervisorStub = {
-      startAgentForTask(task, role, attemptId, _parentSummary, _parentDroidspeak, model) {
-        spawnLog.push({ taskId: task.taskId, role, attemptId, agentName: `test-${attemptId}` });
+      startAgentForTask(task, role, attemptId, _parentSummary, _parentDroidspeak, model, options) {
+        spawnLog.push({ taskId: task.taskId, role, attemptId, agentName: `test-${attemptId}`, model, options });
         return {
           agentName: `test-${attemptId}`,
           taskId: task.taskId,
@@ -167,6 +167,14 @@ const createTestConfig = (overrides = {}) => ({
     import_strict.default.equal(handoffs.length, 1);
     import_strict.default.equal(handoffs[0].toRole, "coder");
     import_strict.default.equal(spawnLog.length, 2, "child task should have been scheduled");
+    import_strict.default.equal(spawnLog[0].options?.modelTier, "local-cheap");
+    import_strict.default.equal(spawnLog[0].options?.routingTelemetry?.routeKind, "planner-local");
+    import_strict.default.equal(spawnLog[1].options?.handoffPacket?.id, handoffs[0].id);
+    import_strict.default.equal(spawnLog[1].options?.requiredReads?.[0], handoffs[0].requiredReads[0]);
+    import_strict.default.equal(
+      (spawnLog[1].options?.compactVerbDictionary ?? {})["handoff.ready"],
+      "A helper handoff is ready."
+    );
     const childAttempt = spawnLog[1];
     const childResult = {
       status: "completed",

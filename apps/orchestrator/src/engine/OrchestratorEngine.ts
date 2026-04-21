@@ -48,6 +48,16 @@ export class OrchestratorEngine {
       taskId,
       planId,
       dependencies,
+    }, {
+      taskId,
+      normalizedVerb: 'plan.proposed',
+      transportBody: {
+        taskId,
+        planId,
+        summary,
+        plan,
+        dependencies,
+      },
     });
     this.deps.gateway.send(buildPlanProposedMessage(this.deps.config, taskId, planId, summary, plan, dependencies));
   };
@@ -62,6 +72,15 @@ export class OrchestratorEngine {
       taskId,
       checkpointId,
       metadata,
+    }, {
+      taskId,
+      normalizedVerb: 'checkpoint.created',
+      transportBody: {
+        checkpointId,
+        taskId,
+        summary,
+        metadata,
+      },
     });
     this.deps.gateway.send(buildCheckpointCreatedMessage(
       this.deps.config,
@@ -83,6 +102,15 @@ export class OrchestratorEngine {
       taskId,
       verificationType,
       requestedBy,
+    }, {
+      taskId,
+      normalizedVerb: 'verification.requested',
+      transportBody: {
+        taskId,
+        verificationType,
+        requestedBy,
+        detail,
+      },
     });
     this.deps.gateway.send(buildVerificationRequestedMessage(
       this.deps.config,
@@ -107,6 +135,17 @@ export class OrchestratorEngine {
       status,
       attemptId,
       reviewer,
+    }, {
+      taskId,
+      normalizedVerb: 'verification.completed',
+      transportBody: {
+        taskId,
+        stage,
+        status,
+        summary,
+        attemptId,
+        reviewer,
+      },
     });
     this.deps.gateway.send(buildVerificationCompletedMessage(
       this.deps.config,

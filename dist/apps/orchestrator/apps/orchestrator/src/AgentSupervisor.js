@@ -73,7 +73,10 @@ class AgentSupervisor {
       workspacePath: options?.workspacePath,
       taskDigest: options?.taskDigest,
       handoffPacket: options?.handoffPacket,
-      modelTier: options?.modelTier
+      modelTier: options?.modelTier,
+      routingTelemetry: options?.routingTelemetry,
+      requiredReads: options?.requiredReads,
+      compactVerbDictionary: options?.compactVerbDictionary
     })], {
       env: process.env,
       stdio: ["ignore", "pipe", "pipe", "ipc"]

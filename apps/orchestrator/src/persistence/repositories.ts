@@ -420,16 +420,19 @@ export class ExecutionEventRepository {
     this.database
       .prepare(`
         INSERT INTO execution_events (
-          event_id, run_id, event_type, detail, metadata_json, created_at
+          event_id, run_id, task_id, event_type, normalized_verb, detail, transport_body_json, metadata_json, created_at
         ) VALUES (
-          @eventId, @runId, @eventType, @detail, @metadataJson, @createdAt
+          @eventId, @runId, @taskId, @eventType, @normalizedVerb, @detail, @transportBodyJson, @metadataJson, @createdAt
         )
       `)
       .run({
         eventId: event.eventId,
         runId: event.runId,
+        taskId: event.taskId ?? null,
         eventType: event.eventType,
+        normalizedVerb: event.normalizedVerb ?? null,
         detail: event.detail,
+        transportBodyJson: event.transportBody ? JSON.stringify(event.transportBody) : null,
         metadataJson: event.metadata ? JSON.stringify(event.metadata) : null,
         createdAt: event.createdAt,
       });
@@ -1388,6 +1391,17 @@ export class TaskStateDigestRepository {
     }
     return parseJson<TaskStateDigest>(row.payload_json) ?? null;
   }
+
+  listByTask(taskId: string): TaskStateDigest[] {
+    return this.database.prepare(`
+      SELECT * FROM task_state_digests
+      WHERE task_id = ?
+      ORDER BY created_at DESC
+    `).all(taskId).flatMap((row: TaskStateDigestRow) => {
+      const parsed = parseJson<TaskStateDigest>(row.payload_json);
+      return parsed ? [parsed] : [];
+    });
+  }
 }
 
 export class HandoffPacketRepository {
@@ -1417,6 +1431,27 @@ export class HandoffPacketRepository {
       const parsed = parseJson<HandoffPacket>(row.payload_json);
       return parsed ? [parsed] : [];
     });
+  }
+
+  getLatest(taskId: string, runId?: string): HandoffPacket | null {
+    const row = runId
+      ? this.database.prepare(`
+        SELECT * FROM handoff_packets
+        WHERE (task_id = ? OR from_task_id = ? OR to_task_id = ?)
+          AND run_id = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+      `).get(taskId, taskId, taskId, runId) as HandoffPacketRow | undefined
+      : this.database.prepare(`
+        SELECT * FROM handoff_packets
+        WHERE task_id = ? OR from_task_id = ? OR to_task_id = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+      `).get(taskId, taskId, taskId) as HandoffPacketRow | undefined;
+    if (!row) {
+      return null;
+    }
+    return parseJson<HandoffPacket>(row.payload_json) ?? null;
   }
 }
 
@@ -1490,12 +1525,25 @@ export class PersistenceClient {
     return run;
   }
 
-  recordExecutionEvent(runId: string, eventType: ExecutionEventRecord['eventType'], detail: string, metadata?: Record<string, unknown>): void {
+  recordExecutionEvent(
+    runId: string,
+    eventType: ExecutionEventRecord['eventType'],
+    detail: string,
+    metadata?: Record<string, unknown>,
+    options?: {
+      taskId?: string;
+      normalizedVerb?: ExecutionEventRecord['normalizedVerb'];
+      transportBody?: Record<string, unknown>;
+    },
+  ): void {
     this.executionEvents.record({
       eventId: randomUUID(),
       runId,
+      taskId: options?.taskId,
       eventType,
       detail,
+      normalizedVerb: options?.normalizedVerb,
+      transportBody: options?.transportBody,
       metadata,
       createdAt: nowIso(),
     });

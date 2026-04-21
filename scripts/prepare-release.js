@@ -27,6 +27,11 @@ function writeVersion(version) {
 }
 
 function runBuilds() {
+  execFileSync('node', ['scripts/build-shared-packages.js'], {
+    cwd: repoRoot,
+    stdio: 'inherit',
+  });
+
   execFileSync(
     'npx',
     ['nx', 'run-many', '-t', 'build', '--projects', buildProjects.join(',')],

@@ -375,8 +375,17 @@ export class OrchestratorPersistenceService {
     });
   }
 
-  recordExecutionEvent(eventType: ExecutionEventRecord['eventType'], detail: string, metadata?: Record<string, unknown>): void {
-    this.persistence.recordExecutionEvent(this.run.runId, eventType, detail, metadata);
+  recordExecutionEvent(
+    eventType: ExecutionEventRecord['eventType'],
+    detail: string,
+    metadata?: Record<string, unknown>,
+    options?: {
+      taskId?: string;
+      normalizedVerb?: ExecutionEventRecord['normalizedVerb'];
+      transportBody?: Record<string, unknown>;
+    },
+  ): void {
+    this.persistence.recordExecutionEvent(this.run.runId, eventType, detail, metadata, options);
   }
 
   updateTaskMetadata(taskId: string, metadata: Record<string, unknown>): void {
@@ -466,12 +475,20 @@ export class OrchestratorPersistenceService {
     return this.persistence.digests.getLatestForTask(taskId) ?? undefined;
   }
 
+  listTaskStateDigests(taskId: string): TaskStateDigest[] {
+    return this.persistence.digests.listByTask(taskId);
+  }
+
   recordHandoffPacket(packet: HandoffPacket): void {
     this.persistence.handoffs.record(packet);
   }
 
   listHandoffPackets(taskId: string): HandoffPacket[] {
     return this.persistence.handoffs.listByTask(taskId);
+  }
+
+  getLatestHandoffPacket(taskId: string, runId?: string): HandoffPacket | undefined {
+    return this.persistence.handoffs.getLatest(taskId, runId) ?? undefined;
   }
 
   recordWorkerResult(taskId: string, attemptId: string, result: WorkerResult): void {

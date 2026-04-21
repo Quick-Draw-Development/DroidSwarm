@@ -1,10 +1,20 @@
-import { translateDroidspeak } from '../lib/droidspeak';
+import { translateDroidspeak, translateDroidspeakV2 } from '../lib/droidspeak';
 import type { MessageRecord } from '../lib/types';
 
 export function MessageBubble({ message, username }: { message: MessageRecord; username: string }) {
   const compression = message.payload.compression as { scheme?: string; compressed_content?: string } | undefined;
-  const translation =
-    (compression?.scheme === 'droidspeak-v1' || compression?.scheme === 'droidspeak-v2') && compression.compressed_content
+  const structuredState = (
+    message.payload.droidspeak
+    ?? (message.payload.payload as { droidspeak?: unknown } | undefined)?.droidspeak
+    ?? (message.payload.envelope_v2 as { body?: { droidspeak?: unknown } } | undefined)?.body?.droidspeak
+  ) as { compact?: string; expanded?: string; kind?: string } | undefined;
+  const translation = structuredState?.compact && structuredState?.expanded && typeof structuredState.kind === 'string'
+    ? translateDroidspeakV2({
+      compact: structuredState.compact,
+      expanded: structuredState.expanded,
+      kind: structuredState.kind as Parameters<typeof translateDroidspeakV2>[0]['kind'],
+    })
+    : (compression?.scheme === 'droidspeak-v1' || compression?.scheme === 'droidspeak-v2') && compression.compressed_content
       ? translateDroidspeak(compression.compressed_content)
       : null;
 
@@ -24,7 +34,7 @@ export function MessageBubble({ message, username }: { message: MessageRecord; u
               Untranslated: {translation.unknownTokens.join(', ')}
             </p>
           ) : null}
-          <pre>{compression?.compressed_content}</pre>
+          <pre>{structuredState?.compact ?? compression?.compressed_content}</pre>
         </div>
       ) : null}
     </article>

@@ -228,10 +228,10 @@ env DROIDSWARM_INSTALL_ROOT="$INSTALL_ROOT" \
     DROIDSWARM_LLAMA_MODELS_FILE="${DROIDSWARM_LLAMA_MODELS_FILE:-}" \
     DROIDSWARM_LLAMA_MODEL_URL="${DROIDSWARM_LLAMA_MODEL_URL:-}" \
     DROIDSWARM_LLAMA_MODEL_DOWNLOAD_CMD="${DROIDSWARM_LLAMA_MODEL_DOWNLOAD_CMD:-}" \
-    "$INSTALL_SCRIPT_PATH" "${INSTALL_ARGS[@]}"
+    "$INSTALL_SCRIPT_PATH" "${INSTALL_ARGS[@]-}"
 rm -f "$INSTALL_SCRIPT_PATH"
 
-for config in "${swarm_configs[@]}"; do
+for config in "${swarm_configs[@]-}"; do
   IFS='|' read -r swarm_id project_root dashboard_port ws_port agent_count main_branch production_branch repo_url project_mode <<<"$config"
   [[ -z "$swarm_id" || -z "$project_root" ]] && continue
   old_dir="$DROIDSWARM_HOME/swarms/$swarm_id"

@@ -21,6 +21,7 @@ __export(TaskScheduler_exports, {
 });
 module.exports = __toCommonJS(TaskScheduler_exports);
 var import_node_crypto = require("node:crypto");
+var import_shared_types = require("@shared-types");
 var import_AgentSupervisor = require("../AgentSupervisor");
 var import_routing = require("../services/routing.service");
 var import_worker_result = require("../services/worker-result.service");
@@ -273,7 +274,7 @@ class TaskScheduler {
     const checkpoint = this.persistenceService.getLatestCheckpoint(task.taskId);
     const checkpointPayload = checkpoint ? this.parseCheckpointPayload(checkpoint) : void 0;
     const taskDigest = this.persistenceService.getLatestTaskStateDigest(task.taskId) ?? (task.parentTaskId ? this.persistenceService.getLatestTaskStateDigest(task.parentTaskId) : void 0);
-    const handoffPacket = this.persistenceService.listHandoffPackets(task.taskId)[0];
+    const handoffPacket = this.persistenceService.getLatestHandoffPacket(task.taskId, task.runId);
     const defaultAssignment = (0, import_AgentSupervisor.defaultRoleInstructions)(record)[0];
     const role = typeof metadata.agent_role === "string" ? metadata.agent_role : defaultAssignment.role;
     const instructions = typeof metadata.agent_instructions === "string" ? metadata.agent_instructions : defaultAssignment.instructions;
@@ -287,6 +288,15 @@ class TaskScheduler {
     }
     const attemptId = (0, import_node_crypto.randomUUID)();
     const routingDecision = this.routingService.decide(task, role);
+    const routingTelemetry = {
+      modelTier: routingDecision.modelTier ?? "local-cheap",
+      routeKind: routingDecision.routeKind ?? "default-local",
+      queueDepth: routingDecision.queueDepth ?? 0,
+      fallbackCount: routingDecision.fallbackCount ?? 0,
+      localFirst: routingDecision.localFirst ?? true,
+      cloudEscalated: routingDecision.cloudEscalated ?? false,
+      escalationReason: routingDecision.escalationReason
+    };
     const model = routingDecision.model ?? this.selectModelForTask(task, role);
     const branch = this.resolveBranch(task, routingDecision.readOnly, record.branchName);
     const repoId = task.repoId ?? this.config.repoId;
@@ -334,7 +344,10 @@ class TaskScheduler {
         workspacePath: workspace.path,
         taskDigest,
         handoffPacket,
-        modelTier: routingDecision.modelTier
+        modelTier: routingDecision.modelTier,
+        routingTelemetry,
+        requiredReads: handoffPacket?.requiredReads ?? taskDigest?.artifactIndex.map((artifact) => artifact.artifactId) ?? [],
+        compactVerbDictionary: import_shared_types.COMPACT_VERB_DICTIONARY
       }
     );
     if (!spawned) {
@@ -447,6 +460,15 @@ class TaskScheduler {
         taskId: childId,
         fromTaskId: task.taskId,
         digestId: digest.id
+      }, {
+        taskId: childId,
+        normalizedVerb: "handoff.ready",
+        transportBody: {
+          handoffId: handoff.id,
+          digestId: digest.id,
+          requiredReads: handoff.requiredReads,
+          toRole: request.role
+        }
       });
       this.readyQueue.add(childId);
       childIds.push(childId);
@@ -845,6 +867,14 @@ class TaskScheduler {
       taskId: task.taskId,
       digestId: digest.id,
       verificationState: digest.verificationState
+    }, {
+      taskId: task.taskId,
+      normalizedVerb: "memory.pinned",
+      transportBody: {
+        digestId: digest.id,
+        verificationState: digest.verificationState,
+        droidspeak: digest.droidspeak
+      }
     });
     return digest;
   }

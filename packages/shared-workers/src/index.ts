@@ -1,5 +1,7 @@
 import type {
+  CompactVerb,
   HandoffPacket,
+  RoutingTelemetry,
   SpawnRequest,
   TaskScope,
   TaskStateDigest,
@@ -25,6 +27,10 @@ export interface WorkerRequest {
     resumePacket?: string;
     taskDigest?: TaskStateDigest;
     handoffPacket?: HandoffPacket;
+    requiredReads?: string[];
+    modelTier?: import('@shared-types').ModelTier;
+    routingTelemetry?: RoutingTelemetry;
+    compactVerbDictionary?: Record<CompactVerb, string>;
   };
 }
 

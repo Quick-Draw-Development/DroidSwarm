@@ -22,13 +22,69 @@ __export(protocol_exports, {
   buildRoomAuthMessage: () => buildRoomAuthMessage,
   buildRoomHeartbeatMessage: () => buildRoomHeartbeatMessage,
   buildTaskIntakeAccepted: () => buildTaskIntakeAccepted,
+  parseCanonicalEnvelope: () => parseCanonicalEnvelope,
   parseEnvelope: () => parseEnvelope
 });
 module.exports = __toCommonJS(protocol_exports);
 var import_src = require("../../../packages/protocol-alias/src/index");
 var import_node_crypto = require("node:crypto");
 var import_protocol = require("@protocol");
-const parseEnvelope = (raw) => (0, import_protocol.normalizeEnvelopeV2)(JSON.parse(raw));
+var import_shared_types = require("@shared-types");
+const parseCanonicalEnvelope = (raw) => (0, import_shared_types.normalizeToEnvelopeV2)(JSON.parse(raw));
+const parseEnvelope = (raw) => {
+  const parsed = JSON.parse(raw);
+  const canonical = (0, import_shared_types.normalizeToEnvelopeV2)(parsed);
+  return (0, import_shared_types.isEnvelopeV2)(parsed) ? canonicalEnvelopeToMessage(canonical) : (0, import_protocol.normalizeEnvelopeV2)(parsed);
+};
+const typeByVerb = {
+  "task.create": "task_created",
+  "task.accept": "task_intake_accepted",
+  "task.ready": "task_assigned",
+  "task.blocked": "clarification_request",
+  "plan.proposed": "plan_proposed",
+  "spawn.requested": "spawn_requested",
+  "spawn.approved": "spawn_approved",
+  "spawn.denied": "spawn_denied",
+  "artifact.created": "artifact_created",
+  "checkpoint.created": "checkpoint_created",
+  "verification.requested": "verification_requested",
+  "verification.completed": "verification_completed",
+  "run.completed": "run_completed",
+  "handoff.ready": "handoff_event",
+  "summary.emitted": "guardrail_event",
+  "memory.pinned": "checkpoint_event",
+  "status.updated": "status_update",
+  "tool.request": "tool_request",
+  "tool.response": "tool_response",
+  "chat.message": "chat",
+  heartbeat: "heartbeat"
+};
+const canonicalEnvelopeToMessage = (canonical) => ({
+  id: canonical.id,
+  message_id: canonical.id,
+  ts: canonical.ts,
+  project_id: canonical.project_id,
+  swarm_id: canonical.swarm_id,
+  run_id: canonical.run_id,
+  room_id: canonical.room_id,
+  task_id: canonical.task_id,
+  agent_id: canonical.agent_id,
+  role: canonical.role,
+  verb: canonical.verb,
+  depends_on: canonical.depends_on,
+  artifact_refs: canonical.artifact_refs,
+  memory_refs: canonical.memory_refs,
+  risk: canonical.risk,
+  body: canonical.body,
+  type: typeByVerb[canonical.verb],
+  from: {
+    actor_type: "agent",
+    actor_id: canonical.agent_id ?? canonical.role ?? "unknown-agent",
+    actor_name: canonical.role ?? canonical.agent_id ?? "unknown-agent"
+  },
+  timestamp: canonical.ts,
+  payload: canonical.body
+});
 const nowIso = () => (/* @__PURE__ */ new Date()).toISOString();
 const buildAuthMessage = (config) => buildRoomAuthMessage(config, "operator", config.agentName, "orchestrator", config.agentRole);
 const buildRoomAuthMessage = (config, roomId, agentName, clientType, agentRole = config.agentRole) => ({
@@ -108,5 +164,6 @@ const buildTaskIntakeAccepted = (config, taskId) => {
   buildRoomAuthMessage,
   buildRoomHeartbeatMessage,
   buildTaskIntakeAccepted,
+  parseCanonicalEnvelope,
   parseEnvelope
 });

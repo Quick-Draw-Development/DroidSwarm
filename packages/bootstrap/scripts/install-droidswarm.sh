@@ -1192,6 +1192,8 @@ fi
 rm -rf "$INSTALL_ROOT/runtime/socket-server" "$INSTALL_ROOT/runtime/orchestrator" "$INSTALL_ROOT/runtime/dashboard" "$INSTALL_ROOT/runtime/blink-bridge" "$INSTALL_ROOT/runtime/worker-host"
 mkdir -p "$INSTALL_ROOT/runtime/socket-server" "$INSTALL_ROOT/runtime/orchestrator" "$INSTALL_ROOT/runtime/dashboard/.next"
 cp -R "$SOCKET_RUNTIME_SOURCE/." "$INSTALL_ROOT/runtime/socket-server/"
+mkdir -p "$INSTALL_ROOT/runtime/socket-server/packages"
+cp -R "$WORKSPACE_SOURCE_ROOT"/dist/packages/shared-* "$INSTALL_ROOT/runtime/socket-server/packages/"
 install_runtime_dependencies "$INSTALL_ROOT/runtime/socket-server" "socket-server"
 cp -R "$ORCHESTRATOR_RUNTIME_SOURCE/." "$INSTALL_ROOT/runtime/orchestrator/"
 mkdir -p "$INSTALL_ROOT/runtime/orchestrator/packages"

@@ -269,14 +269,14 @@ rm -f "$DROIDSWARM_HOME/services.env"
 rm -rf "$DROIDSWARM_HOME/run" "$DROIDSWARM_HOME/logs" "$DROIDSWARM_HOME/swarms"
 mkdir -p "$DROIDSWARM_HOME/run" "$DROIDSWARM_HOME/logs" "$DROIDSWARM_HOME/swarms"
 
-INSTALL_ARGS=()
-[[ -n "$REPO_URL" ]] && INSTALL_ARGS+=(--repo-url "$REPO_URL")
-[[ -n "$REF" ]] && INSTALL_ARGS+=(--ref "$REF")
+INSTALL_CMD=("$INSTALL_SCRIPT_PATH")
+[[ -n "$REPO_URL" ]] && INSTALL_CMD+=(--repo-url "$REPO_URL")
+[[ -n "$REF" ]] && INSTALL_CMD+=(--ref "$REF")
 
 env DROIDSWARM_INSTALL_ROOT="$INSTALL_ROOT" \
     DROIDSWARM_BIN_DIR="$BIN_DIR" \
     DROIDSWARM_DEFAULT_REPO_URL="${REPO_URL:-${DROIDSWARM_DEFAULT_REPO_URL:-https://github.com/Quick-Draw-Development/DroidSwarm}}" \
-    "$INSTALL_SCRIPT_PATH" "${INSTALL_ARGS[@]}"
+    "${INSTALL_CMD[@]}"
 
 if [[ "$RESTART_SWARMS" == "1" ]]; then
   restart_captured_swarms "$SNAPSHOT_DIR"

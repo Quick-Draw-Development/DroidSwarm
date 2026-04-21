@@ -527,6 +527,67 @@ repair_dashboard_dist_source() {
   validate_dashboard_dist_assets "$dashboard_dist_root"
 }
 
+ensure_workspace_dependencies() {
+  local workspace_root="$1"
+
+  if [[ ! -f "$workspace_root/package.json" || ! -f "$workspace_root/package-lock.json" ]]; then
+    err "Installer cannot build runtime artifacts without package manifests."
+    err "Expected to find package.json and package-lock.json under: $workspace_root"
+    exit 1
+  fi
+
+  if [[ ! -d "$workspace_root/node_modules" ]]; then
+    info "Installing workspace dependencies for runtime artifact build..."
+    (
+      cd "$workspace_root"
+      "$DROIDSWARM_INSTALL_NPM_BIN" ci
+    ) || {
+      err "Failed to install workspace dependencies needed to build runtime artifacts."
+      exit 1
+    }
+  fi
+}
+
+workspace_runtime_artifacts_ready() {
+  local workspace_root="$1"
+
+  [[ -f "$workspace_root/dist/apps/socket-server/main.js" ]] \
+    && [[ -f "$workspace_root/dist/apps/orchestrator/main.js" ]] \
+    && compgen -G "$workspace_root/dist/packages/shared-*" >/dev/null \
+    && [[ -d "$workspace_root/dist/apps/dashboard/.next/standalone" ]]
+}
+
+build_workspace_runtime_artifacts() {
+  local workspace_root="$1"
+
+  ensure_workspace_dependencies "$workspace_root"
+  info "Building DroidSwarm runtime artifacts from downloaded source..."
+  (
+    cd "$workspace_root"
+    node scripts/build-shared-packages.js
+    npx nx run-many -t build --projects orchestrator,socket-server,dashboard,blink-bridge,worker-host
+  ) || {
+    err "Failed to build required runtime artifacts from downloaded source."
+    exit 1
+  }
+}
+
+ensure_workspace_runtime_artifacts() {
+  local workspace_root="$1"
+
+  if workspace_runtime_artifacts_ready "$workspace_root"; then
+    return 0
+  fi
+
+  build_workspace_runtime_artifacts "$workspace_root"
+
+  if ! workspace_runtime_artifacts_ready "$workspace_root"; then
+    err "Runtime artifacts are still incomplete after build."
+    err "Expected built apps under dist/apps and shared packages under dist/packages/shared-*"
+    exit 1
+  fi
+}
+
 write_assignment() {
   local file="$1"
   local key="$2"
@@ -1075,6 +1136,8 @@ download_file "$ARCHIVE_URL" "$TMP_ARCHIVE"
 tar -xzf "$TMP_ARCHIVE" -C "$INSTALL_ROOT/source" --strip-components=1
 rm -f "$TMP_ARCHIVE"
 
+ensure_workspace_runtime_artifacts "$WORKSPACE_SOURCE_ROOT"
+
 SOCKET_RUNTIME_SOURCE="$WORKSPACE_SOURCE_ROOT/dist/apps/socket-server"
 ORCHESTRATOR_RUNTIME_SOURCE="$WORKSPACE_SOURCE_ROOT/dist/apps/orchestrator"
 BLINK_BRIDGE_RUNTIME_SOURCE="$WORKSPACE_SOURCE_ROOT/dist/apps/blink-bridge"
@@ -1084,8 +1147,6 @@ DIST_DIR="$DASHBOARD_DIST_SOURCE"
 DASHBOARD_RUNTIME_SOURCE="$DIST_DIR/standalone"
 DASHBOARD_STATIC_SOURCE="$DIST_DIR/static"
 DASHBOARD_PUBLIC_SOURCE="$WORKSPACE_SOURCE_ROOT/apps/dashboard/public"
-SHARED_RUNTIME_SOURCES=("$WORKSPACE_SOURCE_ROOT"/dist/packages/shared-*)
-
 for required_path in \
   "$SOCKET_RUNTIME_SOURCE/main.js" \
   "$ORCHESTRATOR_RUNTIME_SOURCE/main.js"; do
@@ -1096,9 +1157,8 @@ for required_path in \
   fi
 done
 
-if [[ ! -d "${SHARED_RUNTIME_SOURCES[0]}" ]]; then
+if ! compgen -G "$WORKSPACE_SOURCE_ROOT/dist/packages/shared-*" >/dev/null; then
   err "Missing built shared runtime artifacts under dist/packages/shared-*"
-  err "Run: node scripts/build-shared-packages.js"
   exit 1
 fi
 

@@ -58,13 +58,38 @@ EOF
       projectId: "proj-1",
       projectName: "Project 1",
       projectRoot: process.cwd(),
+      repoId: "proj-1-repo",
+      defaultBranch: "main",
+      developBranch: "develop",
+      allowedRepoRoots: [process.cwd()],
+      workspaceRoot: import_node_path.default.join(process.cwd(), ".droidswarm", "workspaces"),
       agentName: "Orchestrator",
       agentRole: "control-plane",
       socketUrl: "ws://localhost:8765",
       heartbeatMs: 1e4,
       reconnectMs: 1e3,
       codexBin: fakeCodexPath,
+      codexCloudModel: "gpt-5-codex",
+      codexApiBaseUrl: "https://api.openai.com/v1",
+      codexApiKey: "test-key",
       codexSandboxMode: "workspace-write",
+      llamaBaseUrl: "http://127.0.0.1:11434",
+      llamaModel: "llama",
+      llamaTimeoutMs: 1e3,
+      muxBaseUrl: "http://127.0.0.1:8960",
+      muxToken: "mux-token",
+      prAutomationEnabled: false,
+      prRemoteName: "origin",
+      gitPolicy: {
+        mainBranch: "main",
+        developBranch: "develop",
+        prefixes: {
+          feature: "feature/",
+          hotfix: "hotfix/",
+          release: "release/",
+          support: "support/"
+        }
+      },
       maxAgentsPerTask: 4,
       maxConcurrentAgents: 8,
       specDir: process.cwd(),
@@ -84,7 +109,15 @@ EOF
         planning: "o1-preview",
         verification: "gpt-4o-mini",
         code: "claude-3.5-sonnet",
+        apple: "apple-intelligence/local",
         default: "o1-preview"
+      },
+      routingPolicy: {
+        plannerRoles: ["plan", "planner", "research", "review", "orchestrator", "checkpoint", "compress"],
+        appleRoles: ["apple", "ios", "macos", "swift", "swiftui", "xcode", "visionos"],
+        appleTaskHints: ["apple", "ios", "ipad", "iphone", "macos", "osx", "swift", "swiftui", "objective-c", "uikit", "appkit", "xcode", "testflight", "visionos", "watchos", "tvos"],
+        codeHints: ["code", "coder", "dev", "implementation", "debug", "refactor"],
+        cloudEscalationHints: ["refactor", "debug", "multi-file", "migration", "large-scale"]
       },
       budgetMaxConsumed: void 0
     };

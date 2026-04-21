@@ -9,5 +9,9 @@
   "/api/tasks/route": "app/api/tasks/route.js",
   "/board/page": "app/board/page.js",
   "/channels/[taskId]/page": "app/channels/[taskId]/page.js",
-  "/page": "app/page.js"
+  "/page": "app/page.js",
+  "/projects/[projectId]/page": "app/projects/[projectId]/page.js",
+  "/projects/[projectId]/runs/[runId]/page": "app/projects/[projectId]/runs/[runId]/page.js",
+  "/projects/[projectId]/tasks/[taskId]/page": "app/projects/[projectId]/tasks/[taskId]/page.js",
+  "/projects/page": "app/projects/page.js"
 }

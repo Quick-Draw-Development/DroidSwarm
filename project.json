@@ -1,0 +1,16 @@
+{
+  "name": "droidswarm",
+  "$schema": "./node_modules/nx/schemas/project-schema.json",
+  "root": ".",
+  "sourceRoot": ".",
+  "projectType": "application",
+  "targets": {
+    "release-prep": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node scripts/prepare-release.js"
+      }
+    }
+  },
+  "tags": []
+}

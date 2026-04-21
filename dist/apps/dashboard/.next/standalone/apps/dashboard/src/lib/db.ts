@@ -1,9 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
 
-import Database from 'better-sqlite3';
 import WebSocket from 'ws';
+import type Database from 'better-sqlite3';
 
 import type {
   ArtifactSummary,
@@ -14,12 +15,18 @@ import type {
   DependencySummary,
   MessageRecord,
   ProjectIdentity,
+  ProjectMemorySummary,
+  ProjectSummary,
+  RepoSummary,
+  RoutingDecisionSummary,
   RunSummary,
+  TaskChatSummary,
   RunTimelineEntry,
   TaskDetails,
   TaskNode,
   TaskRecord,
   VerificationTaskSummary,
+  WorkerHeartbeatSummary,
 } from './types';
 
 const getProjectId = (): string => process.env.DROIDSWARM_PROJECT_ID ?? 'droidswarm';
@@ -27,6 +34,7 @@ const getProjectName = (): string => process.env.DROIDSWARM_PROJECT_NAME ?? 'Dro
 const DEFAULT_DB_PATH = process.env.DROIDSWARM_DB_PATH ?? path.resolve(process.cwd(), 'data', 'droidswarm.db');
 const DEFAULT_SOCKET_URL = process.env.DROIDSWARM_SOCKET_URL ?? 'ws://127.0.0.1:8765';
 const DEFAULT_ORCHESTRATOR_NAME = process.env.DROIDSWARM_ORCHESTRATOR_NAME ?? 'Orchestrator';
+const require = createRequire(import.meta.url);
 
 type RawTaskRow = {
   task_id: string;
@@ -84,6 +92,15 @@ const countAgentsForTask = (database: Database.Database, taskId: string): number
 };
 
 let databaseInstance: Database.Database | null = null;
+let databaseConstructor: (typeof import('better-sqlite3')) | null = null;
+
+const getDatabaseConstructor = (): typeof import('better-sqlite3') => {
+  if (!databaseConstructor) {
+    databaseConstructor = require('better-sqlite3') as typeof import('better-sqlite3');
+  }
+
+  return databaseConstructor;
+};
 
 export const resetDatabaseInstance = (): void => {
   if (databaseInstance) {
@@ -98,7 +115,8 @@ const getDatabase = (): Database.Database => {
   }
 
   fs.mkdirSync(path.dirname(DEFAULT_DB_PATH), { recursive: true });
-  databaseInstance = new Database(DEFAULT_DB_PATH);
+  const DatabaseImpl = getDatabaseConstructor();
+  databaseInstance = new DatabaseImpl(DEFAULT_DB_PATH);
   ensureDashboardSchema(databaseInstance);
   return databaseInstance;
 };
@@ -126,6 +144,21 @@ const ensureDashboardSchema = (database: Database.Database): void => {
       actor_type TEXT NOT NULL,
       actor_id TEXT NOT NULL,
       payload_json TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS task_chat_messages (
+      message_id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      run_id TEXT,
+      project_id TEXT NOT NULL,
+      source TEXT NOT NULL,
+      external_thread_id TEXT,
+      external_message_id TEXT,
+      author_type TEXT NOT NULL,
+      author_id TEXT NOT NULL,
+      body TEXT NOT NULL,
+      metadata_json TEXT,
       created_at TEXT NOT NULL
     );
   `);
@@ -186,6 +219,53 @@ const parsePayload = (value?: string | null): Record<string, unknown> | undefine
   } catch {
     return undefined;
   }
+};
+
+const recordCanonicalTaskChat = (input: {
+  taskId: string;
+  runId?: string;
+  source: 'dashboard' | 'agent' | 'system' | 'slack' | 'blink';
+  authorType: 'user' | 'agent' | 'system';
+  authorId: string;
+  body: string;
+  externalThreadId?: string;
+  externalMessageId?: string;
+  metadata?: Record<string, unknown>;
+}): void => {
+  const database = getDatabase();
+  const existing = database.prepare(`
+    SELECT message_id
+    FROM task_chat_messages
+    WHERE task_id = ?
+      AND source = ?
+      AND author_id = ?
+      AND body = ?
+      AND created_at >= datetime('now', '-5 seconds')
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).get(input.taskId, input.source, input.authorId, input.body) as { message_id?: string } | undefined;
+  if (existing?.message_id) {
+    return;
+  }
+  database.prepare(`
+    INSERT INTO task_chat_messages (
+      message_id, task_id, run_id, project_id, source, external_thread_id, external_message_id,
+      author_type, author_id, body, metadata_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    randomUUID(),
+    input.taskId,
+    input.runId ?? null,
+    getProjectId(),
+    input.source,
+    input.externalThreadId ?? null,
+    input.externalMessageId ?? null,
+    input.authorType,
+    input.authorId,
+    input.body,
+    JSON.stringify(input.metadata ?? {}),
+    new Date().toISOString(),
+  );
 };
 
 const normalizePriority = (value: unknown): TaskRecord['priority'] => {
@@ -320,6 +400,143 @@ export const getProjectIdentity = (): ProjectIdentity => ({
   projectId: getProjectId(),
   projectName: getProjectName(),
 });
+
+export const listProjects = (): ProjectSummary[] => {
+  const database = getDatabase();
+  return database.prepare(`
+    SELECT project_id, name, description, updated_at
+    FROM projects
+    ORDER BY updated_at DESC
+  `).all().map((row) => ({
+    projectId: String((row as Record<string, unknown>).project_id),
+    name: String((row as Record<string, unknown>).name),
+    description: typeof (row as Record<string, unknown>).description === 'string' ? String((row as Record<string, unknown>).description) : undefined,
+    updatedAt: String((row as Record<string, unknown>).updated_at),
+  }));
+};
+
+export const listReposForProject = (projectId: string): RepoSummary[] => {
+  const database = getDatabase();
+  return database.prepare(`
+    SELECT repo_id, project_id, name, root_path, default_branch
+    FROM project_repos
+    WHERE project_id = ?
+    ORDER BY updated_at DESC
+  `).all(projectId).map((row) => ({
+    repoId: String((row as Record<string, unknown>).repo_id),
+    projectId: String((row as Record<string, unknown>).project_id),
+    name: String((row as Record<string, unknown>).name),
+    rootPath: String((row as Record<string, unknown>).root_path),
+    defaultBranch: String((row as Record<string, unknown>).default_branch),
+  }));
+};
+
+export const listTaskChatMessages = (taskId: string): TaskChatSummary[] => {
+  const database = getDatabase();
+  return database.prepare(`
+    SELECT message_id, task_id, source, author_type, author_id, body, created_at
+    FROM task_chat_messages
+    WHERE task_id = ?
+    ORDER BY created_at ASC
+  `).all(taskId).map((row) => ({
+    id: String((row as Record<string, unknown>).message_id),
+    taskId: String((row as Record<string, unknown>).task_id),
+    source: String((row as Record<string, unknown>).source),
+    authorType: String((row as Record<string, unknown>).author_type),
+    authorId: String((row as Record<string, unknown>).author_id),
+    body: String((row as Record<string, unknown>).body),
+    createdAt: String((row as Record<string, unknown>).created_at),
+  }));
+};
+
+export const listWorkerHeartbeatsForTask = (taskId: string): WorkerHeartbeatSummary[] => {
+  const database = getDatabase();
+  return database.prepare(`
+    SELECT attempt_id, engine, model_tier, queue_depth, fallback_count, heartbeat_status, elapsed_ms, last_activity, created_at
+    FROM worker_heartbeats
+    WHERE task_id = ?
+    ORDER BY created_at DESC
+  `).all(taskId).map((row) => ({
+    attemptId: String((row as Record<string, unknown>).attempt_id),
+    engine: String((row as Record<string, unknown>).engine),
+    modelTier: typeof (row as Record<string, unknown>).model_tier === 'string' ? String((row as Record<string, unknown>).model_tier) : undefined,
+    queueDepth: typeof (row as Record<string, unknown>).queue_depth === 'number' ? Number((row as Record<string, unknown>).queue_depth) : undefined,
+    fallbackCount: typeof (row as Record<string, unknown>).fallback_count === 'number' ? Number((row as Record<string, unknown>).fallback_count) : undefined,
+    status: String((row as Record<string, unknown>).heartbeat_status),
+    elapsedMs: Number((row as Record<string, unknown>).elapsed_ms),
+    lastActivity: typeof (row as Record<string, unknown>).last_activity === 'string' ? String((row as Record<string, unknown>).last_activity) : undefined,
+    createdAt: String((row as Record<string, unknown>).created_at),
+  }));
+};
+
+export const listRoutingDecisionsForTask = (taskId: string): RoutingDecisionSummary[] => {
+  const database = getDatabase();
+  return database.prepare(`
+    SELECT attempt_id, metadata_json
+    FROM task_attempts
+    WHERE task_id = ?
+    ORDER BY created_at DESC
+  `).all(taskId).flatMap((row) => {
+    const metadata = parsePayload((row as Record<string, unknown>).metadata_json as string | null | undefined);
+    const decision = metadata?.routing_decision;
+    if (!decision || typeof decision !== 'object') {
+      return [];
+    }
+    const record = decision as Record<string, unknown>;
+    return [{
+      attemptId: String((row as Record<string, unknown>).attempt_id),
+      engine: typeof record.engine === 'string' ? record.engine : undefined,
+      model: typeof record.model === 'string' ? record.model : undefined,
+      modelTier: typeof record.modelTier === 'string' ? record.modelTier : typeof record.model_tier === 'string' ? record.model_tier : undefined,
+      queueDepth: typeof record.queueDepth === 'number' ? record.queueDepth : typeof record.queue_depth === 'number' ? record.queue_depth : undefined,
+      fallbackCount: typeof record.fallbackCount === 'number' ? record.fallbackCount : typeof record.fallback_count === 'number' ? record.fallback_count : undefined,
+      reason: typeof record.reason === 'string' ? record.reason : undefined,
+      role: typeof record.role === 'string' ? record.role : undefined,
+      readOnly: typeof record.readOnly === 'boolean' ? record.readOnly : undefined,
+      complexity: typeof record.complexity === 'string' ? record.complexity : undefined,
+      confidence: typeof record.confidence === 'number' ? record.confidence : undefined,
+    }];
+  });
+};
+
+export const getProjectMemory = (projectId: string): ProjectMemorySummary => {
+  const database = getDatabase();
+  return {
+    facts: database.prepare(`
+      SELECT fact_id, statement, confidence, status, created_at
+      FROM project_facts
+      WHERE project_id = ?
+      ORDER BY created_at DESC
+    `).all(projectId).map((row) => ({
+      id: String((row as Record<string, unknown>).fact_id),
+      statement: String((row as Record<string, unknown>).statement),
+      confidence: Number((row as Record<string, unknown>).confidence),
+      status: String((row as Record<string, unknown>).status),
+      createdAt: String((row as Record<string, unknown>).created_at),
+    })),
+    decisions: database.prepare(`
+      SELECT decision_id, summary, why, created_at
+      FROM project_decisions
+      WHERE project_id = ?
+      ORDER BY created_at DESC
+    `).all(projectId).map((row) => ({
+      id: String((row as Record<string, unknown>).decision_id),
+      summary: String((row as Record<string, unknown>).summary),
+      why: String((row as Record<string, unknown>).why),
+      createdAt: String((row as Record<string, unknown>).created_at),
+    })),
+    checkpoints: database.prepare(`
+      SELECT project_checkpoint_id, summary, created_at
+      FROM project_checkpoints
+      WHERE project_id = ?
+      ORDER BY created_at DESC
+    `).all(projectId).map((row) => ({
+      id: String((row as Record<string, unknown>).project_checkpoint_id),
+      summary: String((row as Record<string, unknown>).summary),
+      createdAt: String((row as Record<string, unknown>).created_at),
+    })),
+  };
+};
 
 export const listOperatorMessages = (): MessageRecord[] => {
   try {
@@ -967,15 +1184,17 @@ const publishTaskCreated = async (task: TaskRecord): Promise<TaskDispatchStatus>
 export const sendOperatorInstruction = async (input: {
   username: string;
   content: string;
-}): Promise<TaskDispatchStatus> => dispatchOperatorMessage({
-  username: input.username,
-  roomId: 'operator',
-  messageType: 'chat',
-  payload: {
-    content: input.content,
-    audience: 'orchestrator',
-  },
-});
+}): Promise<TaskDispatchStatus> => {
+  return dispatchOperatorMessage({
+    username: input.username,
+    roomId: 'operator',
+    messageType: 'chat',
+    payload: {
+      content: input.content,
+      audience: 'orchestrator',
+    },
+  });
+};
 
 export type ChannelMessageResult = {
   dispatchStatus: TaskDispatchStatus;
@@ -987,6 +1206,14 @@ export const sendChannelMessage = async (input: {
   username: string;
   content: string;
 }): Promise<ChannelMessageResult> => {
+  recordCanonicalTaskChat({
+    taskId: input.taskId,
+    source: 'dashboard',
+    authorType: 'user',
+    authorId: input.username,
+    body: input.content,
+  });
+
   const dispatchStatus = await dispatchOperatorMessage({
     username: input.username,
     roomId: input.taskId,
@@ -1084,6 +1311,18 @@ export const createTask = async (input: {
       }),
       now,
     );
+
+  recordCanonicalTaskChat({
+    taskId: task.taskId,
+    source: 'dashboard',
+    authorType: 'user',
+    authorId: task.createdByUserId,
+    body: `${task.title}\n\n${task.description}`,
+    metadata: {
+      priority: task.priority,
+      task_type: task.taskType,
+    },
+  });
 
   const dispatchStatus = await publishTaskCreated(task);
   database

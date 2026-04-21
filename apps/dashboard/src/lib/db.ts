@@ -1,9 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
 
-import Database from 'better-sqlite3';
 import WebSocket from 'ws';
+import type Database from 'better-sqlite3';
 
 import type {
   ArtifactSummary,
@@ -33,6 +34,7 @@ const getProjectName = (): string => process.env.DROIDSWARM_PROJECT_NAME ?? 'Dro
 const DEFAULT_DB_PATH = process.env.DROIDSWARM_DB_PATH ?? path.resolve(process.cwd(), 'data', 'droidswarm.db');
 const DEFAULT_SOCKET_URL = process.env.DROIDSWARM_SOCKET_URL ?? 'ws://127.0.0.1:8765';
 const DEFAULT_ORCHESTRATOR_NAME = process.env.DROIDSWARM_ORCHESTRATOR_NAME ?? 'Orchestrator';
+const require = createRequire(import.meta.url);
 
 type RawTaskRow = {
   task_id: string;
@@ -90,6 +92,15 @@ const countAgentsForTask = (database: Database.Database, taskId: string): number
 };
 
 let databaseInstance: Database.Database | null = null;
+let databaseConstructor: (typeof import('better-sqlite3')) | null = null;
+
+const getDatabaseConstructor = (): typeof import('better-sqlite3') => {
+  if (!databaseConstructor) {
+    databaseConstructor = require('better-sqlite3') as typeof import('better-sqlite3');
+  }
+
+  return databaseConstructor;
+};
 
 export const resetDatabaseInstance = (): void => {
   if (databaseInstance) {
@@ -104,7 +115,8 @@ const getDatabase = (): Database.Database => {
   }
 
   fs.mkdirSync(path.dirname(DEFAULT_DB_PATH), { recursive: true });
-  databaseInstance = new Database(DEFAULT_DB_PATH);
+  const DatabaseImpl = getDatabaseConstructor();
+  databaseInstance = new DatabaseImpl(DEFAULT_DB_PATH);
   ensureDashboardSchema(databaseInstance);
   return databaseInstance;
 };

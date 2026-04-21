@@ -40,13 +40,38 @@ const DEFAULT_CONFIG = {
   projectId: "droidswarm",
   projectName: "DroidSwarm",
   projectRoot: "/",
+  repoId: "droidswarm-repo",
+  defaultBranch: "main",
+  developBranch: "develop",
+  allowedRepoRoots: ["/"],
+  workspaceRoot: "/tmp/droidswarm-workspaces",
   agentName: "Orchestrator",
   agentRole: "control-plane",
   socketUrl: "ws://localhost:8765",
   heartbeatMs: 1e3,
   reconnectMs: 1e3,
   codexBin: "codex",
+  codexCloudModel: "gpt-5-codex",
+  codexApiBaseUrl: "https://api.openai.com/v1",
+  codexApiKey: "test-key",
   codexSandboxMode: "workspace-write",
+  llamaBaseUrl: "http://127.0.0.1:11434",
+  llamaModel: "llama",
+  llamaTimeoutMs: 1e3,
+  muxBaseUrl: "http://127.0.0.1:8960",
+  muxToken: "mux-token",
+  prAutomationEnabled: false,
+  prRemoteName: "origin",
+  gitPolicy: {
+    mainBranch: "main",
+    developBranch: "develop",
+    prefixes: {
+      feature: "feature/",
+      hotfix: "hotfix/",
+      release: "release/",
+      support: "support/"
+    }
+  },
   maxAgentsPerTask: 4,
   maxConcurrentAgents: 4,
   maxConcurrentCodeAgents: 2,
@@ -66,7 +91,15 @@ const DEFAULT_CONFIG = {
     planning: "o1-preview",
     verification: "gpt-4o-mini",
     code: "claude-3.5-sonnet",
+    apple: "apple-intelligence/local",
     default: "o1-preview"
+  },
+  routingPolicy: {
+    plannerRoles: ["plan", "planner", "research", "review", "orchestrator", "checkpoint", "compress"],
+    appleRoles: ["apple", "ios", "macos", "swift", "swiftui", "xcode", "visionos"],
+    appleTaskHints: ["apple", "ios", "ipad", "iphone", "macos", "osx", "swift", "swiftui", "objective-c", "uikit", "appkit", "xcode", "testflight", "visionos", "watchos", "tvos"],
+    codeHints: ["code", "coder", "dev", "implementation", "debug", "refactor"],
+    cloudEscalationHints: ["refactor", "debug", "multi-file", "migration", "large-scale"]
   },
   budgetMaxConsumed: void 0
 };
@@ -353,6 +386,26 @@ const simpleResult = (status, summary) => ({
     env1.service.recordCheckpoint(childSpawn.taskId, childSpawn.attemptId, {
       summary: "checkpoint-before-restart"
     });
+    env1.service.recordTaskStateDigest({
+      id: "digest-before-restart",
+      taskId: childSpawn.taskId,
+      runId: env1.run.runId,
+      projectId: DEFAULT_CONFIG.projectId,
+      objective: "resume child task",
+      currentPlan: ["resume"],
+      decisions: [],
+      openQuestions: [],
+      activeRisks: [],
+      artifactIndex: [],
+      verificationState: "running",
+      lastUpdatedBy: rootSpawn.agentName,
+      ts: (/* @__PURE__ */ new Date()).toISOString(),
+      droidspeak: {
+        kind: "memory_pinned",
+        compact: "memory:pinned",
+        expanded: "Recovery digest pinned."
+      }
+    });
     env1.close();
     const env2 = createEnvironment({ dbPath: env1.dbPath, run: env1.run });
     const summaries = env2.runLifecycle.recoverInterruptedRuns();
@@ -363,6 +416,7 @@ const simpleResult = (status, summary) => ({
     });
     const resumedSpawn = env2.supervisor.assigned[0];
     import_strict.default.ok(resumedSpawn);
+    import_strict.default.equal(env2.service.getLatestTaskStateDigest(childSpawn.taskId)?.id, "digest-before-restart");
     env2.scheduler.handleAgentResult(
       resumedSpawn.taskId,
       resumedSpawn.attemptId,

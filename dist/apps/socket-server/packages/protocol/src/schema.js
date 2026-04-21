@@ -18,7 +18,8 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var schema_exports = {};
 __export(schema_exports, {
   authMessageSchema: () => authMessageSchema,
-  messageEnvelopeSchema: () => messageEnvelopeSchema
+  messageEnvelopeSchema: () => messageEnvelopeSchema,
+  normalizeEnvelopeV2: () => normalizeEnvelopeV2
 });
 module.exports = __toCommonJS(schema_exports);
 var import_zod = require("zod");
@@ -40,11 +41,55 @@ const usageSchema = import_zod.z.object({
   output_tokens: import_zod.z.number().int().nonnegative().optional(),
   reasoning_output_tokens: import_zod.z.number().int().nonnegative().optional()
 });
+const envelopeVerbEnum = import_zod.z.enum([
+  "task.create",
+  "task.accept",
+  "task.ready",
+  "task.blocked",
+  "plan.proposed",
+  "spawn.requested",
+  "spawn.approved",
+  "spawn.denied",
+  "artifact.created",
+  "checkpoint.created",
+  "verification.requested",
+  "verification.completed",
+  "run.completed",
+  "handoff.ready",
+  "summary.emitted",
+  "memory.pinned",
+  "status.updated",
+  "tool.request",
+  "tool.response",
+  "chat.message",
+  "heartbeat"
+]);
+const envelopeRiskSchema = import_zod.z.object({
+  level: import_zod.z.enum(["low", "medium", "high"]).optional(),
+  code: import_zod.z.string().min(1).optional(),
+  summary: import_zod.z.string().min(1).optional()
+}).passthrough();
+const shorthandSchema = import_zod.z.object({
+  compact: import_zod.z.string().min(1).optional(),
+  expanded: import_zod.z.string().min(1).optional()
+}).optional();
 const baseEnvelopeSchema = import_zod.z.object({
+  id: import_zod.z.string().min(1).optional(),
   message_id: import_zod.z.string().min(1),
+  ts: isoTimestampSchema.optional(),
   project_id: import_zod.z.string().min(1),
+  swarm_id: import_zod.z.string().min(1).optional(),
+  run_id: import_zod.z.string().min(1).optional(),
   room_id: import_zod.z.string().min(1),
   task_id: import_zod.z.string().min(1).optional(),
+  agent_id: import_zod.z.string().min(1).optional(),
+  role: import_zod.z.string().min(1).optional(),
+  verb: envelopeVerbEnum.optional(),
+  depends_on: import_zod.z.array(import_zod.z.string().min(1)).optional(),
+  artifact_refs: import_zod.z.array(import_zod.z.string().min(1)).optional(),
+  memory_refs: import_zod.z.array(import_zod.z.string().min(1)).optional(),
+  risk: envelopeRiskSchema.optional(),
+  body: import_zod.z.record(import_zod.z.string(), import_zod.z.unknown()).optional(),
   from: actorRefSchema,
   timestamp: isoTimestampSchema,
   reply_to: import_zod.z.string().min(1).optional(),
@@ -52,8 +97,9 @@ const baseEnvelopeSchema = import_zod.z.object({
   span_id: import_zod.z.string().min(1).optional(),
   session_id: import_zod.z.string().min(1).optional(),
   usage: usageSchema.optional(),
-  compression: compressionSchema.optional()
-});
+  compression: compressionSchema.optional(),
+  shorthand: shorthandSchema
+}).passthrough();
 const statusUpdatePayloadSchema = import_zod.z.object({
   phase: import_zod.z.string().min(1),
   status_code: import_zod.z.string().min(1),
@@ -273,8 +319,53 @@ const authMessageSchema = import_zod.z.object({
   timestamp: isoTimestampSchema,
   payload: authPayloadSchema
 });
+const VERB_BY_TYPE = {
+  status_update: "status.updated",
+  task_created: "task.create",
+  task_intake_accepted: "task.accept",
+  chat: "chat.message",
+  heartbeat: "heartbeat",
+  request_help: "spawn.requested",
+  artifact: "artifact.created",
+  artifact_created: "artifact.created",
+  clarification_request: "task.blocked",
+  plan_proposed: "plan.proposed",
+  task_decomposed: "plan.proposed",
+  task_assigned: "task.ready",
+  spawn_requested: "spawn.requested",
+  spawn_approved: "spawn.approved",
+  spawn_denied: "spawn.denied",
+  verification_requested: "verification.requested",
+  verification_completed: "verification.completed",
+  checkpoint_created: "checkpoint.created",
+  run_completed: "run.completed",
+  handoff_event: "handoff.ready",
+  guardrail_event: "summary.emitted",
+  trace_event: "summary.emitted",
+  limit_event: "task.blocked",
+  checkpoint_event: "memory.pinned",
+  tool_request: "tool.request",
+  tool_response: "tool.response"
+};
+const normalizeEnvelopeV2 = (input) => {
+  const parsed = messageEnvelopeSchema.parse(input);
+  const payload = parsed.payload;
+  return {
+    ...parsed,
+    id: parsed.id ?? parsed.message_id,
+    ts: parsed.ts ?? parsed.timestamp,
+    agent_id: parsed.agent_id ?? parsed.from.actor_id,
+    role: parsed.role ?? parsed.from.actor_name,
+    verb: parsed.verb ?? VERB_BY_TYPE[parsed.type],
+    depends_on: parsed.depends_on ?? (Array.isArray(payload.dependencies) ? payload.dependencies.filter((value) => typeof value === "string") : void 0),
+    artifact_refs: parsed.artifact_refs ?? (typeof payload.artifact_id === "string" ? [payload.artifact_id] : void 0),
+    memory_refs: parsed.memory_refs ?? (typeof payload.checkpoint_id === "string" ? [payload.checkpoint_id] : void 0),
+    body: parsed.body ?? payload
+  };
+};
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   authMessageSchema,
-  messageEnvelopeSchema
+  messageEnvelopeSchema,
+  normalizeEnvelopeV2
 });

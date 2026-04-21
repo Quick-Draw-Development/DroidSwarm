@@ -49,3 +49,30 @@ var import_validate = require("./validate");
     payload: {}
   })));
 });
+(0, import_node_test.default)("parseMessageEnvelope normalizes EnvelopeV2 compatibility fields", () => {
+  const parsed = (0, import_validate.parseMessageEnvelope)(JSON.stringify({
+    message_id: "msg-2",
+    project_id: "droidswarm",
+    room_id: "task-1",
+    type: "plan_proposed",
+    from: {
+      actor_type: "agent",
+      actor_id: "planner-1",
+      actor_name: "planner"
+    },
+    timestamp: "2026-03-12T12:00:00.000Z",
+    payload: {
+      task_id: "task-1",
+      plan_id: "plan-1",
+      summary: "plan ready"
+    }
+  }));
+  import_strict.default.equal(parsed.id, "msg-2");
+  import_strict.default.equal(parsed.ts, "2026-03-12T12:00:00.000Z");
+  import_strict.default.equal(parsed.verb, "plan.proposed");
+  import_strict.default.deepEqual(parsed.body, {
+    task_id: "task-1",
+    plan_id: "plan-1",
+    summary: "plan ready"
+  });
+});

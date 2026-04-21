@@ -264,4 +264,64 @@ const nowIso = () => (/* @__PURE__ */ new Date()).toISOString();
     db.close();
     (0, import_node_fs.rmSync)(tempDir, { recursive: true, force: true });
   });
+  (0, import_node_test.it)("stores task state digests and handoff packets", () => {
+    const tempDir = (0, import_node_fs.mkdtempSync)(import_node_path.default.join((0, import_node_os.tmpdir)(), "droidswarm-persistence-"));
+    const dbPath = import_node_path.default.join(tempDir, "state.db");
+    const db = (0, import_database.openPersistenceDatabase)(dbPath);
+    const persistence = import_repositories.PersistenceClient.fromDatabase(db);
+    const run = persistence.createRun("droidswarm");
+    const service = new import_service.OrchestratorPersistenceService(persistence, run);
+    const task = service.createTask({
+      taskId: "task-digest",
+      name: "digest-task",
+      priority: "medium",
+      metadata: {
+        description: "digest coverage"
+      }
+    });
+    service.recordTaskStateDigest({
+      id: "digest-1",
+      taskId: task.taskId,
+      runId: run.runId,
+      projectId: "droidswarm",
+      objective: "digest-task",
+      currentPlan: ["plan"],
+      decisions: ["decision"],
+      openQuestions: [],
+      activeRisks: [],
+      artifactIndex: [],
+      verificationState: "queued",
+      lastUpdatedBy: "orch",
+      ts: nowIso(),
+      droidspeak: {
+        kind: "summary_emitted",
+        compact: "summary:emitted",
+        expanded: "Summary emitted."
+      }
+    });
+    const digest = service.getLatestTaskStateDigest(task.taskId);
+    import_strict.default.equal(digest?.id, "digest-1");
+    service.recordHandoffPacket({
+      id: "handoff-1",
+      taskId: task.taskId,
+      runId: run.runId,
+      projectId: "droidswarm",
+      fromTaskId: task.taskId,
+      toRole: "coder",
+      digestId: "digest-1",
+      requiredReads: ["artifact-1"],
+      summary: "handoff ready",
+      ts: nowIso(),
+      droidspeak: {
+        kind: "handoff_ready",
+        compact: "handoff:ready",
+        expanded: "Handoff ready."
+      }
+    });
+    const handoffs = service.listHandoffPackets(task.taskId);
+    import_strict.default.equal(handoffs.length, 1);
+    import_strict.default.equal(handoffs[0].digestId, "digest-1");
+    db.close();
+    (0, import_node_fs.rmSync)(tempDir, { recursive: true, force: true });
+  });
 });

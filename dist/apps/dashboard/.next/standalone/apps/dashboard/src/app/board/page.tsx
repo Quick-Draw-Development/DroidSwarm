@@ -19,6 +19,8 @@ import {
   listRunTimelineEvents,
 } from '../../lib/db';
 
+export const dynamic = 'force-dynamic';
+
 export default async function BoardPage() {
   const cookieStore = await cookies();
   const username = cookieStore.get(USERNAME_COOKIE)?.value;

@@ -3,6 +3,8 @@ import { getProjectMemory, listReposForProject, listRuns } from '../../../lib/db
 import { RepoBadge } from '../../../components/repo-badge';
 import { ProjectMemoryPanel } from '../../../components/project-memory-panel';
 
+export const dynamic = 'force-dynamic';
+
 export default async function ProjectPage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const repos = listReposForProject(projectId);

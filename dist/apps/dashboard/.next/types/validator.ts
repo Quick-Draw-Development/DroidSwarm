@@ -74,6 +74,42 @@ type RouteHandlerConfig<Route extends AppRouteHandlerRoutes = AppRouteHandlerRou
   type __Unused = __Check
 }
 
+// Validate ../../../../../apps/dashboard/src/app/projects/[projectId]/page.tsx
+{
+  type __IsExpected<Specific extends AppPageConfig<"/projects/[projectId]">> = Specific
+  const handler = {} as typeof import("../../../../../apps/dashboard/src/app/projects/[projectId]/page.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
+// Validate ../../../../../apps/dashboard/src/app/projects/[projectId]/runs/[runId]/page.tsx
+{
+  type __IsExpected<Specific extends AppPageConfig<"/projects/[projectId]/runs/[runId]">> = Specific
+  const handler = {} as typeof import("../../../../../apps/dashboard/src/app/projects/[projectId]/runs/[runId]/page.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
+// Validate ../../../../../apps/dashboard/src/app/projects/[projectId]/tasks/[taskId]/page.tsx
+{
+  type __IsExpected<Specific extends AppPageConfig<"/projects/[projectId]/tasks/[taskId]">> = Specific
+  const handler = {} as typeof import("../../../../../apps/dashboard/src/app/projects/[projectId]/tasks/[taskId]/page.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
+// Validate ../../../../../apps/dashboard/src/app/projects/page.tsx
+{
+  type __IsExpected<Specific extends AppPageConfig<"/projects">> = Specific
+  const handler = {} as typeof import("../../../../../apps/dashboard/src/app/projects/page.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
 // Validate ../../../../../apps/dashboard/src/app/api/channels/[taskId]/messages/route.ts
 {
   type __IsExpected<Specific extends RouteHandlerConfig<"/api/channels/[taskId]/messages">> = Specific

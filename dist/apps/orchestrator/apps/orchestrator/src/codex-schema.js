@@ -80,7 +80,7 @@ const codexAgentOutputSchema = {
       properties: {
         scheme: {
           type: "string",
-          const: "droidspeak-v1"
+          enum: ["droidspeak-v1", "droidspeak-v2"]
         },
         compressed_content: {
           type: "string",

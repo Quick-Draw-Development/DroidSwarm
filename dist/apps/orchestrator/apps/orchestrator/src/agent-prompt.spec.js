@@ -47,5 +47,6 @@ var import_agent_prompt = require("./agent-prompt");
     import_strict.default.match(prompt, /Role: planner/);
     import_strict.default.match(prompt, /droidspeak rules here/);
     import_strict.default.match(prompt, /blk api-spec/);
+    import_strict.default.match(prompt, /droidspeak-v2/);
   });
 });

@@ -7,9 +7,11 @@
     "lib": "lib"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "npx nx run-many -t test --exclude droidswarm",
+    "typecheck": "npx nx run-many -t typecheck --exclude droidswarm",
     "fix:lockfile": "node scripts/fix-workspace-lockfile.js",
-    "postinstall": "node scripts/fix-workspace-lockfile.js"
+    "postinstall": "node scripts/fix-workspace-lockfile.js",
+    "release:prep": "node scripts/prepare-release.js"
   },
   "repository": {
     "type": "git",

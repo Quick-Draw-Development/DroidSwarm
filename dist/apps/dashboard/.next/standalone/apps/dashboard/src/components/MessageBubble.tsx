@@ -4,7 +4,7 @@ import type { MessageRecord } from '../lib/types';
 export function MessageBubble({ message, username }: { message: MessageRecord; username: string }) {
   const compression = message.payload.compression as { scheme?: string; compressed_content?: string } | undefined;
   const translation =
-    compression?.scheme === 'droidspeak-v1' && compression.compressed_content
+    (compression?.scheme === 'droidspeak-v1' || compression?.scheme === 'droidspeak-v2') && compression.compressed_content
       ? translateDroidspeak(compression.compressed_content)
       : null;
 

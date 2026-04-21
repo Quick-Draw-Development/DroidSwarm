@@ -43,6 +43,32 @@
         "nxtPtaskId": "nxtPtaskId"
       },
       "namedRegex": "^/channels/(?<nxtPtaskId>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/projects/[projectId]",
+      "regex": "^/projects/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPprojectId": "nxtPprojectId"
+      },
+      "namedRegex": "^/projects/(?<nxtPprojectId>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/projects/[projectId]/runs/[runId]",
+      "regex": "^/projects/([^/]+?)/runs/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPprojectId": "nxtPprojectId",
+        "nxtPrunId": "nxtPrunId"
+      },
+      "namedRegex": "^/projects/(?<nxtPprojectId>[^/]+?)/runs/(?<nxtPrunId>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/projects/[projectId]/tasks/[taskId]",
+      "regex": "^/projects/([^/]+?)/tasks/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPprojectId": "nxtPprojectId",
+        "nxtPtaskId": "nxtPtaskId"
+      },
+      "namedRegex": "^/projects/(?<nxtPprojectId>[^/]+?)/tasks/(?<nxtPtaskId>[^/]+?)(?:/)?$"
     }
   ],
   "staticRoutes": [
@@ -93,6 +119,12 @@
       "regex": "^/board(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/board(?:/)?$"
+    },
+    {
+      "page": "/projects",
+      "regex": "^/projects(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/projects(?:/)?$"
     }
   ],
   "dataRoutes": [],

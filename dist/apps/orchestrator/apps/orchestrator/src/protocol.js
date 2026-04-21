@@ -28,7 +28,7 @@ module.exports = __toCommonJS(protocol_exports);
 var import_src = require("../../../packages/protocol-alias/src/index");
 var import_node_crypto = require("node:crypto");
 var import_protocol = require("@protocol");
-const parseEnvelope = (raw) => import_protocol.messageEnvelopeSchema.parse(JSON.parse(raw));
+const parseEnvelope = (raw) => (0, import_protocol.normalizeEnvelopeV2)(JSON.parse(raw));
 const nowIso = () => (/* @__PURE__ */ new Date()).toISOString();
 const buildAuthMessage = (config) => buildRoomAuthMessage(config, "operator", config.agentName, "orchestrator", config.agentRole);
 const buildRoomAuthMessage = (config, roomId, agentName, clientType, agentRole = config.agentRole) => ({
@@ -44,38 +44,63 @@ const buildRoomAuthMessage = (config, roomId, agentName, clientType, agentRole =
   }
 });
 const buildHeartbeatMessage = (config) => buildRoomHeartbeatMessage(config, "operator", config.agentName);
-const buildRoomHeartbeatMessage = (config, roomId, agentName) => ({
-  message_id: (0, import_node_crypto.randomUUID)(),
-  project_id: config.projectId,
-  room_id: roomId,
-  type: "heartbeat",
-  from: {
-    actor_type: "orchestrator",
-    actor_id: agentName,
-    actor_name: agentName
-  },
-  timestamp: nowIso(),
-  payload: {}
-});
-const buildTaskIntakeAccepted = (config, taskId) => ({
-  message_id: (0, import_node_crypto.randomUUID)(),
-  project_id: config.projectId,
-  room_id: "operator",
-  task_id: taskId,
-  type: "task_intake_accepted",
-  from: {
-    actor_type: "orchestrator",
-    actor_id: config.agentName,
-    actor_name: config.agentName
-  },
-  timestamp: nowIso(),
-  payload: {
+const buildRoomHeartbeatMessage = (config, roomId, agentName) => {
+  const id = (0, import_node_crypto.randomUUID)();
+  const ts = nowIso();
+  return {
+    id,
+    message_id: id,
+    project_id: config.projectId,
+    room_id: roomId,
+    type: "heartbeat",
+    from: {
+      actor_type: "orchestrator",
+      actor_id: agentName,
+      actor_name: agentName
+    },
+    ts,
+    timestamp: ts,
+    agent_id: agentName,
+    role: config.agentRole,
+    verb: "heartbeat",
+    body: {},
+    payload: {}
+  };
+};
+const buildTaskIntakeAccepted = (config, taskId) => {
+  const id = (0, import_node_crypto.randomUUID)();
+  const ts = nowIso();
+  return {
+    id,
+    message_id: id,
+    project_id: config.projectId,
+    room_id: "operator",
     task_id: taskId,
-    accepted: true,
-    next_status: "planning",
-    content: "Task intake accepted by orchestrator."
-  }
-});
+    type: "task_intake_accepted",
+    from: {
+      actor_type: "orchestrator",
+      actor_id: config.agentName,
+      actor_name: config.agentName
+    },
+    ts,
+    timestamp: ts,
+    agent_id: config.agentName,
+    role: config.agentRole,
+    verb: "task.accept",
+    body: {
+      task_id: taskId,
+      accepted: true,
+      next_status: "planning",
+      content: "Task intake accepted by orchestrator."
+    },
+    payload: {
+      task_id: taskId,
+      accepted: true,
+      next_status: "planning",
+      content: "Task intake accepted by orchestrator."
+    }
+  };
+};
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   buildAuthMessage,

@@ -28,10 +28,34 @@ class OrchestratorPersistenceService {
     this.persistence = persistence;
     this.run = run;
   }
+  resolveScope(overrides) {
+    return {
+      projectId: overrides?.projectId ?? this.run.projectId,
+      repoId: overrides?.repoId ?? this.run.repoId,
+      rootPath: overrides?.rootPath ?? this.run.rootPath,
+      branch: overrides?.branch ?? this.run.branch,
+      workspaceId: overrides?.workspaceId ?? this.run.workspaceId
+    };
+  }
+  getRunRecord() {
+    return this.run;
+  }
   createTask(task) {
+    const scope = this.resolveScope({
+      projectId: typeof task.metadata?.project_id === "string" ? task.metadata.project_id : void 0,
+      repoId: typeof task.metadata?.repo_id === "string" ? task.metadata.repo_id : void 0,
+      rootPath: typeof task.metadata?.root_path === "string" ? task.metadata.root_path : void 0,
+      branch: typeof task.metadata?.branch === "string" ? task.metadata.branch : void 0,
+      workspaceId: typeof task.metadata?.workspace_id === "string" ? task.metadata.workspace_id : void 0
+    });
     const record = {
       taskId: task.taskId,
       runId: this.run.runId,
+      projectId: scope.projectId,
+      repoId: scope.repoId,
+      rootPath: scope.rootPath,
+      branch: scope.branch,
+      workspaceId: scope.workspaceId,
       parentTaskId: task.parentTaskId,
       name: task.name,
       status: task.status ?? "queued",
@@ -43,11 +67,16 @@ class OrchestratorPersistenceService {
     this.persistence.tasks.create(record);
     return record;
   }
-  createAttempt(attemptId, task, agentName, role, metadata) {
+  createAttempt(attemptId, task, agentName, role, metadata, scope) {
     const attempt = {
       attemptId,
       taskId: task.taskId,
       runId: this.run.runId,
+      projectId: scope?.projectId ?? task.projectId,
+      repoId: scope?.repoId ?? task.repoId,
+      rootPath: scope?.rootPath ?? task.rootPath,
+      branch: scope?.branch ?? task.branch,
+      workspaceId: scope?.workspaceId ?? task.workspaceId,
       agentName,
       status: "running",
       metadata: metadata ? { role, ...metadata } : { role },
@@ -131,6 +160,11 @@ class OrchestratorPersistenceService {
       attemptId: input.attemptId,
       taskId: input.taskId,
       runId: this.run.runId,
+      projectId: this.run.projectId,
+      repoId: this.run.repoId,
+      rootPath: this.run.rootPath,
+      branch: this.run.branch,
+      workspaceId: this.run.workspaceId,
       kind: input.kind,
       summary: input.summary,
       content: input.content,
@@ -154,6 +188,11 @@ class OrchestratorPersistenceService {
       checkpointId,
       taskId,
       runId: this.run.runId,
+      projectId: this.run.projectId,
+      repoId: this.run.repoId,
+      rootPath: this.run.rootPath,
+      branch: this.run.branch,
+      workspaceId: this.run.workspaceId,
       attemptId: attemptId ?? void 0,
       payloadJson: JSON.stringify(payload),
       createdAt: nowIso()
@@ -197,6 +236,11 @@ class OrchestratorPersistenceService {
     this.persistence.budgets.record({
       eventId: (0, import_node_crypto.randomUUID)(),
       runId: this.run.runId,
+      projectId: this.run.projectId,
+      repoId: this.run.repoId,
+      rootPath: this.run.rootPath,
+      branch: this.run.branch,
+      workspaceId: this.run.workspaceId,
       taskId: taskId ?? null,
       detail,
       consumed,
@@ -234,6 +278,108 @@ class OrchestratorPersistenceService {
   }
   searchCheckpoints(query, limit) {
     return this.persistence.vectors.search(query, Math.max(1, limit));
+  }
+  upsertProject(project) {
+    this.persistence.projects.upsert({
+      ...project,
+      createdAt: nowIso(),
+      updatedAt: nowIso()
+    });
+  }
+  upsertProjectRepo(repo) {
+    this.persistence.projectRepos.upsert({
+      ...repo,
+      id: repo.repoId,
+      branch: repo.defaultBranch,
+      workspaceId: void 0,
+      createdAt: nowIso(),
+      updatedAt: nowIso()
+    });
+  }
+  listProjectFacts(projectId) {
+    return this.persistence.memory.listFacts(projectId);
+  }
+  listProjectDecisions(projectId) {
+    return this.persistence.memory.listDecisions(projectId);
+  }
+  listProjectCheckpoints(projectId) {
+    return this.persistence.memory.listCheckpoints(projectId);
+  }
+  recordProjectFact(fact) {
+    this.persistence.memory.recordFact(fact);
+  }
+  recordProjectDecision(decision) {
+    this.persistence.memory.recordDecision(decision);
+  }
+  recordProjectCheckpoint(checkpoint) {
+    this.persistence.memory.recordCheckpoint(checkpoint);
+  }
+  recordTaskChatMessage(message) {
+    this.persistence.chat.create(message);
+  }
+  listTaskChatMessages(taskId) {
+    return this.persistence.chat.listByTask(taskId);
+  }
+  recordTaskStateDigest(digest) {
+    this.persistence.digests.record(digest);
+  }
+  getLatestTaskStateDigest(taskId) {
+    return this.persistence.digests.getLatestForTask(taskId) ?? void 0;
+  }
+  recordHandoffPacket(packet) {
+    this.persistence.handoffs.record(packet);
+  }
+  listHandoffPackets(taskId) {
+    return this.persistence.handoffs.listByTask(taskId);
+  }
+  recordWorkerResult(taskId, attemptId, result) {
+    const task = this.getTask(taskId);
+    const scope = this.resolveScope(task ?? void 0);
+    if (!scope.repoId || !scope.rootPath || !scope.branch) {
+      return;
+    }
+    this.persistence.workers.recordResult({
+      workerResultId: (0, import_node_crypto.randomUUID)(),
+      runId: this.run.runId,
+      taskId,
+      attemptId,
+      projectId: scope.projectId,
+      repoId: scope.repoId,
+      rootPath: scope.rootPath,
+      branch: scope.branch,
+      workspaceId: scope.workspaceId,
+      engine: result.engine,
+      model: result.model,
+      modelTier: typeof result.metadata?.modelTier === "string" ? result.metadata.modelTier : void 0,
+      queueDepth: typeof result.metadata?.queueDepth === "number" ? result.metadata.queueDepth : void 0,
+      fallbackCount: typeof result.metadata?.fallbackCount === "number" ? result.metadata.fallbackCount : void 0,
+      success: result.success,
+      summary: result.summary,
+      payloadJson: JSON.stringify(result),
+      createdAt: nowIso()
+    });
+  }
+  recordWorkerHeartbeat(heartbeat) {
+    const task = this.getTask(heartbeat.taskId);
+    const scope = this.resolveScope(task ?? void 0);
+    if (!scope.repoId || !scope.rootPath || !scope.branch) {
+      return;
+    }
+    this.persistence.workers.recordHeartbeat({
+      heartbeatId: (0, import_node_crypto.randomUUID)(),
+      ...heartbeat,
+      projectId: scope.projectId,
+      repoId: scope.repoId,
+      rootPath: scope.rootPath,
+      branch: scope.branch,
+      workspaceId: scope.workspaceId,
+      modelTier: heartbeat.modelTier,
+      queueDepth: heartbeat.queueDepth,
+      fallbackCount: heartbeat.fallbackCount
+    });
+  }
+  listWorkerHeartbeats(attemptId) {
+    return this.persistence.workers.listHeartbeatsByAttempt(attemptId);
   }
 }
 // Annotate the CommonJS export names for ESM import in node:

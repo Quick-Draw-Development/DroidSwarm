@@ -9,5 +9,9 @@
   "/api/tasks/route": "/api/tasks",
   "/board/page": "/board",
   "/channels/[taskId]/page": "/channels/[taskId]",
-  "/page": "/"
+  "/page": "/",
+  "/projects/[projectId]/page": "/projects/[projectId]",
+  "/projects/[projectId]/runs/[runId]/page": "/projects/[projectId]/runs/[runId]",
+  "/projects/[projectId]/tasks/[taskId]/page": "/projects/[projectId]/tasks/[taskId]",
+  "/projects/page": "/projects"
 }

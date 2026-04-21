@@ -20,517 +20,188 @@ __export(OrchestratorEngine_exports, {
   OrchestratorEngine: () => OrchestratorEngine
 });
 module.exports = __toCommonJS(OrchestratorEngine_exports);
-var import_node_crypto = require("node:crypto");
 var import_messages = require("../messages");
-var import_protocol = require("../protocol");
-var import_task_events = require("../task-events");
-var import_operator_notifications = require("../operator-notifications");
-var import_operator_intents = require("../operator/operator-intents");
 class OrchestratorEngine {
-  constructor(options) {
-    this.options = options;
-    this.prefix = "[OrchestratorEngine]";
-    this.agentAttemptMap = /* @__PURE__ */ new Map();
+  constructor(deps) {
+    this.deps = deps;
+    this.attemptMap = /* @__PURE__ */ new Map();
     this.onPlanProposed = (taskId, planId, summary, plan, dependencies) => {
-      this.recordExecutionEvent(
-        "plan_proposed",
-        `Plan ${planId} proposed for ${taskId}`,
-        {
-          taskId,
-          planId,
-          dependencies,
-          summary
-        }
-      );
-      this.options.gateway.send(
-        (0, import_messages.buildPlanProposedMessage)(
-          this.options.config,
-          taskId,
-          planId,
-          summary,
-          plan,
-          dependencies
-        )
-      );
+      this.deps.persistenceService.recordExecutionEvent("plan_proposed", summary, {
+        taskId,
+        planId,
+        dependencies
+      });
+      this.deps.gateway.send((0, import_messages.buildPlanProposedMessage)(this.deps.config, taskId, planId, summary, plan, dependencies));
     };
     this.onCheckpointCreated = (taskId, checkpointId, summary, metadata) => {
-      this.recordExecutionEvent(
-        "checkpoint_created",
-        `Checkpoint ${checkpointId} for ${taskId}`,
-        {
-          taskId,
-          checkpointId,
-          metadata
-        }
-      );
-      this.options.gateway.send(
-        (0, import_messages.buildCheckpointCreatedMessage)(
-          this.options.config,
-          taskId,
-          taskId,
-          checkpointId,
-          summary,
-          metadata
-        )
-      );
+      this.deps.persistenceService.recordExecutionEvent("checkpoint_created", summary, {
+        taskId,
+        checkpointId,
+        metadata
+      });
+      this.deps.gateway.send((0, import_messages.buildCheckpointCreatedMessage)(
+        this.deps.config,
+        taskId,
+        taskId,
+        checkpointId,
+        summary,
+        metadata
+      ));
     };
     this.onVerificationRequested = (taskId, verificationType, requestedBy, detail) => {
-      this.recordExecutionEvent(
-        "verification_requested",
-        `Verification ${verificationType} requested for ${taskId}`,
-        {
-          taskId,
-          verificationType,
-          requestedBy,
-          detail
-        }
-      );
-      this.options.gateway.send(
-        (0, import_messages.buildVerificationRequestedMessage)(
-          this.options.config,
-          taskId,
-          verificationType,
-          requestedBy,
-          detail
-        )
-      );
-      this.sendStatusUpdate(
-        "operator",
+      this.deps.persistenceService.recordExecutionEvent("verification_requested", detail ?? verificationType, {
         taskId,
-        "operator_review",
-        "verification_requested",
-        "Verification requested for task.",
-        { verification_type: verificationType, detail }
-      );
+        verificationType,
+        requestedBy
+      });
+      this.deps.gateway.send((0, import_messages.buildVerificationRequestedMessage)(
+        this.deps.config,
+        taskId,
+        verificationType,
+        requestedBy,
+        detail
+      ));
     };
     this.onVerificationOutcome = (taskId, stage, status, summary, attemptId, reviewer) => {
-      this.options.gateway.send(
-        (0, import_messages.buildVerificationCompletedMessage)(
-          this.options.config,
-          taskId,
-          stage,
-          status,
-          reviewer ?? this.options.config.agentName,
-          summary
-        )
-      );
-      this.sendStatusUpdate(
-        "operator",
+      this.deps.persistenceService.recordExecutionEvent("verification_completed", summary ?? status, {
         taskId,
-        "operator_review",
-        stage === "verification" ? "verification_completed" : "review_completed",
-        `${stage} ${status}`,
-        {
-          stage,
-          status,
-          attempt_id: attemptId,
-          reviewer
-        }
-      );
+        stage,
+        status,
+        attemptId,
+        reviewer
+      });
+      this.deps.gateway.send((0, import_messages.buildVerificationCompletedMessage)(
+        this.deps.config,
+        taskId,
+        stage,
+        status,
+        reviewer ?? this.deps.config.agentName,
+        summary
+      ));
     };
   }
+  handleAgentAssignment(taskId, agents) {
+    for (const agent of agents) {
+      this.attemptMap.set(agent.attemptId, {
+        taskId: agent.taskId,
+        role: agent.role,
+        agentName: agent.agentName
+      });
+    }
+    const assignmentId = `${taskId}-${agents.map((agent) => agent.attemptId).join("-")}`;
+    this.deps.gateway.send((0, import_messages.buildTaskAssignedMessage)(this.deps.config, taskId, taskId, assignmentId, agents));
+  }
+  handleAgentCommunication(_taskId, _message) {
+  }
   async handleMessage(message, source) {
-    if (message.project_id !== this.options.config.projectId) {
-      return;
-    }
-    if (message.from.actor_name === this.options.config.agentName) {
-      return;
-    }
-    const isTaskChannel = source === "task";
-    if (isTaskChannel && message.type === "status_update") {
-      this.handleAgentStatusUpdate(message);
-      return;
-    }
-    if (isTaskChannel && message.type === "artifact_created") {
-      this.persistArtifact(message);
-      return;
-    }
-    if (isTaskChannel && message.type === "tool_request") {
-      await this.handleToolRequest(message);
-      return;
-    }
-    if (isTaskChannel && message.type === "spawn_requested") {
-      const payload = message.payload;
-      this.recordChannelEvent(
-        "spawn_requested",
-        `Spawn requested for ${payload.needed_role ?? "agent"}`,
-        message,
-        {
-          role: payload.needed_role,
-          reason: payload.reason_code
-        }
-      );
-      return;
-    }
-    if (isTaskChannel && message.type === "clarification_request") {
-      const payload = message.payload;
-      this.recordChannelEvent(
-        "clarification_requested",
-        `Clarification requested: ${payload.question ?? payload.content ?? "question"}`,
-        message
-      );
-      return;
-    }
-    if (!isTaskChannel && message.type === "status_update" && message.room_id === "operator") {
-      const statusMessage = message;
-      if ((0, import_task_events.isCancellationMessage)(statusMessage)) {
-        this.handleCancellation(statusMessage);
-        return;
-      }
-      this.handleOperatorStatusMessage(statusMessage);
-      return;
-    }
-    if (!isTaskChannel && message.type === "task_created") {
+    if (message.type === "task_created") {
       this.handleTaskCreated(message);
       return;
     }
-    if (message.type === "chat" && message.room_id === "operator") {
-      await this.handleOperatorChat(message);
-    }
-  }
-  handleAgentAssignment(taskId, agents) {
-    if (!agents.length) {
+    if (message.type === "tool_request") {
+      await this.handleToolRequest(message);
       return;
     }
-    for (const agent of agents) {
-      this.agentAttemptMap.set(agent.agentName, {
-        attemptId: agent.attemptId,
-        role: agent.role
-      });
-    }
-    const details = agents.map((agent) => `${agent.agentName} (${agent.role})`).join(", ");
-    const assignmentId = (0, import_node_crypto.randomUUID)();
-    this.options.gateway.send((0, import_messages.buildTaskAssignedMessage)(
-      this.options.config,
-      taskId,
-      taskId,
-      assignmentId,
-      agents
-    ));
-    this.sendStatusUpdate(
-      taskId,
-      taskId,
-      "execution",
-      "agent_assigned",
-      `Assigned agents: ${details}.`,
-      {
-        assignment_id: assignmentId,
-        assigned_agents: agents.map((agent) => ({
-          agent_name: agent.agentName,
-          agent_role: agent.role,
-          attempt_id: agent.attemptId
-        }))
-      }
-    );
-  }
-  handleAgentCommunication(taskId, content) {
-    this.sendStatusUpdate(taskId, taskId, "execution", "agent_communication", content);
-  }
-  handleAgentStatusUpdate(message) {
-    const taskId = message.task_id;
-    if (!taskId) {
-      console.warn("[OrchestratorEngine] received status update without task_id");
+    if (message.type === "chat" && source === "operator") {
+      const content = await this.deps.chatResponder.respond(message.payload.content);
+      this.deps.gateway.send((0, import_messages.buildOperatorChatResponse)(this.deps.config, content));
       return;
     }
+    if (message.type !== "status_update") {
+      return;
+    }
+    this.handleStatusUpdate(message);
+  }
+  handleTaskCreated(message) {
     const payload = message.payload;
-    const agentName = message.from.actor_name;
-    const attemptMeta = this.agentAttemptMap.get(agentName);
-    const attemptId = attemptMeta?.attemptId ?? "";
-    const role = attemptMeta?.role ?? "agent";
-    const statusCode = this.asString(payload.status_code) ?? "agent_unknown";
-    const summary = this.asString(payload.content) ?? "";
-    const payloadResult = typeof payload.result === "object" && payload.result !== null ? payload.result : void 0;
-    const result = payloadResult ?? {
-      status: this.mapStatusFromCode(statusCode),
-      summary,
-      requested_agents: [],
-      artifacts: [],
-      doc_updates: [],
-      branch_actions: []
-    };
-    this.recordExecutionEvent(
-      "agent_result",
-      `Agent ${agentName} reported ${statusCode}`,
-      {
-        taskId,
-        attemptId,
-        agentName,
-        role,
-        status: result.status,
-        summary: result.summary
-      }
-    );
-    this.options.scheduler.handleAgentResult(taskId, attemptId, agentName, role, result);
-  }
-  async handleTaskCreated(message) {
-    const task = (0, import_task_events.resolveTaskFromMessage)(message);
-    if (!task) {
-      return;
-    }
-    this.options.registry.register(task);
-    this.options.gateway.watchTaskChannel(task.taskId);
-    const persisted = this.options.persistenceService.createTask({
-      taskId: task.taskId,
-      name: task.title ?? task.taskId,
-      priority: this.normalizePriority(task.priority),
+    const task = this.deps.persistenceService.createTask({
+      taskId: payload.task_id,
+      name: payload.title ?? payload.task_id,
+      priority: payload.priority ?? "medium",
+      status: "planning",
       metadata: {
-        description: task.description,
-        task_type: task.taskType,
-        created_by: task.createdByUserId,
-        branch_name: task.branchName
+        description: payload.description ?? "",
+        task_type: payload.task_type ?? "task",
+        created_by: payload.created_by ?? payload.created_by_user_id ?? "operator",
+        branch_name: payload.branch_name,
+        queue_depth: 0,
+        fallback_count: 0
       }
     });
-    this.options.gateway.send(
-      (0, import_protocol.buildTaskIntakeAccepted)(this.options.config, task.taskId)
-    );
-    this.scheduleTask(persisted.taskId);
+    this.deps.registry.register({
+      taskId: task.taskId,
+      projectId: task.projectId,
+      repoId: task.repoId,
+      rootPath: task.rootPath,
+      workspaceId: task.workspaceId,
+      title: task.name,
+      description: String(task.metadata?.description ?? ""),
+      taskType: String(task.metadata?.task_type ?? "task"),
+      priority: task.priority,
+      createdAt: task.createdAt,
+      createdByUserId: typeof task.metadata?.created_by === "string" ? task.metadata.created_by : void 0,
+      branchName: typeof task.metadata?.branch_name === "string" ? task.metadata.branch_name : void 0
+    });
+    this.deps.gateway.watchTaskChannel(task.taskId);
+    this.deps.scheduler.handleNewTask(task.taskId);
   }
-  handleCancellation(message) {
-    const task = (0, import_task_events.resolveTaskFromMessage)(message);
-    if (!task) {
-      return;
-    }
-    const removedAgents = this.options.supervisor.cancelTask(task.taskId);
-    this.options.persistenceService.setTaskStatus(task.taskId, "cancelled");
-    this.options.gateway.send(
-      (0, import_messages.buildOrchestratorStatusUpdate)(
-        this.options.config,
-        "operator",
-        "operator",
-        "task_cancelled",
-        "Task cancelled.",
-        task.taskId,
-        {
-          removed_agents: removedAgents,
-          removed_agent_count: removedAgents.length
-        }
-      )
-    );
-    const persisted = this.options.persistenceService.getTask(task.taskId);
-    if (persisted) {
-      this.options.runLifecycle.cancelRunById(persisted.runId, "Operator cancelled task");
-    }
-  }
-  async handleOperatorChat(message) {
+  handleStatusUpdate(message) {
     const payload = message.payload;
-    const content = typeof payload.content === "string" ? payload.content : "";
-    if (!content) {
+    const taskId = message.task_id ?? message.room_id;
+    if (payload.status_code === "task_cancelled") {
+      const detail = payload.content;
+      this.deps.controlService.execute({ type: "cancel_task" }, taskId, message.from.actor_name, detail);
       return;
     }
-    const metadataTaskId = typeof payload.metadata === "object" && payload.metadata !== null ? payload.metadata.task_id : void 0;
-    const resolvedTaskId = message.task_id ?? (typeof metadataTaskId === "string" ? metadataTaskId : void 0);
-    const intent = (0, import_operator_intents.parseOperatorIntent)(content, resolvedTaskId);
-    this.sendStatusUpdate(
-      "operator",
-      void 0,
-      "operator_instruction",
-      "processing_operator_instruction",
-      "Processing operator instruction."
-    );
-    if (intent.category === "command_error") {
-      this.options.controlService.recordRejectedCommand(
-        intent.referencedTaskId,
-        content,
-        message.from.actor_name,
-        intent.message
-      );
-      this.options.gateway.send((0, import_messages.buildOperatorChatResponse)(this.options.config, intent.message));
+    if (!payload.result || !["agent_completed", "agent_blocked", "agent_failed"].includes(payload.status_code)) {
       return;
     }
-    if (intent.category === "note") {
-      try {
-        const response = await this.options.chatResponder.respond(content);
-        this.options.gateway.send((0, import_messages.buildOperatorChatResponse)(this.options.config, response));
-      } catch (error) {
-        this.options.gateway.send(
-          (0, import_messages.buildOperatorChatResponse)(
-            this.options.config,
-            error instanceof Error ? error.message : "Failed to process operator instruction."
-          )
-        );
-      }
+    const attempt = this.lookupAttempt(taskId, message.from.actor_id);
+    if (!attempt) {
       return;
     }
-    await this.handleOperatorCommand(intent.action, message, intent.referencedTaskId ?? resolvedTaskId);
-  }
-  handleOperatorStatusMessage(message) {
-    const metadata = typeof message.payload.metadata === "object" && message.payload.metadata !== null ? message.payload.metadata : void 0;
-    const taskId = message.task_id ?? (typeof metadata?.task_id === "string" ? metadata.task_id : void 0);
-    if (!taskId) {
-      return;
-    }
-    const status = typeof metadata?.status === "string" ? metadata.status : void 0;
-    if (status === "review") {
-      this.sendStatusUpdate(
-        "operator",
-        taskId,
-        "operator_review",
-        "operator_review_notice",
-        (0, import_operator_notifications.buildReviewAnnouncement)(message.from.actor_name)
-      );
-    }
-  }
-  normalizePriority(value) {
-    if (!value) {
-      return "medium";
-    }
-    if (["low", "medium", "high", "urgent"].includes(value)) {
-      return value;
-    }
-    return "medium";
-  }
-  persistArtifact(message) {
-    const attemptMeta = this.agentAttemptMap.get(message.from.actor_name);
-    if (!attemptMeta) {
-      console.warn("[OrchestratorEngine] missing attempt for artifact", message.payload.artifact_id);
-      return;
-    }
-    const metadata = typeof message.payload.metadata === "object" && message.payload.metadata !== null ? message.payload.metadata : void 0;
-    this.recordChannelEvent(
-      "artifact_created",
-      `Artifact ${message.payload.artifact_id} (${message.payload.kind})`,
-      message,
-      {
-        artifactId: message.payload.artifact_id,
-        kind: message.payload.kind,
-        summary: message.payload.summary
-      }
-    );
-    this.options.persistenceService.recordArtifact({
-      artifactId: message.payload.artifact_id,
-      attemptId: attemptMeta.attemptId,
-      taskId: message.payload.task_id,
-      kind: message.payload.kind,
-      summary: message.payload.summary,
-      content: message.payload.content,
-      metadata,
-      createdAt: message.timestamp
+    this.deps.persistenceService.recordExecutionEvent("agent_result", payload.content, {
+      taskId,
+      attemptId: attempt.attemptId,
+      agentName: attempt.agentName,
+      role: attempt.role,
+      verb: message.verb,
+      shorthand: message.shorthand
     });
-    this.options.scheduler.handleArtifactRecorded(
-      message.payload.task_id,
-      attemptMeta.attemptId,
-      message.payload.artifact_id,
-      message.payload.kind,
-      message.payload.summary
-    );
+    this.deps.scheduler.handleAgentResult(taskId, attempt.attemptId, attempt.agentName, attempt.role, payload.result);
   }
   async handleToolRequest(message) {
-    const taskId = message.task_id;
-    if (!taskId) {
-      console.warn("[OrchestratorEngine] tool request without task_id");
-      return;
-    }
-    const request = {
-      requestId: message.payload.request_id,
-      taskId,
-      toolName: message.payload.tool_name,
-      parameters: message.payload.parameters,
-      agentName: message.from.actor_name
-    };
-    const response = await this.options.toolService.handleRequest(request);
-    const responseMessage = (0, import_messages.buildToolResponseMessage)(
-      this.options.config,
-      taskId,
-      request.requestId,
+    const payload = message.payload;
+    const response = await this.deps.toolService.handleRequest({
+      requestId: payload.request_id,
+      toolName: payload.tool_name,
+      taskId: message.task_id ?? message.room_id,
+      agentName: message.from.actor_id,
+      parameters: payload.parameters
+    });
+    this.deps.gateway.send((0, import_messages.buildToolResponseMessage)(
+      this.deps.config,
+      message.task_id ?? message.room_id,
+      payload.request_id,
       response.status,
       response.result,
       response.error
-    );
-    this.options.gateway.sendToTask(taskId, responseMessage);
-  }
-  sendStatusUpdate(roomId, taskId, phase, statusCode, content, extraPayload) {
-    this.options.gateway.send(
-      (0, import_messages.buildOrchestratorStatusUpdate)(
-        this.options.config,
-        roomId,
-        phase,
-        statusCode,
-        content,
-        taskId,
-        extraPayload
-      )
-    );
-  }
-  asString(value) {
-    return typeof value === "string" ? value : void 0;
-  }
-  mapStatusFromCode(code) {
-    if (code === "agent_completed") {
-      return "completed";
-    }
-    if (code === "agent_failed") {
-      return "blocked";
-    }
-    if (code === "agent_blocked") {
-      return "blocked";
-    }
-    return "blocked";
-  }
-  recordExecutionEvent(eventType, detail, metadata) {
-    this.options.persistenceService.recordExecutionEvent(eventType, detail, metadata);
-  }
-  recordChannelEvent(eventType, detail, message, metadata) {
-    this.recordExecutionEvent(
-      eventType,
-      detail,
-      {
-        taskId: message.task_id,
-        actor_type: message.from.actor_type,
-        actor_id: message.from.actor_id,
-        actor_name: message.from.actor_name,
-        ...metadata
-      }
-    );
-  }
-  async handleOperatorCommand(action, message, taskId) {
-    if (!taskId) {
-      this.options.gateway.send((0, import_messages.buildOperatorChatResponse)(
-        this.options.config,
-        "Could not determine which task you meant; please include a task identifier."
-      ));
-      return;
-    }
-    const detail = action.reason ?? message.payload.content ?? action.type;
-    const outcome = this.options.controlService.execute(action, taskId, message.from.actor_name, detail);
-    if (outcome.actionType === "cancel_task") {
-      const removedAgents = outcome.removedAgents ?? [];
-      this.options.gateway.send(
-        (0, import_messages.buildOrchestratorStatusUpdate)(
-          this.options.config,
-          "operator",
-          "operator",
-          "task_cancelled",
-          `Cancelled task per operator: ${detail}`,
-          taskId,
-          {
-            removed_agents: removedAgents,
-            removed_agent_count: removedAgents.length
-          }
-        )
-      );
-    }
-    if (outcome.reviewRequested) {
-      this.onVerificationRequested(taskId, "operator_review", message.from.actor_name, detail);
-    }
-    if (outcome.priority) {
-      this.sendStatusUpdate(
-        "operator",
-        taskId,
-        "operator_instruction",
-        "reprioritized",
-        `Updated priority to ${outcome.priority}.`
-      );
-    }
-    this.options.gateway.send((0, import_messages.buildOperatorChatResponse)(
-      this.options.config,
-      `Recorded operator action: ${outcome.actionType}.`
     ));
   }
-  scheduleTask(taskId) {
-    this.options.scheduler.handleNewTask(taskId);
-  }
-  log(...items) {
-    console.log(this.prefix, ...items);
+  lookupAttempt(taskId, agentName) {
+    for (const [attemptId, attempt] of this.attemptMap.entries()) {
+      if (attempt.taskId === taskId && attempt.agentName === agentName) {
+        return { attemptId, ...attempt };
+      }
+    }
+    const attempts = this.deps.persistenceService.listAttemptsForTask(taskId);
+    const matched = attempts.find((attempt) => attempt.agentName === agentName);
+    if (!matched) {
+      return void 0;
+    }
+    const role = typeof matched.metadata?.role === "string" ? matched.metadata.role : "worker";
+    this.attemptMap.set(matched.attemptId, { taskId, role, agentName });
+    return { attemptId: matched.attemptId, taskId, role, agentName };
   }
 }
 // Annotate the CommonJS export names for ESM import in node:

@@ -45,6 +45,7 @@ var import_service = require("./persistence/service");
 var import_run_lifecycle = require("./run-lifecycle");
 var import_run_shutdown = require("./run-shutdown");
 var import_ToolService = require("./tools/ToolService");
+var import_project_registry = require("./services/project-registry.service");
 class DroidSwarmOrchestratorClient {
   constructor(config = (0, import_config.loadConfig)()) {
     this.config = config;
@@ -57,7 +58,7 @@ class DroidSwarmOrchestratorClient {
     this.supervisor = new import_AgentSupervisor.AgentSupervisor(
       config,
       this.registry,
-      import_node_path.default.resolve(__dirname, "main.js")
+      this.config.workerHostEntry ?? import_node_path.default.resolve(__dirname, "main.js")
     );
   }
   start() {
@@ -65,7 +66,15 @@ class DroidSwarmOrchestratorClient {
     this.runLifecycle.recoverInterruptedRuns();
     const activeRuns = this.persistence.runs.listActiveRuns();
     if (activeRuns.length === 0) {
-      this.currentRun = this.persistence.createRun(this.config.projectId);
+      this.currentRun = this.persistence.createRun(this.config.projectId, {
+        repoId: this.config.repoId,
+        rootPath: this.config.projectRoot,
+        branch: this.config.defaultBranch,
+        metadata: {
+          project_id: this.config.projectId,
+          repo_id: this.config.repoId
+        }
+      });
       this.log("created run", this.currentRun.runId);
     } else {
       if (activeRuns.length > 1) {
@@ -76,6 +85,19 @@ class DroidSwarmOrchestratorClient {
     }
     this.runLifecycle.startRun(this.currentRun);
     this.persistenceService = new import_service.OrchestratorPersistenceService(this.persistence, this.currentRun);
+    new import_project_registry.ProjectRegistryService(this.persistenceService).registerProject({
+      projectId: this.config.projectId,
+      name: this.config.projectName,
+      repo: {
+        repoId: this.config.repoId,
+        name: this.config.projectName,
+        rootPath: this.config.projectRoot,
+        defaultBranch: this.config.defaultBranch,
+        mainBranch: this.config.gitPolicy.mainBranch,
+        developBranch: this.config.gitPolicy.developBranch,
+        allowedRoots: this.config.allowedRepoRoots
+      }
+    });
     this.scheduler = new import_TaskScheduler.TaskScheduler(this.persistenceService, this.supervisor, this.config);
     const toolService = new import_ToolService.ToolService(this.config, this.persistenceService);
     this.engine = new import_OrchestratorEngine.OrchestratorEngine({

@@ -451,18 +451,17 @@ dashboard_runtime_dist_root() {
   printf '%s\n' "$dashboard_root/dist/apps/dashboard/.next"
 }
 
-validate_dashboard_runtime_assets() {
-  local dashboard_root="$1"
-  local dashboard_dist_root manifest_dir static_root
+validate_dashboard_dist_assets() {
+  local dashboard_dist_root="$1"
+  local manifest_dir static_root
 
-  dashboard_dist_root="$(dashboard_runtime_dist_root "$dashboard_root")"
   manifest_dir="$dashboard_dist_root/server/app"
   static_root="$dashboard_dist_root/static"
 
   [[ -d "$manifest_dir" ]] || return 0
   [[ -d "$static_root" ]] || {
     err "Dashboard runtime is missing .next assets at $static_root"
-    exit 1
+    return 1
   }
 
   local manifest_file chunk_path relative_path
@@ -472,10 +471,46 @@ validate_dashboard_runtime_assets() {
       if [[ ! -f "$dashboard_dist_root/$relative_path" ]]; then
         err "Dashboard runtime is missing referenced chunk asset: $chunk_path"
         err "Referenced by: $manifest_file"
-        exit 1
+        return 1
       fi
     done < <(rg -o '/_next/static/[^"]+' "$manifest_file" | sort -u)
   done < <(find "$manifest_dir" -name '*page_client-reference-manifest.js' -type f | sort)
+}
+
+validate_dashboard_runtime_assets() {
+  local dashboard_root="$1"
+  local dashboard_dist_root
+
+  dashboard_dist_root="$(dashboard_runtime_dist_root "$dashboard_root")"
+  if ! validate_dashboard_dist_assets "$dashboard_dist_root"; then
+    exit 1
+  fi
+}
+
+repair_dashboard_dist_source() {
+  local workspace_root="$1"
+  local dashboard_dist_root="$2"
+
+  if [[ ! -f "$workspace_root/package.json" || ! -f "$workspace_root/package-lock.json" ]]; then
+    err "Dashboard assets are inconsistent and the installer cannot repair them without package manifests."
+    err "Expected to find package.json and package-lock.json under: $workspace_root"
+    exit 1
+  fi
+
+  info "Dashboard build artifacts are inconsistent. Rebuilding dashboard assets..."
+
+  if ! (
+    cd "$workspace_root"
+    if [[ ! -d node_modules ]]; then
+      "$DROIDSWARM_INSTALL_NPM_BIN" ci
+    fi
+    npx nx build dashboard
+  ); then
+    err "Failed to rebuild dashboard assets from installer source."
+    exit 1
+  fi
+
+  validate_dashboard_dist_assets "$dashboard_dist_root"
 }
 
 write_assignment() {
@@ -1052,6 +1087,12 @@ if [[ ! -d "$DASHBOARD_RUNTIME_SOURCE" ]]; then
   exit 1
 fi
 
+if [[ -d "$DASHBOARD_DIST_SOURCE/server/app" ]]; then
+  if ! validate_dashboard_dist_assets "$DASHBOARD_DIST_SOURCE"; then
+    repair_dashboard_dist_source "$WORKSPACE_SOURCE_ROOT" "$DASHBOARD_DIST_SOURCE"
+  fi
+fi
+
 mkdir -p "$INSTALL_ROOT/bin" "$INSTALL_ROOT/lib" "$INSTALL_ROOT/libexec" "$INSTALL_ROOT/runtime"
 cp "$SOURCE_DIR/bin/DroidSwarm" "$INSTALL_ROOT/bin/DroidSwarm"
 cp -R "$SOURCE_DIR/lib/droidswarm" "$INSTALL_ROOT/lib/"
@@ -1099,6 +1140,7 @@ if [[ -d "$DASHBOARD_PUBLIC_SOURCE" ]]; then
 fi
 if [[ -d "$DASHBOARD_DIST_SOURCE" ]]; then
   DASHBOARD_RUNTIME_DIST="$dashboard_dist_root"
+  rm -rf "$DASHBOARD_RUNTIME_DIST"
   mkdir -p "$DASHBOARD_RUNTIME_DIST"
   cp -R "$DASHBOARD_DIST_SOURCE/." "$DASHBOARD_RUNTIME_DIST"
 fi

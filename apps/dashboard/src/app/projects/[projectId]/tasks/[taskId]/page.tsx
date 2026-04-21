@@ -5,6 +5,8 @@ import { SkillPackList } from '../../../../../components/skill-pack-list';
 import { TaskChatPanel } from '../../../../../components/task-chat-panel';
 import { WorkerHeartbeatPanel } from '../../../../../components/worker-heartbeat-panel';
 
+export const dynamic = 'force-dynamic';
+
 export default async function ProjectTaskPage({ params }: { params: Promise<{ projectId: string; taskId: string }> }) {
   const { taskId } = await params;
   const messages = listTaskChatMessages(taskId);

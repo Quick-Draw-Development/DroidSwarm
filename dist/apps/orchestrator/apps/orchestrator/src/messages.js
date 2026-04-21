@@ -40,14 +40,38 @@ const buildActor = (name, actorType) => ({
   actor_id: name,
   actor_name: name
 });
-const buildAgentStatusUpdate = (config, taskId, roomId, agentName, phase, statusCode, content, compression, payloadExtras) => ({
-  message_id: (0, import_node_crypto.randomUUID)(),
-  project_id: config.projectId,
-  room_id: roomId,
-  task_id: taskId,
+const buildEnvelope = (input) => {
+  const id = (0, import_node_crypto.randomUUID)();
+  const ts = nowIso();
+  return {
+    id,
+    message_id: id,
+    ts,
+    project_id: input.config.projectId,
+    room_id: input.roomId,
+    task_id: input.taskId,
+    agent_id: input.from.actor_id,
+    role: input.from.actor_name,
+    verb: input.verb,
+    depends_on: input.dependsOn,
+    artifact_refs: input.artifactRefs,
+    memory_refs: input.memoryRefs,
+    body: input.body ?? input.payload,
+    type: input.type,
+    from: input.from,
+    timestamp: ts,
+    payload: input.payload,
+    compression: input.compression,
+    usage: input.usage
+  };
+};
+const buildAgentStatusUpdate = (config, taskId, roomId, agentName, phase, statusCode, content, compression, payloadExtras) => buildEnvelope({
+  config,
+  roomId,
+  taskId,
   type: "status_update",
   from: buildActor(agentName, "agent"),
-  timestamp: nowIso(),
+  verb: "status.updated",
   payload: {
     phase,
     status_code: statusCode,
@@ -56,14 +80,13 @@ const buildAgentStatusUpdate = (config, taskId, roomId, agentName, phase, status
   },
   compression
 });
-const buildOrchestratorStatusUpdate = (config, roomId, phase, statusCode, content, taskId, extraPayload) => ({
-  message_id: (0, import_node_crypto.randomUUID)(),
-  project_id: config.projectId,
-  room_id: roomId,
-  task_id: taskId,
+const buildOrchestratorStatusUpdate = (config, roomId, phase, statusCode, content, taskId, extraPayload) => buildEnvelope({
+  config,
+  roomId,
+  taskId,
   type: "status_update",
   from: buildActor(config.agentName, "orchestrator"),
-  timestamp: nowIso(),
+  verb: "status.updated",
   payload: {
     phase,
     status_code: statusCode,
@@ -71,30 +94,32 @@ const buildOrchestratorStatusUpdate = (config, roomId, phase, statusCode, conten
     ...extraPayload
   }
 });
-const buildArtifactCreatedMessage = (config, taskId, roomId, agentName, artifact) => ({
-  message_id: (0, import_node_crypto.randomUUID)(),
-  project_id: config.projectId,
-  room_id: roomId,
-  task_id: taskId,
-  type: "artifact_created",
-  from: buildActor(agentName, "agent"),
-  timestamp: nowIso(),
-  payload: {
-    artifact_id: (0, import_node_crypto.randomUUID)(),
-    task_id: taskId,
-    kind: artifact.kind,
-    summary: artifact.title,
-    content: artifact.content
-  }
-});
-const buildSpawnRequestedMessage = (config, taskId, roomId, agentName, request) => ({
-  message_id: (0, import_node_crypto.randomUUID)(),
-  project_id: config.projectId,
-  room_id: roomId,
-  task_id: taskId,
+const buildArtifactCreatedMessage = (config, taskId, roomId, agentName, artifact) => {
+  const artifactId = (0, import_node_crypto.randomUUID)();
+  return buildEnvelope({
+    config,
+    roomId,
+    taskId,
+    type: "artifact_created",
+    from: buildActor(agentName, "agent"),
+    verb: "artifact.created",
+    artifactRefs: [artifactId],
+    payload: {
+      artifact_id: artifactId,
+      task_id: taskId,
+      kind: artifact.kind,
+      summary: artifact.summary,
+      content: artifact.content ?? artifact.path ?? artifact.uri ?? artifact.summary
+    }
+  });
+};
+const buildSpawnRequestedMessage = (config, taskId, roomId, agentName, request) => buildEnvelope({
+  config,
+  roomId,
+  taskId,
   type: "spawn_requested",
   from: buildActor(agentName, "agent"),
-  timestamp: nowIso(),
+  verb: "spawn.requested",
   payload: {
     task_id: taskId,
     needed_role: request.role,
@@ -103,14 +128,13 @@ const buildSpawnRequestedMessage = (config, taskId, roomId, agentName, request) 
     content: `Need ${request.role}: ${request.reason}`
   }
 });
-const buildTaskAssignedMessage = (config, taskId, roomId, assignmentId, agents) => ({
-  message_id: (0, import_node_crypto.randomUUID)(),
-  project_id: config.projectId,
-  room_id: roomId,
-  task_id: taskId,
+const buildTaskAssignedMessage = (config, taskId, roomId, assignmentId, agents) => buildEnvelope({
+  config,
+  roomId,
+  taskId,
   type: "task_assigned",
   from: buildActor(config.agentName, "orchestrator"),
-  timestamp: nowIso(),
+  verb: "task.ready",
   payload: {
     task_id: taskId,
     assignment_id: assignmentId,
@@ -121,50 +145,45 @@ const buildTaskAssignedMessage = (config, taskId, roomId, assignmentId, agents) 
     }))
   }
 });
-const buildClarificationRequest = (config, taskId, roomId, targetUserId, question) => ({
-  message_id: (0, import_node_crypto.randomUUID)(),
-  project_id: config.projectId,
-  room_id: roomId,
-  task_id: taskId,
+const buildClarificationRequest = (config, taskId, roomId, targetUserId, question) => buildEnvelope({
+  config,
+  roomId,
+  taskId,
   type: "clarification_request",
   from: buildActor(config.agentName, "orchestrator"),
-  timestamp: nowIso(),
+  verb: "task.blocked",
   payload: {
     target_user_id: targetUserId,
     question,
     content: targetUserId ? `@${targetUserId} ${question}` : question
   }
 });
-const buildAgentToolResponseMessage = (config, taskId, roomId, agentName, payload, usage) => ({
-  message_id: (0, import_node_crypto.randomUUID)(),
-  project_id: config.projectId,
-  room_id: roomId,
-  task_id: taskId,
+const buildAgentToolResponseMessage = (config, taskId, roomId, agentName, payload, usage) => buildEnvelope({
+  config,
+  roomId,
+  taskId,
   type: "tool_response",
   from: buildActor(agentName, "agent"),
-  timestamp: nowIso(),
+  verb: "tool.response",
   payload,
   usage
 });
-const buildOperatorChatResponse = (config, content) => ({
-  message_id: (0, import_node_crypto.randomUUID)(),
-  project_id: config.projectId,
-  room_id: "operator",
+const buildOperatorChatResponse = (config, content) => buildEnvelope({
+  config,
+  roomId: "operator",
   type: "chat",
   from: buildActor(config.agentName, "orchestrator"),
-  timestamp: nowIso(),
-  payload: {
-    content
-  }
+  verb: "chat.message",
+  payload: { content }
 });
-const buildPlanProposedMessage = (config, taskId, planId, summary, plan, dependencies) => ({
-  message_id: (0, import_node_crypto.randomUUID)(),
-  project_id: config.projectId,
-  room_id: "operator",
-  task_id: taskId,
+const buildPlanProposedMessage = (config, taskId, planId, summary, plan, dependencies) => buildEnvelope({
+  config,
+  roomId: "operator",
+  taskId,
   type: "plan_proposed",
   from: buildActor(config.agentName, "orchestrator"),
-  timestamp: nowIso(),
+  verb: "plan.proposed",
+  dependsOn: dependencies,
   payload: {
     task_id: taskId,
     plan_id: planId,
@@ -173,24 +192,23 @@ const buildPlanProposedMessage = (config, taskId, planId, summary, plan, depende
     dependencies
   }
 });
-const buildToolRequestMessage = (config, taskId, agentName, payload) => ({
-  message_id: (0, import_node_crypto.randomUUID)(),
-  project_id: config.projectId,
-  room_id: taskId,
-  task_id: taskId,
+const buildToolRequestMessage = (config, taskId, agentName, payload) => buildEnvelope({
+  config,
+  roomId: taskId,
+  taskId,
   type: "tool_request",
   from: buildActor(agentName, "agent"),
-  timestamp: nowIso(),
-  payload
+  verb: "tool.request",
+  payload,
+  body: payload
 });
-const buildToolResponseMessage = (config, taskId, requestId, status, result, error) => ({
-  message_id: (0, import_node_crypto.randomUUID)(),
-  project_id: config.projectId,
-  room_id: taskId,
-  task_id: taskId,
+const buildToolResponseMessage = (config, taskId, requestId, status, result, error) => buildEnvelope({
+  config,
+  roomId: taskId,
+  taskId,
   type: "tool_response",
   from: buildActor(config.agentName, "orchestrator"),
-  timestamp: nowIso(),
+  verb: "tool.response",
   payload: {
     request_id: requestId,
     status,
@@ -198,14 +216,13 @@ const buildToolResponseMessage = (config, taskId, requestId, status, result, err
     error
   }
 });
-const buildVerificationRequestedMessage = (config, taskId, verificationType, requestedBy, detail) => ({
-  message_id: (0, import_node_crypto.randomUUID)(),
-  project_id: config.projectId,
-  room_id: "operator",
-  task_id: taskId,
+const buildVerificationRequestedMessage = (config, taskId, verificationType, requestedBy, detail) => buildEnvelope({
+  config,
+  roomId: "operator",
+  taskId,
   type: "verification_requested",
   from: buildActor(config.agentName, "orchestrator"),
-  timestamp: nowIso(),
+  verb: "verification.requested",
   payload: {
     task_id: taskId,
     verification_type: verificationType,
@@ -213,14 +230,13 @@ const buildVerificationRequestedMessage = (config, taskId, verificationType, req
     detail
   }
 });
-const buildVerificationCompletedMessage = (config, taskId, stage, status, reviewer, details) => ({
-  message_id: (0, import_node_crypto.randomUUID)(),
-  project_id: config.projectId,
-  room_id: "operator",
-  task_id: taskId,
+const buildVerificationCompletedMessage = (config, taskId, stage, status, reviewer, details) => buildEnvelope({
+  config,
+  roomId: "operator",
+  taskId,
   type: "verification_completed",
   from: buildActor(config.agentName, "orchestrator"),
-  timestamp: nowIso(),
+  verb: "verification.completed",
   payload: {
     task_id: taskId,
     status,
@@ -228,14 +244,14 @@ const buildVerificationCompletedMessage = (config, taskId, stage, status, review
     details: [`stage=${stage}`, details].filter(Boolean).join(" | ")
   }
 });
-const buildCheckpointCreatedMessage = (config, taskId, roomId, checkpointId, summary, metadata) => ({
-  message_id: (0, import_node_crypto.randomUUID)(),
-  project_id: config.projectId,
-  room_id: roomId,
-  task_id: taskId,
+const buildCheckpointCreatedMessage = (config, taskId, roomId, checkpointId, summary, metadata) => buildEnvelope({
+  config,
+  roomId,
+  taskId,
   type: "checkpoint_created",
   from: buildActor(config.agentName, "orchestrator"),
-  timestamp: nowIso(),
+  verb: "checkpoint.created",
+  memoryRefs: [checkpointId],
   payload: {
     checkpoint_id: checkpointId,
     task_id: taskId,

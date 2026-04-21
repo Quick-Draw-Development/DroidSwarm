@@ -8,6 +8,8 @@ import { TaskStatusAction } from '../../../components/TaskStatusAction';
 import { USERNAME_COOKIE } from '../../../lib/identity';
 import { getTaskDetails } from '../../../lib/db';
 
+export const dynamic = 'force-dynamic';
+
 export default async function ChannelPage({
   params,
 }: {

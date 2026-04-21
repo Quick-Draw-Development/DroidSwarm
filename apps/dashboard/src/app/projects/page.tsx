@@ -1,6 +1,8 @@
 import { listProjects } from '../../lib/db';
 import { ProjectSwitcher } from '../../components/project-switcher';
 
+export const dynamic = 'force-dynamic';
+
 export default function ProjectsPage() {
   const projects = listProjects();
   return (

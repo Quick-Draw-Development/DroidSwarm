@@ -1,5 +1,56 @@
 export type ActorType = 'agent' | 'orchestrator' | 'human' | 'system' | 'tool';
 export type ClientType = 'agent' | 'orchestrator' | 'human' | 'dashboard' | 'system';
+export type EnvelopeVerb =
+  | 'task.create'
+  | 'task.accept'
+  | 'task.ready'
+  | 'task.blocked'
+  | 'plan.proposed'
+  | 'spawn.requested'
+  | 'spawn.approved'
+  | 'spawn.denied'
+  | 'artifact.created'
+  | 'checkpoint.created'
+  | 'verification.requested'
+  | 'verification.completed'
+  | 'run.completed'
+  | 'handoff.ready'
+  | 'summary.emitted'
+  | 'memory.pinned'
+  | 'status.updated'
+  | 'tool.request'
+  | 'tool.response'
+  | 'chat.message'
+  | 'heartbeat';
+
+export interface EnvelopeRisk {
+  level?: 'low' | 'medium' | 'high';
+  code?: string;
+  summary?: string;
+}
+
+export interface EnvelopeRefs {
+  compact?: string;
+  expanded?: string;
+}
+
+export interface EnvelopeV2Fields {
+  id: string;
+  ts: string;
+  project_id: string;
+  swarm_id?: string;
+  run_id?: string;
+  task_id?: string;
+  room_id: string;
+  agent_id?: string;
+  role?: string;
+  verb: EnvelopeVerb;
+  depends_on?: string[];
+  artifact_refs?: string[];
+  memory_refs?: string[];
+  risk?: EnvelopeRisk;
+  body: Record<string, unknown>;
+}
 
 export interface ActorRef {
   actor_type: ActorType;
@@ -249,10 +300,22 @@ export interface MessagePayloadMap {
 export type MessageType = keyof MessagePayloadMap;
 
 type MessageEnvelopeBase<T extends MessageType> = {
+  id?: string;
   message_id: string;
+  ts?: string;
   project_id: string;
+  swarm_id?: string;
+  run_id?: string;
   room_id: string;
   task_id?: string;
+  agent_id?: string;
+  role?: string;
+  verb?: EnvelopeVerb;
+  depends_on?: string[];
+  artifact_refs?: string[];
+  memory_refs?: string[];
+  risk?: EnvelopeRisk;
+  body?: Record<string, unknown>;
   type: T;
   from: ActorRef;
   timestamp: string;
@@ -263,6 +326,7 @@ type MessageEnvelopeBase<T extends MessageType> = {
   session_id?: string;
   usage?: UsageShape;
   compression?: CompressionShape;
+  shorthand?: EnvelopeRefs;
 };
 
 export type MessageEnvelope<T extends MessageType = MessageType> = T extends MessageType

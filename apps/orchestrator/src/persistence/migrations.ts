@@ -433,4 +433,56 @@ export const migrations: SchemaMigration[] = [
       `);
     },
   },
+  {
+    version: 6,
+    description: 'Envelope v2 coordination digests, handoff packets, and routing telemetry',
+    apply: (database) => {
+      const tryExec = (statement: string): void => {
+        try {
+          database.exec(statement);
+        } catch {
+          // Ignore already-applied additive changes.
+        }
+      };
+
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS task_state_digests (
+          digest_id TEXT PRIMARY KEY,
+          task_id TEXT NOT NULL,
+          run_id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          updated_by TEXT NOT NULL,
+          payload_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY(task_id) REFERENCES tasks(task_id),
+          FOREIGN KEY(run_id) REFERENCES runs(run_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS handoff_packets (
+          packet_id TEXT PRIMARY KEY,
+          task_id TEXT NOT NULL,
+          run_id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          from_task_id TEXT NOT NULL,
+          to_task_id TEXT,
+          to_role TEXT NOT NULL,
+          digest_id TEXT NOT NULL,
+          payload_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY(task_id) REFERENCES tasks(task_id),
+          FOREIGN KEY(run_id) REFERENCES runs(run_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_task_state_digests_task ON task_state_digests(task_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_handoff_packets_task ON handoff_packets(task_id, created_at DESC);
+      `);
+
+      tryExec('ALTER TABLE worker_results ADD COLUMN model_tier TEXT;');
+      tryExec('ALTER TABLE worker_results ADD COLUMN queue_depth INTEGER;');
+      tryExec('ALTER TABLE worker_results ADD COLUMN fallback_count INTEGER;');
+      tryExec('ALTER TABLE worker_heartbeats ADD COLUMN model_tier TEXT;');
+      tryExec('ALTER TABLE worker_heartbeats ADD COLUMN queue_depth INTEGER;');
+      tryExec('ALTER TABLE worker_heartbeats ADD COLUMN fallback_count INTEGER;');
+    },
+  },
 ];

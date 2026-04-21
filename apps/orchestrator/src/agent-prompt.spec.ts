@@ -28,5 +28,6 @@ describe('buildAgentPrompt', () => {
     assert.match(prompt, /Role: planner/);
     assert.match(prompt, /droidspeak rules here/);
     assert.match(prompt, /blk api-spec/);
+    assert.match(prompt, /droidspeak-v2/);
   });
 });

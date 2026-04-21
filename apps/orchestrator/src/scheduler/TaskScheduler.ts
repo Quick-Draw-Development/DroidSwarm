@@ -21,6 +21,7 @@ import { BranchPolicyService } from '../services/branch-policy.service';
 import { WorkspaceService } from '../services/workspace.service';
 import { SkillPackService } from '../services/skill-pack.service';
 import { PRAutomationService } from '../services/pr-automation.service';
+import { buildDroidspeakV2, buildHandoffPacket, buildTaskDigest } from '../coordination';
 
 const buildTaskRecord = (task: PersistedTask): TaskRecord => ({
   taskId: task.taskId,
@@ -89,7 +90,7 @@ export class TaskScheduler {
   private readonly pendingCheckpoints = new Map<string, PendingCheckpoint>();
   private readonly artifactCriticQueue = new Set<string>();
   private readonly tasksAwaitingCritic = new Set<string>();
-  private readonly routingService = new RoutingService();
+  private readonly routingService: RoutingService;
   private readonly workerResultService = new WorkerResultService();
   private readonly branchPolicyService: BranchPolicyService;
   private readonly workspaceService: WorkspaceService;
@@ -103,6 +104,7 @@ export class TaskScheduler {
     private readonly supervisor: AgentSupervisor,
     private readonly config: OrchestratorConfig,
   ) {
+    this.routingService = new RoutingService(this.config);
     this.branchPolicyService = new BranchPolicyService(this.config.gitPolicy);
     this.workspaceService = new WorkspaceService(this.config);
     this.skillPackService = new SkillPackService(this.config);
@@ -143,6 +145,14 @@ export class TaskScheduler {
       summary: result.summary,
     });
     this.persistenceService.recordWorkerResult(taskId, attemptId, result);
+    this.buildAndPersistDigest(
+      task,
+      result.summary,
+      agentName,
+      typeof result.metadata?.compression === 'object' && result.metadata.compression !== null && typeof (result.metadata.compression as { compressed_content?: unknown }).compressed_content === 'string'
+        ? (result.metadata.compression as { compressed_content: string }).compressed_content
+        : undefined,
+    );
 
     const stage = typeof task.metadata?.stage === 'string' ? task.metadata.stage : undefined;
     if (stage === 'artifact_verification') {
@@ -355,6 +365,9 @@ export class TaskScheduler {
     const metadata = task.metadata ?? {};
     const checkpoint = this.persistenceService.getLatestCheckpoint(task.taskId);
     const checkpointPayload = checkpoint ? this.parseCheckpointPayload(checkpoint) : undefined;
+    const taskDigest = this.persistenceService.getLatestTaskStateDigest(task.taskId)
+      ?? (task.parentTaskId ? this.persistenceService.getLatestTaskStateDigest(task.parentTaskId) : undefined);
+    const handoffPacket = this.persistenceService.listHandoffPackets(task.taskId)[0];
 
     const defaultAssignment = defaultRoleInstructions(record)[0];
     const role = typeof metadata.agent_role === 'string' ? metadata.agent_role : defaultAssignment.role;
@@ -420,6 +433,9 @@ export class TaskScheduler {
         readOnly: routingDecision.readOnly,
         instructions,
         workspacePath: workspace.path,
+        taskDigest,
+        handoffPacket,
+        modelTier: routingDecision.modelTier,
       },
     );
     if (!spawned) {
@@ -462,6 +478,13 @@ export class TaskScheduler {
       routing_decision: routingDecision,
     });
     this.persistenceService.recordAssignment(spawned.agentName, attemptId);
+    this.persistenceService.updateAttemptMetadata(attemptId, {
+      ...(this.persistenceService.getAttempt(attemptId)?.metadata ?? {}),
+      routing_decision: routingDecision,
+      model_tier: routingDecision.modelTier,
+      queue_depth: routingDecision.queueDepth ?? 0,
+      fallback_count: routingDecision.fallbackCount ?? 0,
+    });
     this.persistenceService.setTaskStatus(task.taskId, 'running');
   }
 
@@ -498,7 +521,7 @@ export class TaskScheduler {
 
     for (const request of requests) {
       const childId = randomUUID();
-      this.persistenceService.createTask({
+      const childRecord = this.persistenceService.createTask({
         taskId: childId,
         name: `${task.name} → ${request.role}`,
         priority: task.priority,
@@ -519,6 +542,23 @@ export class TaskScheduler {
         },
       });
       this.persistenceService.addDependency(task.taskId, childId);
+      const digest = this.buildAndPersistDigest(task, parentSummary, this.config.agentName, parentDroidspeak);
+      const handoff = buildHandoffPacket({
+        task: childRecord,
+        fromTaskId: task.taskId,
+        toTaskId: childId,
+        toRole: request.role,
+        digest,
+        requiredReads: digest.artifactIndex.map((artifact) => artifact.artifactId),
+        summary: request.instructions,
+        droidspeak: buildDroidspeakV2('handoff_ready', `Handoff ready for ${request.role}.`),
+      });
+      this.persistenceService.recordHandoffPacket(handoff);
+      this.persistenceService.recordExecutionEvent('handoff_ready', `Handoff packet ready for ${request.role}`, {
+        taskId: childId,
+        fromTaskId: task.taskId,
+        digestId: digest.id,
+      });
       this.readyQueue.add(childId);
       childIds.push(childId);
     }
@@ -646,6 +686,12 @@ export class TaskScheduler {
 
   private persistCheckpoint(taskId: string, attemptId: string, summary: string | undefined, payload: Record<string, unknown>): void {
     const checkpointId = this.persistenceService.recordCheckpoint(taskId, attemptId, payload);
+    const task = this.persistenceService.getTask(taskId);
+    if (task && summary) {
+      this.buildAndPersistDigest(task, summary, attemptId, typeof payload.compression === 'object' && payload.compression !== null && typeof (payload.compression as { compressed_content?: unknown }).compressed_content === 'string'
+        ? (payload.compression as { compressed_content: string }).compressed_content
+        : undefined);
+    }
     this.events?.onCheckpointCreated?.(
       taskId,
       checkpointId,
@@ -739,6 +785,7 @@ export class TaskScheduler {
     if (result.success) {
       this.persistenceService.setTaskStatus(task.taskId, 'completed');
       this.persistenceService.setTaskStatus(parent.taskId, 'verified');
+      this.buildAndPersistDigest(parent, result.summary ?? 'verification passed', agentName);
       this.startReview(parent, result.summary);
     } else {
       this.persistenceService.setTaskStatus(task.taskId, 'failed');
@@ -791,6 +838,7 @@ export class TaskScheduler {
     if (result.success) {
       this.persistenceService.setTaskStatus(task.taskId, 'completed');
       this.persistenceService.setTaskStatus(parent.taskId, 'verified');
+      this.buildAndPersistDigest(parent, result.summary ?? 'review passed', agentName);
       if (parent.rootPath) {
         this.prAutomationService.finalizeTask(parent, parent.rootPath);
       }
@@ -848,6 +896,7 @@ export class TaskScheduler {
         ...(parent.metadata ?? {}),
         critic_verified: new Date().toISOString(),
       });
+      this.buildAndPersistDigest(parent, result.summary ?? 'artifact verification passed', agentName);
       this.flushPendingCheckpoint(parent);
       this.persistenceService.setTaskStatus(parent.taskId, 'queued');
     } else {
@@ -976,6 +1025,35 @@ export class TaskScheduler {
   private isCodeRole(role: string): boolean {
     const normalized = role.toLowerCase();
     return normalized.includes('code') || normalized.includes('coder') || normalized.includes('dev');
+  }
+
+  private buildAndPersistDigest(
+    task: PersistedTask,
+    summary: string,
+    updatedBy: string,
+    compact?: string,
+  ) {
+    const artifacts = this.persistenceService.getArtifactsForTask(task.taskId);
+    const digest = buildTaskDigest({
+      task,
+      summary,
+      artifacts,
+      lastUpdatedBy: updatedBy,
+      openQuestions: typeof task.metadata?.clarification_question === 'string' ? [task.metadata.clarification_question] : [],
+      activeRisks: typeof task.metadata?.blocked_reason === 'string' ? [task.metadata.blocked_reason] : [],
+      decisions: typeof task.metadata?.agent_reason === 'string' ? [task.metadata.agent_reason] : [],
+      verificationState: task.status,
+      droidspeak: compact
+        ? buildDroidspeakV2('summary_emitted', summary, compact)
+        : buildDroidspeakV2(task.status === 'waiting_on_dependency' || task.status === 'waiting_on_human' ? 'blocked' : 'plan_status', summary),
+    });
+    this.persistenceService.recordTaskStateDigest(digest);
+    this.persistenceService.recordExecutionEvent('memory_pinned', `Task digest updated for ${task.taskId}`, {
+      taskId: task.taskId,
+      digestId: digest.id,
+      verificationState: digest.verificationState,
+    });
+    return digest;
   }
 
   private recordBudgetLimit(taskId: string | undefined, detail: string, consumed: number): void {

@@ -1,7 +1,9 @@
 import { z } from 'zod';
 
-export const WORKER_ENGINES = ['local-llama', 'codex-cloud', 'codex-cli', 'mux-local', 'blink-agent'] as const;
+export const WORKER_ENGINES = ['local-llama', 'apple-intelligence', 'codex-cloud', 'codex-cli', 'mux-local', 'blink-agent'] as const;
 export type WorkerEngine = (typeof WORKER_ENGINES)[number];
+export const MODEL_TIERS = ['local-cheap', 'local-capable', 'cloud'] as const;
+export type ModelTier = (typeof MODEL_TIERS)[number];
 
 export interface TaskScope {
   projectId: string;
@@ -88,21 +90,78 @@ export interface WorkerHeartbeat {
   taskId: string;
   attemptId: string;
   engine: WorkerEngine;
+  modelTier?: ModelTier;
+  queueDepth?: number;
+  fallbackCount?: number;
   timestamp: string;
   elapsedMs: number;
   status: 'starting' | 'running' | 'waiting' | 'finishing';
   lastActivity?: string;
 }
 
+export interface DroidspeakV2State {
+  compact: string;
+  expanded: string;
+  kind:
+    | 'plan_status'
+    | 'blocked'
+    | 'unblocked'
+    | 'handoff_ready'
+    | 'verification_needed'
+    | 'summary_emitted'
+    | 'memory_pinned';
+}
+
+export interface TaskStateDigest {
+  id: string;
+  taskId: string;
+  runId: string;
+  projectId: string;
+  objective: string;
+  currentPlan: string[];
+  decisions: string[];
+  openQuestions: string[];
+  activeRisks: string[];
+  artifactIndex: Array<{
+    artifactId: string;
+    kind: string;
+    summary: string;
+  }>;
+  verificationState: string;
+  lastUpdatedBy: string;
+  ts: string;
+  droidspeak?: DroidspeakV2State;
+}
+
+export interface HandoffPacket {
+  id: string;
+  taskId: string;
+  runId: string;
+  projectId: string;
+  fromTaskId: string;
+  toTaskId?: string;
+  toRole: string;
+  digestId: string;
+  requiredReads: string[];
+  summary: string;
+  ts: string;
+  droidspeak?: DroidspeakV2State;
+}
+
 export interface RoutingDecision {
   engine: WorkerEngine;
   model?: string;
+  modelTier?: ModelTier;
   reason: string;
   role: string;
   readOnly: boolean;
   complexity: 'low' | 'medium' | 'high';
   confidence: number;
   skillPacks?: string[];
+  queueDepth?: number;
+  fallbackCount?: number;
+  localFirst?: boolean;
+  cloudEscalated?: boolean;
 }
 
 export interface TaskChatMessage {

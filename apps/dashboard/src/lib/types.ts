@@ -157,6 +157,9 @@ export interface RepoSummary {
 export interface WorkerHeartbeatSummary {
   attemptId: string;
   engine: string;
+  modelTier?: string;
+  queueDepth?: number;
+  fallbackCount?: number;
   status: string;
   elapsedMs: number;
   lastActivity?: string;
@@ -167,6 +170,9 @@ export interface RoutingDecisionSummary {
   attemptId: string;
   engine?: string;
   model?: string;
+  modelTier?: string;
+  queueDepth?: number;
+  fallbackCount?: number;
   reason?: string;
   role?: string;
   readOnly?: boolean;

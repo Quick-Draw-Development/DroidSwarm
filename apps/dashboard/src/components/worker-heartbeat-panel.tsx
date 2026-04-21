@@ -7,7 +7,7 @@ export function WorkerHeartbeatPanel({ heartbeats }: { heartbeats: WorkerHeartbe
       <ul>
         {heartbeats.map((heartbeat) => (
           <li key={`${heartbeat.attemptId}-${heartbeat.createdAt}`}>
-            {heartbeat.engine} · {heartbeat.status} · {heartbeat.elapsedMs}ms
+            {heartbeat.engine} [{heartbeat.modelTier ?? 'unassigned'}] · {heartbeat.status} · {heartbeat.elapsedMs}ms · queue {heartbeat.queueDepth ?? 0} · fallback {heartbeat.fallbackCount ?? 0}
           </li>
         ))}
       </ul>

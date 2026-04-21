@@ -66,7 +66,7 @@ DroidSwarm shutdown --all
 
 ## Current Scope
 
-The repo now carries the shared contracts and persistence scaffolding for multi-project runs, repo-target/workspace scoping, canonical task chat, worker results and heartbeats, project memory, skill packs, local-first routing, and strict git-flow enforcement. Existing durable runs/tasks/checkpoints are preserved and extended rather than replaced.
+The repo now carries the shared contracts and persistence scaffolding for multi-project runs, repo-target/workspace scoping, canonical task chat, worker results and heartbeats, project memory, skill packs, local-first routing, EnvelopeV2 compatibility, TaskStateDigest/HandoffPacket durability, and strict git-flow enforcement. Existing durable runs/tasks/checkpoints are preserved and extended rather than replaced.
 
 ## Workspace Layout
 
@@ -82,7 +82,7 @@ The repo now carries the shared contracts and persistence scaffolding for multi-
 ## Architecture docs
 
 - `docs/orchestrator-architecture.md` describes the final control-plane flow (durable runs/tasks, scheduler decisions, supervisor lifecycle, and the dashboard insights that read them).
-- `docs/orchestrator-protocol-migration.md` details the execution-centered event schema (`plan_proposed`, `verification_requested`, `artifact_created`, etc.) and how clients should emit/persist those events when the orchestrator restarts.
+- `docs/orchestrator-protocol-migration.md` details EnvelopeV2, compact verbs, TaskStateDigest/HandoffPacket artifacts, and the execution-centered event schema (`plan_proposed`, `verification_requested`, `artifact_created`, etc.) used for compatibility and replay.
 - `docs/orchestrator-runlife-guide.md` explains the explicit run lifecycle, dependency semantics, durable event flow, policy enforcement, operator command model, and restart/recovery guarantees that now drive the control plane.
 - `docs/architecture/*.md` covers the merged multi-project system, worker contract, chat sync, project registry, routing policy, git policy, checkpoint memory, and Blink bridge.
 
@@ -94,18 +94,18 @@ The repo now carries the shared contracts and persistence scaffolding for multi-
 
 ## Runtime Setup
 
-Installer and runtime management now expect Blink server, Mux, and llama.cpp to be available through env-configured binaries or install commands:
+The installer now provisions the local runtime stack directly:
 
-- `DROIDSWARM_BLINK_SERVER_BIN` or `DROIDSWARM_BLINK_SERVER_INSTALL_CMD`
-- `DROIDSWARM_MUX_BIN` or `DROIDSWARM_MUX_INSTALL_CMD`
-- `DROIDSWARM_LLAMA_SERVER_BIN` or `DROIDSWARM_LLAMA_INSTALL_CMD`
-- `DROIDSWARM_LLAMA_MODEL` and optionally `DROIDSWARM_LLAMA_MODEL_DOWNLOAD_CMD`
+- `blink-server` is installed automatically and Blink setup verifies Docker is installed and running before swarm startup.
+- `mux` is installed automatically via the supported npm CLI package and started as a managed local service.
+- `llama.cpp` is installed locally, then the installer prompts for which local models to download and writes an inventory at `~/.droidswarm/models/inventory.json`.
 
-The installer writes the resolved service configuration to `~/.droidswarm/services.env`. Swarm startup reads that file, starts Blink server, Mux, and llama.cpp as managed services, and exports their local URLs to the orchestrator.
+The installer writes the resolved service configuration to `~/.droidswarm/services.env`. Swarm startup reads that file, starts Blink server, Mux, and llama.cpp as managed services, and exports their local URLs plus the selected llama model catalog to the orchestrator. Environment variables remain available as overrides, but they are no longer the primary setup path.
 
 Optional provider/runtime env:
 
 - `DROIDSWARM_CODEX_API_KEY`, `DROIDSWARM_CODEX_API_BASE_URL`, `DROIDSWARM_CODEX_CLOUD_MODEL`
+- `DROIDSWARM_MODEL_APPLE` for the first-class local Apple Intelligence agent
 - `DROIDSWARM_SLACK_BOT_TOKEN`, `DROIDSWARM_SLACK_API_BASE_URL`
 - `DROIDSWARM_BLINK_API_TOKEN`, `DROIDSWARM_BLINK_API_BASE_URL`
 - `DROIDSWARM_WORKER_HOST_ENTRY` and `DROIDSWARM_BLINK_BRIDGE_ENTRY` when running separate built runtimes

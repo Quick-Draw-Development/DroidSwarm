@@ -31,3 +31,32 @@ test('parseMessageEnvelope rejects missing actor refs', () => {
     payload: {},
   })));
 });
+
+test('parseMessageEnvelope normalizes EnvelopeV2 compatibility fields', () => {
+  const parsed = parseMessageEnvelope(JSON.stringify({
+    message_id: 'msg-2',
+    project_id: 'droidswarm',
+    room_id: 'task-1',
+    type: 'plan_proposed',
+    from: {
+      actor_type: 'agent',
+      actor_id: 'planner-1',
+      actor_name: 'planner',
+    },
+    timestamp: '2026-03-12T12:00:00.000Z',
+    payload: {
+      task_id: 'task-1',
+      plan_id: 'plan-1',
+      summary: 'plan ready',
+    },
+  }));
+
+  assert.equal(parsed.id, 'msg-2');
+  assert.equal(parsed.ts, '2026-03-12T12:00:00.000Z');
+  assert.equal(parsed.verb, 'plan.proposed');
+  assert.deepEqual(parsed.body, {
+    task_id: 'task-1',
+    plan_id: 'plan-1',
+    summary: 'plan ready',
+  });
+});

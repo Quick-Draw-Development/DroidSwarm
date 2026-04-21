@@ -1,8 +1,12 @@
 import { RoutingService as SharedRoutingService } from '@shared-routing';
-import type { PersistedTask, RoutingDecision } from '../types';
+import type { OrchestratorConfig, PersistedTask, RoutingDecision } from '../types';
 
 export class RoutingService {
   private readonly routing = new SharedRoutingService();
+
+  constructor(
+    private readonly config: Pick<OrchestratorConfig, 'routingPolicy' | 'modelRouting'>,
+  ) {}
 
   decide(task: PersistedTask, role: string): RoutingDecision {
     const normalizedRole = role.toLowerCase();
@@ -12,12 +16,27 @@ export class RoutingService {
       normalizedRole.includes('review') ||
       normalizedRole.includes('tester') ||
       normalizedRole.includes('critic');
-    return this.routing.decide({
+    const decision = this.routing.decide({
       role,
       taskType: typeof task.metadata?.task_type === 'string' ? task.metadata.task_type : undefined,
       stage: typeof task.metadata?.stage === 'string' ? task.metadata.stage : undefined,
       summary: typeof task.metadata?.description === 'string' ? task.metadata.description : undefined,
       readOnly: typeof task.metadata?.read_only === 'boolean' ? task.metadata.read_only : readOnlyByRole,
+      allowCloud: typeof task.metadata?.allow_cloud === 'boolean' ? task.metadata.allow_cloud : false,
+      queueDepth: typeof task.metadata?.queue_depth === 'number' ? task.metadata.queue_depth : 0,
+      fallbackCount: typeof task.metadata?.fallback_count === 'number' ? task.metadata.fallback_count : 0,
+      planningHints: this.config.routingPolicy.plannerRoles,
+      appleRoles: this.config.routingPolicy.appleRoles,
+      appleHints: this.config.routingPolicy.appleTaskHints,
+      codeHints: this.config.routingPolicy.codeHints,
+      cloudEscalationHints: this.config.routingPolicy.cloudEscalationHints,
     });
+    if (decision.engine === 'apple-intelligence') {
+      return {
+        ...decision,
+        model: this.config.modelRouting.apple,
+      };
+    }
+    return decision;
   }
 }

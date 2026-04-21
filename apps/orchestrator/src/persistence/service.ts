@@ -6,6 +6,7 @@ import type {
   CheckpointRecord,
   CheckpointVectorRecord,
   ExecutionEventRecord,
+  HandoffPacket,
   OperatorControlActionRecord,
   PersistedTask,
   ProjectCheckpoint,
@@ -15,6 +16,7 @@ import type {
   TaskChatMessage,
   TaskAttemptRecord,
   TaskDependencyRecord,
+  TaskStateDigest,
   VerificationOutcomeRecord,
   WorkerHeartbeat,
   WorkerResult,
@@ -456,6 +458,22 @@ export class OrchestratorPersistenceService {
     return this.persistence.chat.listByTask(taskId);
   }
 
+  recordTaskStateDigest(digest: TaskStateDigest): void {
+    this.persistence.digests.record(digest);
+  }
+
+  getLatestTaskStateDigest(taskId: string): TaskStateDigest | undefined {
+    return this.persistence.digests.getLatestForTask(taskId) ?? undefined;
+  }
+
+  recordHandoffPacket(packet: HandoffPacket): void {
+    this.persistence.handoffs.record(packet);
+  }
+
+  listHandoffPackets(taskId: string): HandoffPacket[] {
+    return this.persistence.handoffs.listByTask(taskId);
+  }
+
   recordWorkerResult(taskId: string, attemptId: string, result: WorkerResult): void {
     const task = this.getTask(taskId);
     const scope = this.resolveScope(task ?? undefined);
@@ -474,6 +492,9 @@ export class OrchestratorPersistenceService {
       workspaceId: scope.workspaceId,
       engine: result.engine,
       model: result.model,
+      modelTier: typeof result.metadata?.modelTier === 'string' ? result.metadata.modelTier : undefined,
+      queueDepth: typeof result.metadata?.queueDepth === 'number' ? result.metadata.queueDepth : undefined,
+      fallbackCount: typeof result.metadata?.fallbackCount === 'number' ? result.metadata.fallbackCount : undefined,
       success: result.success,
       summary: result.summary,
       payloadJson: JSON.stringify(result),
@@ -495,6 +516,9 @@ export class OrchestratorPersistenceService {
       rootPath: scope.rootPath,
       branch: scope.branch,
       workspaceId: scope.workspaceId,
+      modelTier: heartbeat.modelTier,
+      queueDepth: heartbeat.queueDepth,
+      fallbackCount: heartbeat.fallbackCount,
     });
   }
 

@@ -1,4 +1,12 @@
-import type { SpawnRequest, TaskScope, WorkerEngine, WorkerHeartbeat, WorkerResult } from '@shared-types';
+import type {
+  HandoffPacket,
+  SpawnRequest,
+  TaskScope,
+  TaskStateDigest,
+  WorkerEngine,
+  WorkerHeartbeat,
+  WorkerResult,
+} from '@shared-types';
 
 export interface WorkerRequest {
   runId: string;
@@ -15,6 +23,8 @@ export interface WorkerRequest {
     parentSummary?: string;
     parentCheckpoint?: string;
     resumePacket?: string;
+    taskDigest?: TaskStateDigest;
+    handoffPacket?: HandoffPacket;
   };
 }
 
@@ -46,7 +56,7 @@ export interface LegacyCodexAgentResult {
   clarification_question?: string;
   reason_code?: string;
   compression?: {
-    scheme: 'droidspeak-v1';
+    scheme: 'droidspeak-v1' | 'droidspeak-v2';
     compressed_content: string;
   };
   metrics?: {

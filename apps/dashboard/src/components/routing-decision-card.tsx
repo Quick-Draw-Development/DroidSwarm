@@ -7,7 +7,8 @@ export function RoutingDecisionCard({ decisions }: { decisions: RoutingDecisionS
       <ul>
         {decisions.map((decision) => (
           <li key={decision.attemptId}>
-            {decision.role ?? 'worker'} → {decision.engine ?? 'unknown'} ({decision.complexity ?? 'n/a'})
+            {decision.role ?? 'worker'} → {decision.engine ?? 'unknown'} [{decision.modelTier ?? 'unassigned'}]
+            {' '}({decision.complexity ?? 'n/a'}, queue {decision.queueDepth ?? 0}, fallback {decision.fallbackCount ?? 0})
           </li>
         ))}
       </ul>

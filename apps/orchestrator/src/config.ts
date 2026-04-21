@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { defaultGitPolicy } from '@shared-git';
 
@@ -99,9 +100,17 @@ const envSchema = z.object({
   DROIDSWARM_MODEL_PLANNING: z.string().optional(),
   DROIDSWARM_MODEL_VERIFICATION: z.string().optional(),
   DROIDSWARM_MODEL_CODE: z.string().optional(),
+  DROIDSWARM_MODEL_APPLE: z.string().optional(),
   DROIDSWARM_MODEL_DEFAULT: z.string().optional(),
+  DROIDSWARM_ROUTING_PLANNER_ROLES: z.string().optional(),
+  DROIDSWARM_ROUTING_APPLE_ROLES: z.string().optional(),
+  DROIDSWARM_ROUTING_APPLE_HINTS: z.string().optional(),
+  DROIDSWARM_ROUTING_CODE_HINTS: z.string().optional(),
+  DROIDSWARM_ROUTING_CLOUD_HINTS: z.string().optional(),
   DROIDSWARM_LLAMA_BASE_URL: z.string().optional(),
   DROIDSWARM_LLAMA_MODEL: z.string().optional(),
+  DROIDSWARM_LLAMA_MODEL_NAME: z.string().optional(),
+  DROIDSWARM_LLAMA_MODELS_FILE: z.string().optional(),
   DROIDSWARM_LLAMA_TIMEOUT_MS: z.string().optional(),
   DROIDSWARM_MUX_BASE_URL: z.string().optional(),
   DROIDSWARM_MUX_TOKEN: z.string().optional(),
@@ -128,6 +137,28 @@ export const loadConfig = (): OrchestratorConfig => {
   const installDir = process.env.DROIDSWARM_INSTALL_DIR ?? path.resolve(droidswarmHome, 'install');
   const runtimeDir = process.env.DROIDSWARM_RUNTIME_DIR ?? path.resolve(installDir, 'runtime');
   const modelsDir = process.env.DROIDSWARM_MODELS_DIR ?? path.resolve(droidswarmHome, 'models');
+  const llamaModelsFile = env.DROIDSWARM_LLAMA_MODELS_FILE ?? path.resolve(modelsDir, 'inventory.json');
+  const availableLlamaModels = (() => {
+    if (!fs.existsSync(llamaModelsFile)) {
+      return undefined;
+    }
+
+    try {
+      const payload = JSON.parse(fs.readFileSync(llamaModelsFile, 'utf8')) as {
+        models?: Array<{ id?: string; name?: string; tags?: string; path?: string; url?: string }>;
+      };
+      const models = Array.isArray(payload.models) ? payload.models : [];
+      const normalized = models
+        .filter((model): model is { id: string; name: string; tags?: string; path: string; url?: string } =>
+          typeof model.id === 'string'
+          && typeof model.name === 'string'
+          && typeof model.path === 'string')
+        .filter((model) => fs.existsSync(model.path));
+      return normalized.length > 0 ? normalized : undefined;
+    } catch {
+      return undefined;
+    }
+  })();
   const host = env.DROIDSWARM_SOCKET_HOST ?? '127.0.0.1';
   const port = toPositiveInt(env.DROIDSWARM_SOCKET_PORT, 8765);
   const specDir = env.DROIDSWARM_SPECS_DIR ?? path.resolve(__dirname, '..', '..', '..', 'packages', 'bootstrap', 'specs');
@@ -135,6 +166,7 @@ export const loadConfig = (): OrchestratorConfig => {
   const planningModel = env.DROIDSWARM_MODEL_PLANNING ?? 'o1-preview';
   const verificationModel = env.DROIDSWARM_MODEL_VERIFICATION ?? 'gpt-4o-mini';
   const codeModel = env.DROIDSWARM_MODEL_CODE ?? 'claude-3.5-sonnet';
+  const appleModel = env.DROIDSWARM_MODEL_APPLE ?? 'apple-intelligence/local';
   const defaultModel = env.DROIDSWARM_MODEL_DEFAULT ?? env.DROIDSWARM_CODEX_MODEL ?? 'o1-preview';
   const budgetMaxConsumed = toPositiveIntOrUndefined(env.DROIDSWARM_BUDGET_MAX_CONSUMED);
   const allowedTools = parseCommaList(env.DROIDSWARM_ALLOWED_TOOLS);
@@ -181,7 +213,13 @@ export const loadConfig = (): OrchestratorConfig => {
     codexModel: env.DROIDSWARM_CODEX_MODEL,
     codexSandboxMode: env.DROIDSWARM_CODEX_SANDBOX_MODE,
     llamaBaseUrl: env.DROIDSWARM_LLAMA_BASE_URL ?? process.env.DROIDSWARM_LLAMA_BASE_URL ?? 'http://127.0.0.1:11434',
-    llamaModel: env.DROIDSWARM_LLAMA_MODEL ?? path.resolve(modelsDir, 'default.gguf'),
+    llamaModel: env.DROIDSWARM_LLAMA_MODEL_NAME
+      ?? env.DROIDSWARM_LLAMA_MODEL
+      ?? availableLlamaModels?.[0]?.id
+      ?? path.resolve(modelsDir, 'default.gguf'),
+    llamaModelPath: env.DROIDSWARM_LLAMA_MODEL ?? availableLlamaModels?.[0]?.path,
+    llamaModelsFile,
+    availableLlamaModels,
     llamaTimeoutMs: toPositiveInt(env.DROIDSWARM_LLAMA_TIMEOUT_MS, 60_000),
     muxBaseUrl: env.DROIDSWARM_MUX_BASE_URL,
     muxToken: env.DROIDSWARM_MUX_TOKEN,
@@ -214,7 +252,15 @@ export const loadConfig = (): OrchestratorConfig => {
       planning: planningModel,
       verification: verificationModel,
       code: codeModel,
+      apple: appleModel,
       default: defaultModel,
+    },
+    routingPolicy: {
+      plannerRoles: parseCommaList(env.DROIDSWARM_ROUTING_PLANNER_ROLES ?? 'plan,planner,research,review,orchestrator,checkpoint,compress'),
+      appleRoles: parseCommaList(env.DROIDSWARM_ROUTING_APPLE_ROLES ?? 'apple,ios,macos,swift,swiftui,xcode,visionos'),
+      appleTaskHints: parseCommaList(env.DROIDSWARM_ROUTING_APPLE_HINTS ?? 'apple,ios,ipad,iphone,macos,osx,swift,swiftui,objective-c,uikit,appkit,xcode,testflight,visionos,watchos,tvos'),
+      codeHints: parseCommaList(env.DROIDSWARM_ROUTING_CODE_HINTS ?? 'code,coder,dev,implementation,debug,refactor'),
+      cloudEscalationHints: parseCommaList(env.DROIDSWARM_ROUTING_CLOUD_HINTS ?? 'refactor,debug,multi-file,migration,large-scale'),
     },
     budgetMaxConsumed,
     allowedTools,

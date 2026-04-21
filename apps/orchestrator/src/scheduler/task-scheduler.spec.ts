@@ -69,7 +69,15 @@ const createTestConfig = (overrides: Partial<OrchestratorConfig> = {}): Orchestr
     planning: 'o1-preview',
     verification: 'gpt-4o-mini',
     code: 'claude-3.5-sonnet',
+    apple: 'apple-intelligence/local',
     default: 'o1-preview',
+  },
+  routingPolicy: {
+    plannerRoles: ['plan', 'planner', 'research', 'review', 'orchestrator', 'checkpoint', 'compress'],
+    appleRoles: ['apple', 'ios', 'macos', 'swift', 'swiftui', 'xcode', 'visionos'],
+    appleTaskHints: ['apple', 'ios', 'ipad', 'iphone', 'macos', 'osx', 'swift', 'swiftui', 'objective-c', 'uikit', 'appkit', 'xcode', 'testflight', 'visionos', 'watchos', 'tvos'],
+    codeHints: ['code', 'coder', 'dev', 'implementation', 'debug', 'refactor'],
+    cloudEscalationHints: ['refactor', 'debug', 'multi-file', 'migration', 'large-scale'],
   },
   budgetMaxConsumed: undefined,
   ...overrides,
@@ -143,6 +151,11 @@ describe('TaskScheduler', () => {
     const dependencies = persistence.dependencies.listDependencies(rootTask.taskId);
     assert.equal(dependencies.length, 1);
     assert.equal(dependencies[0].dependsOnTaskId, childTask.taskId);
+    const digest = service.getLatestTaskStateDigest(rootTask.taskId);
+    assert.ok(digest);
+    const handoffs = service.listHandoffPackets(childTask.taskId);
+    assert.equal(handoffs.length, 1);
+    assert.equal(handoffs[0].toRole, 'coder');
     assert.equal(spawnLog.length, 2, 'child task should have been scheduled');
 
     const childAttempt = spawnLog[1];

@@ -68,6 +68,7 @@ Commands:
   setup       Initialize a project for DroidSwarm
   swarm       Start and register a managed DroidSwarm instance
   list        List tracked swarms running on this machine
+  status      Show detailed status for one managed DroidSwarm instance
   shutdown    Shut down one swarm or all swarms
   version     Show the installed DroidSwarm version
   update      Refresh the installed runtime and restart swarms
@@ -77,6 +78,7 @@ Examples:
   DroidSwarm setup --project-root "$PWD" --project-mode greenfield
   DroidSwarm swarm --project-root "$PWD" --env OPENAI_API_KEY=example --config mode=dev
   DroidSwarm list
+  DroidSwarm status --swarm-id <id>
   DroidSwarm shutdown --swarm-id <id>
   DroidSwarm shutdown --all
 EOF
@@ -141,6 +143,17 @@ Options:
   --install-root DIR
   --bin-dir DIR
   --force
+  --help
+EOF
+}
+
+print_status_help() {
+  cat <<'EOF'
+Usage:
+  DroidSwarm status [--swarm-id <id>]
+
+Options:
+  --swarm-id ID
   --help
 EOF
 }
@@ -833,7 +846,90 @@ EOF
     local pid="$!"
     printf '%s\n' "$pid" >"$(swarm_pid_file "$swarm_id")"
     info "Started DroidSwarm '$swarm_id' (pid $pid)"
+    sleep 2
+    print_swarm_runtime_status "$swarm_id"
   fi
+}
+
+print_swarm_runtime_status() {
+  local swarm_id="$1"
+  local include_header="${2:-1}"
+
+  if ! load_swarm_env "$swarm_id"; then
+    err "Unable to load swarm state for $swarm_id"
+    return 1
+  fi
+
+  local pid status uptime
+  local socket_component_status dashboard_component_status orch_component_status bridge_component_status
+  local blink_component_status mux_component_status llama_component_status
+
+  pid="-"
+  status="stopped"
+  uptime="-"
+  socket_component_status="-"
+  dashboard_component_status="-"
+  orch_component_status="-"
+  bridge_component_status="disabled"
+  blink_component_status="-"
+  mux_component_status="-"
+  llama_component_status="-"
+
+  if [[ -f "$(swarm_status_file "$swarm_id")" ]]; then
+    status="$(<"$(swarm_status_file "$swarm_id")")"
+  fi
+  if [[ -f "$(swarm_pid_file "$swarm_id")" ]]; then
+    pid="$(<"$(swarm_pid_file "$swarm_id")")"
+    if is_pid_running "$pid"; then
+      [[ "$status" == "stopped" ]] && status="running"
+      uptime="$(format_duration "${DROIDSWARM_CREATED_EPOCH:-0}")"
+    else
+      [[ "$status" == "running" ]] && status="degraded"
+    fi
+  fi
+  if [[ -f "$(component_status_file "socket-server" "$(swarm_dir "$swarm_id")")" ]]; then
+    socket_component_status="$(<"$(component_status_file "socket-server" "$(swarm_dir "$swarm_id")")")"
+  fi
+  if [[ -f "$(component_status_file "dashboard" "$(swarm_dir "$swarm_id")")" ]]; then
+    dashboard_component_status="$(<"$(component_status_file "dashboard" "$(swarm_dir "$swarm_id")")")"
+  fi
+  if [[ -f "$(component_status_file "orchestrator" "$(swarm_dir "$swarm_id")")" ]]; then
+    orch_component_status="$(<"$(component_status_file "orchestrator" "$(swarm_dir "$swarm_id")")")"
+  fi
+  if [[ -f "$(component_status_file "blink-bridge" "$(swarm_dir "$swarm_id")")" ]]; then
+    bridge_component_status="$(<"$(component_status_file "blink-bridge" "$(swarm_dir "$swarm_id")")")"
+  fi
+  if [[ -f "$(service_status_file "blink-server" "$(swarm_dir "$swarm_id")")" ]]; then
+    blink_component_status="$(<"$(service_status_file "blink-server" "$(swarm_dir "$swarm_id")")")"
+  fi
+  if [[ -f "$(service_status_file "mux" "$(swarm_dir "$swarm_id")")" ]]; then
+    mux_component_status="$(<"$(service_status_file "mux" "$(swarm_dir "$swarm_id")")")"
+  fi
+  if [[ -f "$(service_status_file "llama.cpp" "$(swarm_dir "$swarm_id")")" ]]; then
+    llama_component_status="$(<"$(service_status_file "llama.cpp" "$(swarm_dir "$swarm_id")")")"
+  fi
+
+  if [[ "$include_header" == "1" ]]; then
+    printf '%-28s %-18s %-10s %-8s %-8s %-8s %-12s\n' \
+      "SWARM_ID" "PROJECT_ID" "STATUS" "PID" "DASH" "WS" "UPTIME"
+  fi
+  printf '%-28s %-18s %-10s %-8s %-8s %-8s %-12s\n' \
+    "$swarm_id" \
+    "${DROIDSWARM_PROJECT_ID:-unknown}" \
+    "$status" \
+    "$pid" \
+    "${DROIDSWARM_DASHBOARD_PORT:-"-"}" \
+    "${DROIDSWARM_WS_PORT:-"-"}" \
+    "$uptime"
+  printf '  components: socket=%s dashboard=%s orchestrator=%s blink-bridge=%s\n' \
+    "$socket_component_status" \
+    "$dashboard_component_status" \
+    "$orch_component_status" \
+    "$bridge_component_status"
+  printf '  services: blink=%s mux=%s llama=%s\n' \
+    "$blink_component_status" \
+    "$mux_component_status" \
+    "$llama_component_status"
 }
 
 cmd_list() {
@@ -860,8 +956,8 @@ EOF
     shift
   done
 
-  printf '%-28s %-18s %-10s %-8s %-8s %-8s %-12s %-12s %-12s\n' \
-    "SWARM_ID" "PROJECT_ID" "STATUS" "PID" "DASH" "WS" "UPTIME" "SOCKET" "ORCH"
+  printf '%-28s %-18s %-10s %-8s %-8s %-8s %-12s\n' \
+    "SWARM_ID" "PROJECT_ID" "STATUS" "PID" "DASH" "WS" "UPTIME"
 
   local swarm_id pid status uptime
   local found="0"
@@ -892,48 +988,65 @@ EOF
       continue
     fi
 
-    local socket_component_status orch_component_status blink_component_status mux_component_status llama_component_status
-    socket_component_status="-"
-    orch_component_status="-"
-    blink_component_status="-"
-    mux_component_status="-"
-    llama_component_status="-"
-    if [[ -f "$(component_status_file "socket-server" "$(swarm_dir "$swarm_id")")" ]]; then
-      socket_component_status="$(<"$(component_status_file "socket-server" "$(swarm_dir "$swarm_id")")")"
-    fi
-    if [[ -f "$(component_status_file "orchestrator" "$(swarm_dir "$swarm_id")")" ]]; then
-      orch_component_status="$(<"$(component_status_file "orchestrator" "$(swarm_dir "$swarm_id")")")"
-    fi
-    if [[ -f "$(service_status_file "blink-server" "$(swarm_dir "$swarm_id")")" ]]; then
-      blink_component_status="$(<"$(service_status_file "blink-server" "$(swarm_dir "$swarm_id")")")"
-    fi
-    if [[ -f "$(service_status_file "mux" "$(swarm_dir "$swarm_id")")" ]]; then
-      mux_component_status="$(<"$(service_status_file "mux" "$(swarm_dir "$swarm_id")")")"
-    fi
-    if [[ -f "$(service_status_file "llama.cpp" "$(swarm_dir "$swarm_id")")" ]]; then
-      llama_component_status="$(<"$(service_status_file "llama.cpp" "$(swarm_dir "$swarm_id")")")"
-    fi
-
     found="1"
-    printf '%-28s %-18s %-10s %-8s %-8s %-8s %-12s %-12s %-12s\n' \
-      "$swarm_id" \
-      "${DROIDSWARM_PROJECT_ID:-unknown}" \
-      "$status" \
-      "$pid" \
-      "${DROIDSWARM_DASHBOARD_PORT:-"-"}" \
-      "${DROIDSWARM_WS_PORT:-"-"}" \
-      "$uptime" \
-      "$socket_component_status" \
-      "$orch_component_status"
-    printf '  sidecars: blink=%s mux=%s llama=%s\n' \
-      "$blink_component_status" \
-      "$mux_component_status" \
-      "$llama_component_status"
+    print_swarm_runtime_status "$swarm_id" 0
   done
 
   if [[ "$found" != "1" ]]; then
     info "No matching DroidSwarm instances found."
   fi
+}
+
+cmd_status() {
+  ensure_runtime_dirs
+
+  local swarm_id=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --swarm-id)
+        shift
+        require_value "--swarm-id" "${1:-}"
+        swarm_id="$1"
+        ;;
+      --help|-h)
+        print_status_help
+        return 0
+        ;;
+      *)
+        err "Unknown status option: $1"
+        return 1
+        ;;
+    esac
+    shift
+  done
+
+  if [[ -z "$swarm_id" ]]; then
+    local detected_ids=()
+    local active_id
+    for active_id in $(active_swarm_ids); do
+      detected_ids+=("$active_id")
+    done
+
+    if [[ "${#detected_ids[@]}" -eq 0 ]]; then
+      info "No DroidSwarm instances found."
+      return 0
+    fi
+
+    if [[ "${#detected_ids[@]}" -gt 1 ]]; then
+      err "Multiple swarms found. Re-run with --swarm-id."
+      cmd_list --all
+      return 1
+    fi
+
+    swarm_id="${detected_ids[0]}"
+  fi
+
+  if ! swarm_exists "$swarm_id"; then
+    err "Unknown swarm: $swarm_id"
+    return 1
+  fi
+
+  print_swarm_runtime_status "$swarm_id"
 }
 
 cmd_update() {
@@ -1124,6 +1237,9 @@ case "$COMMAND" in
     ;;
   list)
     cmd_list "$@"
+    ;;
+  status)
+    cmd_status "$@"
     ;;
   shutdown)
     cmd_shutdown "$@"

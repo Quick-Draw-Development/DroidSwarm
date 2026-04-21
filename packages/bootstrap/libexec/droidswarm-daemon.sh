@@ -19,6 +19,11 @@ heartbeat_file="$state_dir/heartbeat"
 status_file="$state_dir/status"
 started_epoch_file="$state_dir/started_epoch"
 shutdown_requested="0"
+component_start_retries="${DROIDSWARM_COMPONENT_START_RETRIES:-3}"
+service_start_retries="${DROIDSWARM_SERVICE_START_RETRIES:-3}"
+runtime_restart_retries="${DROIDSWARM_RUNTIME_RESTART_RETRIES:-2}"
+retry_delay_seconds="${DROIDSWARM_RETRY_DELAY_SECONDS:-2}"
+component_grace_seconds="${DROIDSWARM_COMPONENT_GRACE_SECONDS:-2}"
 
 mkdir -p "$state_dir"
 
@@ -54,20 +59,67 @@ mark_service_status() {
   printf '%s\n' "$status" >"$(service_status_file "$name" "$state_dir")"
 }
 
+stop_pid() {
+  local pid="${1:-}"
+  if [[ -z "$pid" ]] || ! is_pid_running "$pid"; then
+    return 0
+  fi
+
+  kill "$pid" 2>/dev/null || true
+  sleep 1
+  if is_pid_running "$pid"; then
+    kill -9 "$pid" 2>/dev/null || true
+  fi
+}
+
 start_component() {
   local name="$1"
-  shift
+  local health_port="$2"
+  shift 2
 
   local log_file pid_file
   log_file="$(component_log_file "$swarm_id" "$name")"
   pid_file="$(component_pid_file "$name" "$state_dir")"
+  local attempt=1
+  local pid=""
 
-  mark_component_status "$name" "starting"
+  while [[ "$attempt" -le "$component_start_retries" ]]; do
+    mark_component_status "$name" "starting"
+    printf '[%s] starting %s (attempt %s/%s)\n' "$(now_utc)" "$name" "$attempt" "$component_start_retries" >>"$log_file"
 
-  "$@" >>"$log_file" 2>&1 &
-  local pid="$!"
-  printf '%s\n' "$pid" >"$pid_file"
-  mark_component_status "$name" "running"
+    "$@" >>"$log_file" 2>&1 &
+    pid="$!"
+    printf '%s\n' "$pid" >"$pid_file"
+
+    if [[ -n "$health_port" && "$health_port" != "-" ]]; then
+      if wait_for_port "$health_port" 20 1; then
+        mark_component_status "$name" "running"
+        return 0
+      fi
+    else
+      sleep "$component_grace_seconds"
+      if is_pid_running "$pid"; then
+        mark_component_status "$name" "running"
+        return 0
+      fi
+    fi
+
+    if is_pid_running "$pid"; then
+      printf '[%s] component %s failed readiness check; retrying\n' "$(now_utc)" "$name" >>"$log_file"
+    else
+      printf '[%s] component %s exited during startup; retrying\n' "$(now_utc)" "$name" >>"$log_file"
+    fi
+
+    mark_component_status "$name" "retrying"
+    stop_pid "$pid"
+    attempt=$((attempt + 1))
+    if [[ "$attempt" -le "$component_start_retries" ]]; then
+      sleep "$retry_delay_seconds"
+    fi
+  done
+
+  mark_component_status "$name" "failed"
+  fail_daemon "Component failed startup after retries: $name"
 }
 
 start_service() {
@@ -78,21 +130,95 @@ start_service() {
   local log_file pid_file
   log_file="$(component_log_file "$swarm_id" "$name")"
   pid_file="$(service_pid_file "$name" "$state_dir")"
+  local attempt=1
+  local pid=""
 
-  mark_service_status "$name" "starting"
-  "$@" >>"$log_file" 2>&1 &
-  local pid="$!"
-  printf '%s\n' "$pid" >"$pid_file"
+  while [[ "$attempt" -le "$service_start_retries" ]]; do
+    mark_service_status "$name" "starting"
+    printf '[%s] starting %s on port %s (attempt %s/%s)\n' "$(now_utc)" "$name" "$port" "$attempt" "$service_start_retries" >>"$log_file"
 
-  if ! wait_for_port "$port" 20 1; then
-    mark_service_status "$name" "failed"
-    if is_pid_running "$pid"; then
-      kill "$pid" 2>/dev/null || true
+    "$@" >>"$log_file" 2>&1 &
+    pid="$!"
+    printf '%s\n' "$pid" >"$pid_file"
+
+    if wait_for_port "$port" 20 1; then
+      mark_service_status "$name" "running"
+      return 0
     fi
-    fail_daemon "Service failed health check: $name on port $port"
+
+    mark_service_status "$name" "retrying"
+    printf '[%s] service %s failed health check on port %s; retrying\n' "$(now_utc)" "$name" "$port" >>"$log_file"
+    stop_pid "$pid"
+    attempt=$((attempt + 1))
+    if [[ "$attempt" -le "$service_start_retries" ]]; then
+      sleep "$retry_delay_seconds"
+    fi
+  done
+
+  mark_service_status "$name" "failed"
+  fail_daemon "Service failed health check after retries: $name on port $port"
+}
+
+restart_component() {
+  local name="$1"
+  local health_port="$2"
+  shift 2
+
+  local log_file
+  log_file="$(component_log_file "$swarm_id" "$name")"
+  printf '[%s] component %s exited unexpectedly; attempting restart\n' "$(now_utc)" "$name" >>"$log_file"
+  mark_component_status "$name" "retrying"
+  start_component "$name" "$health_port" "$@"
+}
+
+restart_service() {
+  local name="$1"
+  local port="$2"
+  shift 2
+
+  local log_file
+  log_file="$(component_log_file "$swarm_id" "$name")"
+  printf '[%s] service %s exited unexpectedly; attempting restart\n' "$(now_utc)" "$name" >>"$log_file"
+  mark_service_status "$name" "retrying"
+  start_service "$name" "$port" "$@"
+}
+
+maybe_restart_component() {
+  local name="$1"
+  local health_port="$2"
+  shift 2
+  local pid_file restart_count_file restart_count
+  pid_file="$(component_pid_file "$name" "$state_dir")"
+  restart_count_file="$state_dir/${name}.restarts"
+  restart_count="0"
+
+  [[ -f "$restart_count_file" ]] && restart_count="$(<"$restart_count_file")"
+  if [[ "$restart_count" -ge "$runtime_restart_retries" ]]; then
+    mark_component_status "$name" "failed"
+    fail_daemon "Component exceeded restart limit: $name"
   fi
 
-  mark_service_status "$name" "running"
+  printf '%s\n' $((restart_count + 1)) >"$restart_count_file"
+  restart_component "$name" "$health_port" "$@"
+}
+
+maybe_restart_service() {
+  local name="$1"
+  local port="$2"
+  shift 2
+  local pid_file restart_count_file restart_count
+  pid_file="$(service_pid_file "$name" "$state_dir")"
+  restart_count_file="$state_dir/${name}.restarts"
+  restart_count="0"
+
+  [[ -f "$restart_count_file" ]] && restart_count="$(<"$restart_count_file")"
+  if [[ "$restart_count" -ge "$runtime_restart_retries" ]]; then
+    mark_service_status "$name" "failed"
+    fail_daemon "Service exceeded restart limit: $name"
+  fi
+
+  printf '%s\n' $((restart_count + 1)) >"$restart_count_file"
+  restart_service "$name" "$port" "$@"
 }
 
 stop_component() {
@@ -105,13 +231,7 @@ stop_component() {
     pid="$(<"$pid_file")"
   fi
 
-  if [[ -n "$pid" ]] && is_pid_running "$pid"; then
-    kill "$pid" 2>/dev/null || true
-    sleep 1
-    if is_pid_running "$pid"; then
-      kill -9 "$pid" 2>/dev/null || true
-    fi
-  fi
+  stop_pid "$pid"
 
   mark_component_status "$name" "stopped"
 }
@@ -126,13 +246,7 @@ stop_service() {
     pid="$(<"$pid_file")"
   fi
 
-  if [[ -n "$pid" ]] && is_pid_running "$pid"; then
-    kill "$pid" 2>/dev/null || true
-    sleep 1
-    if is_pid_running "$pid"; then
-      kill -9 "$pid" 2>/dev/null || true
-    fi
-  fi
+  stop_pid "$pid"
 
   mark_service_status "$name" "stopped"
 }
@@ -249,6 +363,8 @@ run_orchestrator() {
   export DROIDSWARM_MUX_URL="http://127.0.0.1:${DROIDSWARM_MUX_PORT}"
   export DROIDSWARM_LLAMA_BASE_URL="http://127.0.0.1:${DROIDSWARM_LLAMA_PORT}"
   export DROIDSWARM_LLAMA_MODEL
+  export DROIDSWARM_LLAMA_MODEL_NAME
+  export DROIDSWARM_LLAMA_MODELS_FILE
   exec "$DROIDSWARM_NODE_BIN" "$DROIDSWARM_ORCHESTRATOR_ENTRY"
 }
 
@@ -308,15 +424,15 @@ printf '%s\n' "$(date +%s)" >"$started_epoch_file"
 start_service "blink-server" "$DROIDSWARM_BLINK_SERVER_PORT" run_blink_server
 start_service "mux" "$DROIDSWARM_MUX_PORT" run_mux
 start_service "llama.cpp" "$DROIDSWARM_LLAMA_PORT" run_llama_server
-start_component "socket-server" run_socket_server
+start_component "socket-server" "$DROIDSWARM_WS_PORT" run_socket_server
 sleep 1
 if [[ -n "${DROIDSWARM_BLINK_BRIDGE_ENTRY:-}" && -f "$DROIDSWARM_BLINK_BRIDGE_ENTRY" ]]; then
-  start_component "blink-bridge" run_blink_bridge
+  start_component "blink-bridge" "-" run_blink_bridge
   sleep 1
 fi
-start_component "dashboard" run_dashboard
+start_component "dashboard" "$DROIDSWARM_DASHBOARD_PORT" run_dashboard
 sleep 1
-start_component "orchestrator" run_orchestrator
+start_component "orchestrator" "-" run_orchestrator
 
 mark_status "running"
 
@@ -329,9 +445,21 @@ while true; do
     fi
     component_pid="$(<"$(component_pid_file "$component_name" "$state_dir")")"
     if ! is_pid_running "$component_pid"; then
-      mark_component_status "$component_name" "failed"
       if [[ "$shutdown_requested" != "1" ]]; then
-        fail_daemon "Component exited unexpectedly: $component_name"
+        case "$component_name" in
+          socket-server)
+            maybe_restart_component "$component_name" "$DROIDSWARM_WS_PORT" run_socket_server
+            ;;
+          dashboard)
+            maybe_restart_component "$component_name" "$DROIDSWARM_DASHBOARD_PORT" run_dashboard
+            ;;
+          orchestrator)
+            maybe_restart_component "$component_name" "-" run_orchestrator
+            ;;
+          blink-bridge)
+            maybe_restart_component "$component_name" "-" run_blink_bridge
+            ;;
+        esac
       fi
     fi
   done
@@ -339,9 +467,18 @@ while true; do
   for service_name in blink-server mux llama.cpp; do
     service_pid="$(<"$(service_pid_file "$service_name" "$state_dir")")"
     if ! is_pid_running "$service_pid"; then
-      mark_service_status "$service_name" "failed"
       if [[ "$shutdown_requested" != "1" ]]; then
-        fail_daemon "Managed service exited unexpectedly: $service_name"
+        case "$service_name" in
+          blink-server)
+            maybe_restart_service "$service_name" "$DROIDSWARM_BLINK_SERVER_PORT" run_blink_server
+            ;;
+          mux)
+            maybe_restart_service "$service_name" "$DROIDSWARM_MUX_PORT" run_mux
+            ;;
+          llama.cpp)
+            maybe_restart_service "$service_name" "$DROIDSWARM_LLAMA_PORT" run_llama_server
+            ;;
+        esac
       fi
     fi
   done

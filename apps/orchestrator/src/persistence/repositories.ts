@@ -8,10 +8,12 @@ import {
   BudgetEventRecord,
   CheckpointRecord,
   CheckpointVectorRecord,
+  HandoffPacket,
   ProjectCheckpoint,
   ProjectDecision,
   ProjectFact,
   RepoTarget,
+  TaskStateDigest,
   TaskChatMessage,
   OperatorControlActionRecord,
   PersistedTask,
@@ -259,6 +261,9 @@ type WorkerResultRow = {
   workspace_id?: string | null;
   engine: string;
   model?: string | null;
+  model_tier?: string | null;
+  queue_depth?: number | null;
+  fallback_count?: number | null;
   success: number;
   summary: string;
   payload_json: string;
@@ -276,9 +281,35 @@ type WorkerHeartbeatRow = {
   branch: string;
   workspace_id?: string | null;
   engine: string;
+  model_tier?: string | null;
+  queue_depth?: number | null;
+  fallback_count?: number | null;
   heartbeat_status: WorkerHeartbeat['status'];
   elapsed_ms: number;
   last_activity?: string | null;
+  created_at: string;
+};
+
+type TaskStateDigestRow = {
+  digest_id: string;
+  task_id: string;
+  run_id: string;
+  project_id: string;
+  updated_by: string;
+  payload_json: string;
+  created_at: string;
+};
+
+type HandoffPacketRow = {
+  packet_id: string;
+  task_id: string;
+  run_id: string;
+  project_id: string;
+  from_task_id: string;
+  to_task_id?: string | null;
+  to_role: string;
+  digest_id: string;
+  payload_json: string;
   created_at: string;
 };
 
@@ -1238,15 +1269,18 @@ export class WorkerRepository {
     this.database.prepare(`
       INSERT INTO worker_results (
         worker_result_id, run_id, task_id, attempt_id, project_id, repo_id, root_path, branch, workspace_id,
-        engine, model, success, summary, payload_json, created_at
+        engine, model, model_tier, queue_depth, fallback_count, success, summary, payload_json, created_at
       ) VALUES (
         @workerResultId, @runId, @taskId, @attemptId, @projectId, @repoId, @rootPath, @branch, @workspaceId,
-        @engine, @model, @success, @summary, @payloadJson, @createdAt
+        @engine, @model, @modelTier, @queueDepth, @fallbackCount, @success, @summary, @payloadJson, @createdAt
       )
     `).run({
       ...record,
       workspaceId: record.workspaceId ?? null,
       model: record.model ?? null,
+      modelTier: record.modelTier ?? null,
+      queueDepth: record.queueDepth ?? null,
+      fallbackCount: record.fallbackCount ?? null,
       success: record.success ? 1 : 0,
     });
   }
@@ -1264,6 +1298,9 @@ export class WorkerRepository {
       workspaceId: row.workspace_id ?? undefined,
       engine: row.engine,
       model: row.model ?? undefined,
+      modelTier: row.model_tier as WorkerResultRecord['modelTier'],
+      queueDepth: row.queue_depth ?? undefined,
+      fallbackCount: row.fallback_count ?? undefined,
       success: row.success === 1,
       summary: row.summary,
       payloadJson: row.payload_json,
@@ -1275,10 +1312,10 @@ export class WorkerRepository {
     this.database.prepare(`
       INSERT INTO worker_heartbeats (
         heartbeat_id, run_id, task_id, attempt_id, project_id, repo_id, root_path, branch, workspace_id,
-        engine, heartbeat_status, elapsed_ms, last_activity, created_at
+        engine, model_tier, queue_depth, fallback_count, heartbeat_status, elapsed_ms, last_activity, created_at
       ) VALUES (
         @heartbeatId, @runId, @taskId, @attemptId, @projectId, @repoId, @rootPath, @branch, @workspaceId,
-        @engine, @status, @elapsedMs, @lastActivity, @createdAt
+        @engine, @modelTier, @queueDepth, @fallbackCount, @status, @elapsedMs, @lastActivity, @createdAt
       )
     `).run({
       heartbeatId: record.heartbeatId,
@@ -1291,6 +1328,9 @@ export class WorkerRepository {
       branch: record.branch,
       workspaceId: record.workspaceId ?? null,
       engine: record.engine,
+      modelTier: record.modelTier ?? null,
+      queueDepth: record.queueDepth ?? null,
+      fallbackCount: record.fallbackCount ?? null,
       status: record.status,
       elapsedMs: record.elapsedMs,
       lastActivity: record.lastActivity ?? null,
@@ -1304,11 +1344,79 @@ export class WorkerRepository {
       taskId: row.task_id,
       attemptId: row.attempt_id,
       engine: row.engine as WorkerHeartbeat['engine'],
+      modelTier: row.model_tier as WorkerHeartbeat['modelTier'],
+      queueDepth: row.queue_depth ?? undefined,
+      fallbackCount: row.fallback_count ?? undefined,
       timestamp: row.created_at,
       elapsedMs: row.elapsed_ms,
       status: row.heartbeat_status,
       lastActivity: row.last_activity ?? undefined,
     }));
+  }
+}
+
+export class TaskStateDigestRepository {
+  constructor(private readonly database: Database.Database) {}
+
+  record(digest: TaskStateDigest): void {
+    this.database.prepare(`
+      INSERT OR REPLACE INTO task_state_digests (
+        digest_id, task_id, run_id, project_id, updated_by, payload_json, created_at
+      ) VALUES (
+        @id, @taskId, @runId, @projectId, @updatedBy, @payloadJson, @createdAt
+      )
+    `).run({
+      id: digest.id,
+      taskId: digest.taskId,
+      runId: digest.runId,
+      projectId: digest.projectId,
+      updatedBy: digest.lastUpdatedBy,
+      payloadJson: JSON.stringify(digest),
+      createdAt: digest.ts,
+    });
+  }
+
+  getLatestForTask(taskId: string): TaskStateDigest | null {
+    const row = this.database.prepare(`
+      SELECT * FROM task_state_digests
+      WHERE task_id = ?
+      ORDER BY created_at DESC
+      LIMIT 1
+    `).get(taskId) as TaskStateDigestRow | undefined;
+    if (!row) {
+      return null;
+    }
+    return parseJson<TaskStateDigest>(row.payload_json) ?? null;
+  }
+}
+
+export class HandoffPacketRepository {
+  constructor(private readonly database: Database.Database) {}
+
+  record(packet: HandoffPacket): void {
+    this.database.prepare(`
+      INSERT OR REPLACE INTO handoff_packets (
+        packet_id, task_id, run_id, project_id, from_task_id, to_task_id, to_role, digest_id, payload_json, created_at
+      ) VALUES (
+        @id, @taskId, @runId, @projectId, @fromTaskId, @toTaskId, @toRole, @digestId, @payloadJson, @createdAt
+      )
+    `).run({
+      ...packet,
+      toTaskId: packet.toTaskId ?? null,
+      payloadJson: JSON.stringify(packet),
+      createdAt: packet.ts,
+    });
+  }
+
+  listByTask(taskId: string): HandoffPacket[] {
+    return this.database.prepare(`
+      SELECT * FROM handoff_packets
+      WHERE task_id = ? OR from_task_id = ? OR to_task_id = ?
+      ORDER BY created_at DESC
+    `).all(taskId, taskId, taskId).flatMap((row: HandoffPacketRow) => {
+      const parsed = parseJson<HandoffPacket>(row.payload_json);
+      return parsed ? [parsed] : [];
+    });
   }
 }
 
@@ -1332,6 +1440,8 @@ export class PersistenceClient {
     public readonly memory: MemoryRepository,
     public readonly chat: ChatRepository,
     public readonly workers: WorkerRepository,
+    public readonly digests: TaskStateDigestRepository,
+    public readonly handoffs: HandoffPacketRepository,
   ) {}
 
   updateAttemptMetadata(attemptId: string, metadata?: Record<string, unknown>): void {
@@ -1358,8 +1468,10 @@ export class PersistenceClient {
       new MemoryRepository(database),
       new ChatRepository(database),
       new WorkerRepository(database),
-  );
-}
+      new TaskStateDigestRepository(database),
+      new HandoffPacketRepository(database),
+    );
+  }
 
   createRun(projectId: string, scope?: { repoId?: string; rootPath?: string; branch?: string; workspaceId?: string; metadata?: Record<string, unknown> }): RunRecord {
     const run: RunRecord = {

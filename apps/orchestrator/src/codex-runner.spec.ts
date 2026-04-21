@@ -93,7 +93,15 @@ describe('runCodexPrompt', () => {
         planning: 'o1-preview',
         verification: 'gpt-4o-mini',
         code: 'claude-3.5-sonnet',
+        apple: 'apple-intelligence/local',
         default: 'o1-preview',
+      },
+      routingPolicy: {
+        plannerRoles: ['plan', 'planner', 'research', 'review', 'orchestrator', 'checkpoint', 'compress'],
+        appleRoles: ['apple', 'ios', 'macos', 'swift', 'swiftui', 'xcode', 'visionos'],
+        appleTaskHints: ['apple', 'ios', 'ipad', 'iphone', 'macos', 'osx', 'swift', 'swiftui', 'objective-c', 'uikit', 'appkit', 'xcode', 'testflight', 'visionos', 'watchos', 'tvos'],
+        codeHints: ['code', 'coder', 'dev', 'implementation', 'debug', 'refactor'],
+        cloudEscalationHints: ['refactor', 'debug', 'multi-file', 'migration', 'large-scale'],
       },
       budgetMaxConsumed: undefined,
     };

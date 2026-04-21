@@ -74,7 +74,15 @@ const DEFAULT_CONFIG: OrchestratorConfig = {
     planning: 'o1-preview',
     verification: 'gpt-4o-mini',
     code: 'claude-3.5-sonnet',
+    apple: 'apple-intelligence/local',
     default: 'o1-preview',
+  },
+  routingPolicy: {
+    plannerRoles: ['plan', 'planner', 'research', 'review', 'orchestrator', 'checkpoint', 'compress'],
+    appleRoles: ['apple', 'ios', 'macos', 'swift', 'swiftui', 'xcode', 'visionos'],
+    appleTaskHints: ['apple', 'ios', 'ipad', 'iphone', 'macos', 'osx', 'swift', 'swiftui', 'objective-c', 'uikit', 'appkit', 'xcode', 'testflight', 'visionos', 'watchos', 'tvos'],
+    codeHints: ['code', 'coder', 'dev', 'implementation', 'debug', 'refactor'],
+    cloudEscalationHints: ['refactor', 'debug', 'multi-file', 'migration', 'large-scale'],
   },
   budgetMaxConsumed: undefined,
 };
@@ -430,6 +438,26 @@ describe('Phase 10 orchestrator flows', () => {
     env1.service.recordCheckpoint(childSpawn.taskId, childSpawn.attemptId, {
       summary: 'checkpoint-before-restart',
     });
+    env1.service.recordTaskStateDigest({
+      id: 'digest-before-restart',
+      taskId: childSpawn.taskId,
+      runId: env1.run.runId,
+      projectId: DEFAULT_CONFIG.projectId,
+      objective: 'resume child task',
+      currentPlan: ['resume'],
+      decisions: [],
+      openQuestions: [],
+      activeRisks: [],
+      artifactIndex: [],
+      verificationState: 'running',
+      lastUpdatedBy: rootSpawn.agentName,
+      ts: new Date().toISOString(),
+      droidspeak: {
+        kind: 'memory_pinned',
+        compact: 'memory:pinned',
+        expanded: 'Recovery digest pinned.',
+      },
+    });
 
     env1.close();
     const env2 = createEnvironment({ dbPath: env1.dbPath, run: env1.run });
@@ -443,6 +471,7 @@ describe('Phase 10 orchestrator flows', () => {
 
     const resumedSpawn = env2.supervisor.assigned[0];
     assert.ok(resumedSpawn);
+    assert.equal(env2.service.getLatestTaskStateDigest(childSpawn.taskId)?.id, 'digest-before-restart');
 
     env2.scheduler.handleAgentResult(
       resumedSpawn.taskId,

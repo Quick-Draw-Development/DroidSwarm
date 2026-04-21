@@ -3,9 +3,12 @@ import { ChildProcess, fork } from 'node:child_process';
 
 import { WorkerRegistry } from './worker-registry';
 import type {
+  HandoffPacket,
+  ModelTier,
   OrchestratorConfig,
   RequestedAgent,
   SpawnedAgent,
+  TaskStateDigest,
   TaskScope,
   TaskRecord,
   WorkerEngine,
@@ -32,6 +35,9 @@ export interface AgentLaunchOptions {
   readOnly?: boolean;
   instructions?: string;
   workspacePath?: string;
+  taskDigest?: TaskStateDigest;
+  handoffPacket?: HandoffPacket;
+  modelTier?: ModelTier;
 }
 
 export const defaultRoleInstructions = (task: TaskRecord): RequestedAgent[] => {
@@ -99,6 +105,9 @@ export class AgentSupervisor {
       readOnly: options?.readOnly,
       instructions: options?.instructions,
       workspacePath: options?.workspacePath,
+      taskDigest: options?.taskDigest,
+      handoffPacket: options?.handoffPacket,
+      modelTier: options?.modelTier,
     })], {
       env: process.env,
       stdio: ['ignore', 'pipe', 'pipe', 'ipc'],

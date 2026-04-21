@@ -10,6 +10,10 @@ info() {
   printf '%s\n' "$*"
 }
 
+warn() {
+  printf 'Warning: %s\n' "$*" >&2
+}
+
 require_value() {
   local flag="$1"
   local value="${2:-}"
@@ -19,7 +23,39 @@ require_value() {
   fi
 }
 
-INSTALL_SCRIPT_URL="${DROIDSWARM_INSTALL_SCRIPT_URL:-https://raw.githubusercontent.com/Quick-Draw-Development/DroidSwarm/main/scripts/install-droidswarm.sh}"
+download_to_temp() {
+  local url="$1"
+  local destination
+  destination="$(mktemp -t droidswarm-update.XXXXXX.sh)"
+  curl -fL --retry 3 --retry-delay 2 --retry-connrefused "$url" -o "$destination"
+  chmod +x "$destination"
+  printf '%s\n' "$destination"
+}
+
+verify_swarm_running() {
+  local bin_dir="$1"
+  local swarm_id="$2"
+  local attempts="${3:-10}"
+  local delay_seconds="${4:-2}"
+  local attempt=1
+  local status_output=""
+  local swarm_status=""
+
+  while [[ "$attempt" -le "$attempts" ]]; do
+    status_output="$(DROIDSWARM_HOME="$DROIDSWARM_HOME" "$bin_dir/DroidSwarm" status --swarm-id "$swarm_id" 2>/dev/null || true)"
+    swarm_status="$(printf '%s\n' "$status_output" | awk 'NR==2 { print $3 }')"
+    if [[ "$swarm_status" == "running" ]]; then
+      return 0
+    fi
+
+    sleep "$delay_seconds"
+    attempt=$((attempt + 1))
+  done
+
+  return 1
+}
+
+INSTALL_SCRIPT_URL="${DROIDSWARM_INSTALL_SCRIPT_URL:-https://raw.githubusercontent.com/Quick-Draw-Development/DroidSwarm/main/packages/bootstrap/scripts/install-droidswarm.sh}"
 REPO_URL=""
 REF=""
 INSTALL_ROOT="${DROIDSWARM_INSTALL_ROOT:-$HOME/.droidswarm/install}"
@@ -151,7 +187,7 @@ for env_path in $config_file; do
 done
 
 rm -rf "$DROIDSWARM_HOME/swarms" "$DROIDSWARM_HOME/run" "$DROIDSWARM_HOME/logs"
-mkdir -p "$DROIDSWARM_HOME/{swarms,run,logs}"
+mkdir -p "$DROIDSWARM_HOME/swarms" "$DROIDSWARM_HOME/run" "$DROIDSWARM_HOME/logs"
 
 local_version="$(read_local_version || true)"
 remote_version=""
@@ -177,10 +213,23 @@ fi
 if [[ -n "$REF" ]]; then
   INSTALL_ARGS+=(--ref "$REF")
 fi
+INSTALL_SCRIPT_PATH="$(download_to_temp "$INSTALL_SCRIPT_URL")"
 env DROIDSWARM_INSTALL_ROOT="$INSTALL_ROOT" \
     DROIDSWARM_BIN_DIR="$BIN_DIR" \
     DROIDSWARM_DEFAULT_REPO_URL="$REPO_URL" \
-    /bin/bash -c "$(curl -fsSL "$INSTALL_SCRIPT_URL")" install-droidswarm "${INSTALL_ARGS[@]}"
+    DROIDSWARM_BLINK_SERVER_BIN="${DROIDSWARM_BLINK_SERVER_BIN:-}" \
+    DROIDSWARM_BLINK_SERVER_INSTALL_CMD="${DROIDSWARM_BLINK_SERVER_INSTALL_CMD:-}" \
+    DROIDSWARM_MUX_BIN="${DROIDSWARM_MUX_BIN:-}" \
+    DROIDSWARM_MUX_INSTALL_CMD="${DROIDSWARM_MUX_INSTALL_CMD:-}" \
+    DROIDSWARM_LLAMA_SERVER_BIN="${DROIDSWARM_LLAMA_SERVER_BIN:-}" \
+    DROIDSWARM_LLAMA_INSTALL_CMD="${DROIDSWARM_LLAMA_INSTALL_CMD:-}" \
+    DROIDSWARM_LLAMA_MODEL="${DROIDSWARM_LLAMA_MODEL:-}" \
+    DROIDSWARM_LLAMA_MODEL_NAME="${DROIDSWARM_LLAMA_MODEL_NAME:-}" \
+    DROIDSWARM_LLAMA_MODELS_FILE="${DROIDSWARM_LLAMA_MODELS_FILE:-}" \
+    DROIDSWARM_LLAMA_MODEL_URL="${DROIDSWARM_LLAMA_MODEL_URL:-}" \
+    DROIDSWARM_LLAMA_MODEL_DOWNLOAD_CMD="${DROIDSWARM_LLAMA_MODEL_DOWNLOAD_CMD:-}" \
+    "$INSTALL_SCRIPT_PATH" "${INSTALL_ARGS[@]}"
+rm -f "$INSTALL_SCRIPT_PATH"
 
 for config in "${swarm_configs[@]}"; do
   IFS='|' read -r swarm_id project_root dashboard_port ws_port agent_count main_branch production_branch repo_url project_mode <<<"$config"
@@ -197,5 +246,13 @@ for config in "${swarm_configs[@]}"; do
   [[ -n "$production_branch" ]] && restart_cmd+=(--production-branch "$production_branch")
   [[ -n "$repo_url" ]] && restart_cmd+=(--repo-url "$repo_url")
 
-  DROIDSWARM_HOME="$DROIDSWARM_HOME" "${restart_cmd[@]}" >/dev/null 2>&1 || true
+  if ! DROIDSWARM_HOME="$DROIDSWARM_HOME" "${restart_cmd[@]}" >/dev/null 2>&1; then
+    err "Failed to restart swarm $swarm_id"
+    exit 1
+  fi
+
+  if ! verify_swarm_running "$BIN_DIR" "$swarm_id"; then
+    err "Swarm $swarm_id restarted but did not report a running status in time."
+    exit 1
+  fi
 done

@@ -440,13 +440,16 @@ export const listTaskChatMessages = (taskId: string): TaskChatSummary[] => {
 export const listWorkerHeartbeatsForTask = (taskId: string): WorkerHeartbeatSummary[] => {
   const database = getDatabase();
   return database.prepare(`
-    SELECT attempt_id, engine, heartbeat_status, elapsed_ms, last_activity, created_at
+    SELECT attempt_id, engine, model_tier, queue_depth, fallback_count, heartbeat_status, elapsed_ms, last_activity, created_at
     FROM worker_heartbeats
     WHERE task_id = ?
     ORDER BY created_at DESC
   `).all(taskId).map((row) => ({
     attemptId: String((row as Record<string, unknown>).attempt_id),
     engine: String((row as Record<string, unknown>).engine),
+    modelTier: typeof (row as Record<string, unknown>).model_tier === 'string' ? String((row as Record<string, unknown>).model_tier) : undefined,
+    queueDepth: typeof (row as Record<string, unknown>).queue_depth === 'number' ? Number((row as Record<string, unknown>).queue_depth) : undefined,
+    fallbackCount: typeof (row as Record<string, unknown>).fallback_count === 'number' ? Number((row as Record<string, unknown>).fallback_count) : undefined,
     status: String((row as Record<string, unknown>).heartbeat_status),
     elapsedMs: Number((row as Record<string, unknown>).elapsed_ms),
     lastActivity: typeof (row as Record<string, unknown>).last_activity === 'string' ? String((row as Record<string, unknown>).last_activity) : undefined,
@@ -472,6 +475,9 @@ export const listRoutingDecisionsForTask = (taskId: string): RoutingDecisionSumm
       attemptId: String((row as Record<string, unknown>).attempt_id),
       engine: typeof record.engine === 'string' ? record.engine : undefined,
       model: typeof record.model === 'string' ? record.model : undefined,
+      modelTier: typeof record.modelTier === 'string' ? record.modelTier : typeof record.model_tier === 'string' ? record.model_tier : undefined,
+      queueDepth: typeof record.queueDepth === 'number' ? record.queueDepth : typeof record.queue_depth === 'number' ? record.queue_depth : undefined,
+      fallbackCount: typeof record.fallbackCount === 'number' ? record.fallbackCount : typeof record.fallback_count === 'number' ? record.fallback_count : undefined,
       reason: typeof record.reason === 'string' ? record.reason : undefined,
       role: typeof record.role === 'string' ? record.role : undefined,
       readOnly: typeof record.readOnly === 'boolean' ? record.readOnly : undefined,

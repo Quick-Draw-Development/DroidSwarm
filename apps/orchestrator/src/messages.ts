@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { UsageShape } from '@protocol';
 
 import type {
+  EnvelopeVerb,
   MessageEnvelope,
   OrchestratorConfig,
   RequestedAgent,
@@ -19,6 +20,46 @@ const buildActor = (name: string, actorType: 'agent' | 'orchestrator'): MessageE
   actor_name: name,
 });
 
+const buildEnvelope = <T extends MessageEnvelope['type']>(input: {
+  config: OrchestratorConfig;
+  roomId: string;
+  type: T;
+  from: MessageEnvelope['from'];
+  payload: MessageEnvelope<T>['payload'];
+  taskId?: string;
+  verb: EnvelopeVerb;
+  body?: Record<string, unknown>;
+  artifactRefs?: string[];
+  memoryRefs?: string[];
+  dependsOn?: string[];
+  compression?: MessageEnvelope['compression'];
+  usage?: UsageShape;
+}): MessageEnvelope<T> => {
+  const id = randomUUID();
+  const ts = nowIso();
+  return {
+    id,
+    message_id: id,
+    ts,
+    project_id: input.config.projectId,
+    room_id: input.roomId,
+    task_id: input.taskId,
+    agent_id: input.from.actor_id,
+    role: input.from.actor_name,
+    verb: input.verb,
+    depends_on: input.dependsOn,
+    artifact_refs: input.artifactRefs,
+    memory_refs: input.memoryRefs,
+    body: input.body ?? (input.payload as Record<string, unknown>),
+    type: input.type,
+    from: input.from,
+    timestamp: ts,
+    payload: input.payload,
+    compression: input.compression,
+    usage: input.usage,
+  } as MessageEnvelope<T>;
+};
+
 export const buildAgentStatusUpdate = (
   config: OrchestratorConfig,
   taskId: string,
@@ -29,14 +70,13 @@ export const buildAgentStatusUpdate = (
   content: string,
   compression?: MessageEnvelope['compression'],
   payloadExtras?: Record<string, unknown>,
-): MessageEnvelope => ({
-  message_id: randomUUID(),
-  project_id: config.projectId,
-  room_id: roomId,
-  task_id: taskId,
+): MessageEnvelope<'status_update'> => buildEnvelope({
+  config,
+  roomId,
+  taskId,
   type: 'status_update',
   from: buildActor(agentName, 'agent'),
-  timestamp: nowIso(),
+  verb: 'status.updated',
   payload: {
     phase,
     status_code: statusCode,
@@ -54,14 +94,13 @@ export const buildOrchestratorStatusUpdate = (
   content: string,
   taskId?: string,
   extraPayload?: Record<string, unknown>,
-): MessageEnvelope => ({
-  message_id: randomUUID(),
-  project_id: config.projectId,
-  room_id: roomId,
-  task_id: taskId,
+): MessageEnvelope<'status_update'> => buildEnvelope({
+  config,
+  roomId,
+  taskId,
   type: 'status_update',
   from: buildActor(config.agentName, 'orchestrator'),
-  timestamp: nowIso(),
+  verb: 'status.updated',
   payload: {
     phase,
     status_code: statusCode,
@@ -76,22 +115,25 @@ export const buildArtifactCreatedMessage = (
   roomId: string,
   agentName: string,
   artifact: WorkerArtifact,
-): MessageEnvelope => ({
-  message_id: randomUUID(),
-  project_id: config.projectId,
-  room_id: roomId,
-  task_id: taskId,
-  type: 'artifact_created',
-  from: buildActor(agentName, 'agent'),
-  timestamp: nowIso(),
-  payload: {
-    artifact_id: randomUUID(),
-    task_id: taskId,
-    kind: artifact.kind,
-    summary: artifact.summary,
-    content: artifact.content ?? artifact.path ?? artifact.uri ?? artifact.summary,
-  },
-});
+): MessageEnvelope<'artifact_created'> => {
+  const artifactId = randomUUID();
+  return buildEnvelope({
+    config,
+    roomId,
+    taskId,
+    type: 'artifact_created',
+    from: buildActor(agentName, 'agent'),
+    verb: 'artifact.created',
+    artifactRefs: [artifactId],
+    payload: {
+      artifact_id: artifactId,
+      task_id: taskId,
+      kind: artifact.kind,
+      summary: artifact.summary,
+      content: artifact.content ?? artifact.path ?? artifact.uri ?? artifact.summary,
+    },
+  });
+};
 
 export const buildSpawnRequestedMessage = (
   config: OrchestratorConfig,
@@ -99,14 +141,13 @@ export const buildSpawnRequestedMessage = (
   roomId: string,
   agentName: string,
   request: RequestedAgent,
-): MessageEnvelope => ({
-  message_id: randomUUID(),
-  project_id: config.projectId,
-  room_id: roomId,
-  task_id: taskId,
+): MessageEnvelope<'spawn_requested'> => buildEnvelope({
+  config,
+  roomId,
+  taskId,
   type: 'spawn_requested',
   from: buildActor(agentName, 'agent'),
-  timestamp: nowIso(),
+  verb: 'spawn.requested',
   payload: {
     task_id: taskId,
     needed_role: request.role,
@@ -122,14 +163,13 @@ export const buildTaskAssignedMessage = (
   roomId: string,
   assignmentId: string,
   agents: SpawnedAgent[],
-): MessageEnvelope => ({
-  message_id: randomUUID(),
-  project_id: config.projectId,
-  room_id: roomId,
-  task_id: taskId,
+): MessageEnvelope<'task_assigned'> => buildEnvelope({
+  config,
+  roomId,
+  taskId,
   type: 'task_assigned',
   from: buildActor(config.agentName, 'orchestrator'),
-  timestamp: nowIso(),
+  verb: 'task.ready',
   payload: {
     task_id: taskId,
     assignment_id: assignmentId,
@@ -147,14 +187,13 @@ export const buildClarificationRequest = (
   roomId: string,
   targetUserId: string | undefined,
   question: string,
-): MessageEnvelope => ({
-  message_id: randomUUID(),
-  project_id: config.projectId,
-  room_id: roomId,
-  task_id: taskId,
+): MessageEnvelope<'clarification_request'> => buildEnvelope({
+  config,
+  roomId,
+  taskId,
   type: 'clarification_request',
   from: buildActor(config.agentName, 'orchestrator'),
-  timestamp: nowIso(),
+  verb: 'task.blocked',
   payload: {
     target_user_id: targetUserId,
     question,
@@ -169,14 +208,13 @@ export const buildAgentToolResponseMessage = (
   agentName: string,
   payload: ToolResponsePayload,
   usage?: UsageShape,
-): MessageEnvelope => ({
-  message_id: randomUUID(),
-  project_id: config.projectId,
-  room_id: roomId,
-  task_id: taskId,
+): MessageEnvelope<'tool_response'> => buildEnvelope({
+  config,
+  roomId,
+  taskId,
   type: 'tool_response',
   from: buildActor(agentName, 'agent'),
-  timestamp: nowIso(),
+  verb: 'tool.response',
   payload,
   usage,
 });
@@ -184,16 +222,13 @@ export const buildAgentToolResponseMessage = (
 export const buildOperatorChatResponse = (
   config: OrchestratorConfig,
   content: string,
-): MessageEnvelope => ({
-  message_id: randomUUID(),
-  project_id: config.projectId,
-  room_id: 'operator',
+): MessageEnvelope<'chat'> => buildEnvelope({
+  config,
+  roomId: 'operator',
   type: 'chat',
   from: buildActor(config.agentName, 'orchestrator'),
-  timestamp: nowIso(),
-  payload: {
-    content,
-  },
+  verb: 'chat.message',
+  payload: { content },
 });
 
 export const buildPlanProposedMessage = (
@@ -203,14 +238,14 @@ export const buildPlanProposedMessage = (
   summary: string,
   plan?: string,
   dependencies?: string[],
-): MessageEnvelope => ({
-  message_id: randomUUID(),
-  project_id: config.projectId,
-  room_id: 'operator',
-  task_id: taskId,
+): MessageEnvelope<'plan_proposed'> => buildEnvelope({
+  config,
+  roomId: 'operator',
+  taskId,
   type: 'plan_proposed',
   from: buildActor(config.agentName, 'orchestrator'),
-  timestamp: nowIso(),
+  verb: 'plan.proposed',
+  dependsOn: dependencies,
   payload: {
     task_id: taskId,
     plan_id: planId,
@@ -225,15 +260,15 @@ export const buildToolRequestMessage = (
   taskId: string,
   agentName: string,
   payload: ToolRequestPayload,
-): MessageEnvelope<'tool_request'> => ({
-  message_id: randomUUID(),
-  project_id: config.projectId,
-  room_id: taskId,
-  task_id: taskId,
+): MessageEnvelope<'tool_request'> => buildEnvelope({
+  config,
+  roomId: taskId,
+  taskId,
   type: 'tool_request',
   from: buildActor(agentName, 'agent'),
-  timestamp: nowIso(),
+  verb: 'tool.request',
   payload,
+  body: payload as unknown as Record<string, unknown>,
 });
 
 export const buildToolResponseMessage = (
@@ -243,14 +278,13 @@ export const buildToolResponseMessage = (
   status: ToolResponsePayload['status'],
   result?: ToolResponsePayload['result'],
   error?: string,
-): MessageEnvelope<'tool_response'> => ({
-  message_id: randomUUID(),
-  project_id: config.projectId,
-  room_id: taskId,
-  task_id: taskId,
+): MessageEnvelope<'tool_response'> => buildEnvelope({
+  config,
+  roomId: taskId,
+  taskId,
   type: 'tool_response',
   from: buildActor(config.agentName, 'orchestrator'),
-  timestamp: nowIso(),
+  verb: 'tool.response',
   payload: {
     request_id: requestId,
     status,
@@ -265,14 +299,13 @@ export const buildVerificationRequestedMessage = (
   verificationType: string,
   requestedBy: string,
   detail?: string,
-): MessageEnvelope => ({
-  message_id: randomUUID(),
-  project_id: config.projectId,
-  room_id: 'operator',
-  task_id: taskId,
+): MessageEnvelope<'verification_requested'> => buildEnvelope({
+  config,
+  roomId: 'operator',
+  taskId,
   type: 'verification_requested',
   from: buildActor(config.agentName, 'orchestrator'),
-  timestamp: nowIso(),
+  verb: 'verification.requested',
   payload: {
     task_id: taskId,
     verification_type: verificationType,
@@ -288,14 +321,13 @@ export const buildVerificationCompletedMessage = (
   status: 'passed' | 'failed' | 'blocked',
   reviewer: string,
   details?: string,
-): MessageEnvelope => ({
-  message_id: randomUUID(),
-  project_id: config.projectId,
-  room_id: 'operator',
-  task_id: taskId,
+): MessageEnvelope<'verification_completed'> => buildEnvelope({
+  config,
+  roomId: 'operator',
+  taskId,
   type: 'verification_completed',
   from: buildActor(config.agentName, 'orchestrator'),
-  timestamp: nowIso(),
+  verb: 'verification.completed',
   payload: {
     task_id: taskId,
     status,
@@ -311,14 +343,14 @@ export const buildCheckpointCreatedMessage = (
   checkpointId: string,
   summary: string,
   metadata?: Record<string, unknown>,
-): MessageEnvelope => ({
-  message_id: randomUUID(),
-  project_id: config.projectId,
-  room_id: roomId,
-  task_id: taskId,
+): MessageEnvelope<'checkpoint_created'> => buildEnvelope({
+  config,
+  roomId,
+  taskId,
   type: 'checkpoint_created',
   from: buildActor(config.agentName, 'orchestrator'),
-  timestamp: nowIso(),
+  verb: 'checkpoint.created',
+  memoryRefs: [checkpointId],
   payload: {
     checkpoint_id: checkpointId,
     task_id: taskId,

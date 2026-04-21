@@ -12,9 +12,10 @@ import {
   buildAgentToolResponseMessage,
 } from './messages';
 import { buildAuthMessage, parseEnvelope } from './protocol';
-import type { MessageEnvelope, TaskRecord, TaskScope, WorkerEngine, WorkerHeartbeat, WorkerResult } from './types';
+import type { HandoffPacket, MessageEnvelope, TaskRecord, TaskScope, TaskStateDigest, WorkerEngine, WorkerHeartbeat, WorkerResult } from './types';
 import { CompressionShape, StatusUpdatePayload, ToolResponsePayload, UsageShape } from '@protocol';
 import { LocalLlamaAdapter } from './adapters/worker/local-llama.adapter';
+import { AppleIntelligenceWorkerAdapter } from './adapters/worker/apple-intelligence.adapter';
 import { CodexCloudAdapter } from './adapters/worker/codex-cloud.adapter';
 import { CodexCliAdapter } from './adapters/worker/codex-cli.adapter';
 import { MuxWorkerAdapter } from './adapters/worker/mux-worker.adapter';
@@ -34,6 +35,9 @@ interface WorkerOptions {
   readOnly?: boolean;
   instructions?: string;
   workspacePath?: string;
+  taskDigest?: TaskStateDigest;
+  handoffPacket?: HandoffPacket;
+  modelTier?: import('./types').ModelTier;
 }
 
 const parseOptions = (): WorkerOptions => {
@@ -97,6 +101,8 @@ const getAdapter = (config: ReturnType<typeof loadConfig>, engine: WorkerEngine,
   switch (engine) {
     case 'local-llama':
       return new LocalLlamaAdapter({ baseUrl: config.llamaBaseUrl, timeoutMs: config.llamaTimeoutMs });
+    case 'apple-intelligence':
+      return new AppleIntelligenceWorkerAdapter({ model: config.modelRouting.apple });
     case 'codex-cloud':
       return new CodexCloudAdapter({
         apiBaseUrl: config.codexApiBaseUrl,
@@ -159,6 +165,8 @@ const runWorker = async (): Promise<void> => {
     agentName: options.agentName,
     parentSummary: options.parentSummary,
     parentDroidspeak: options.parentDroidspeak,
+    taskDigest: options.taskDigest,
+    handoffPacket: options.handoffPacket,
     projectId: config.projectId,
     projectName: config.projectName,
     specRules: config.agentRules,
@@ -167,7 +175,13 @@ const runWorker = async (): Promise<void> => {
   const scope = resolveScope(config, options);
   const engine = options.engine ?? 'local-llama';
   const modelOverride = options.model
-    ?? (engine === 'local-llama' ? config.llamaModel : engine === 'codex-cloud' ? config.codexCloudModel : config.codexModel);
+    ?? (engine === 'local-llama'
+      ? config.llamaModel
+      : engine === 'apple-intelligence'
+        ? config.modelRouting.apple
+        : engine === 'codex-cloud'
+          ? config.codexCloudModel
+          : config.codexModel);
   const reportLLMCall = (payload: ToolResponsePayload, usage?: UsageShape): void => {
     sendMessage(
       socket,
@@ -192,6 +206,7 @@ const runWorker = async (): Promise<void> => {
       timestamp: new Date().toISOString(),
       elapsedMs: Date.now() - llmStart,
       status: 'running',
+      modelTier: options.modelTier,
       lastActivity: `running ${options.role}`,
     };
     sendMessage(
@@ -229,9 +244,17 @@ const runWorker = async (): Promise<void> => {
         parentSummary: options.parentSummary,
         parentCheckpoint: options.parentDroidspeak,
         resumePacket: options.skillTexts?.join('\n\n'),
+        taskDigest: options.taskDigest,
+        handoffPacket: options.handoffPacket,
       },
     };
     result = await adapter.run(request);
+    result.metadata = {
+      ...(result.metadata ?? {}),
+      modelTier: options.modelTier,
+      queueDepth: 0,
+      fallbackCount: 0,
+    };
   } catch (error) {
     const latencyMs = Date.now() - llmStart;
     reportLLMCall({

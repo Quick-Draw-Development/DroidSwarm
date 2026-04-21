@@ -3,6 +3,7 @@ export type {
   ActorType,
   AuthMessage,
   ClientType,
+  EnvelopeVerb,
   MessageEnvelope,
   MessagePayloadMap,
   MessageType,
@@ -11,12 +12,15 @@ export type {
 } from '@protocol';
 export type {
   CheckpointDelta,
+  HandoffPacket,
   GitPolicy,
+  ModelTier,
   ProjectCheckpoint,
   ProjectDecision,
   ProjectFact,
   RepoTarget,
   RoutingDecision,
+  TaskStateDigest,
   TaskChatMessage,
   TaskScope,
   WorkerArtifact,
@@ -52,6 +56,15 @@ export interface OrchestratorConfig {
   codexSandboxMode: 'read-only' | 'workspace-write' | 'danger-full-access';
   llamaBaseUrl: string;
   llamaModel: string;
+  llamaModelPath?: string;
+  llamaModelsFile?: string;
+  availableLlamaModels?: Array<{
+    id: string;
+    name: string;
+    tags?: string;
+    path: string;
+    url?: string;
+  }>;
   llamaTimeoutMs: number;
   muxBaseUrl?: string;
   muxToken?: string;
@@ -79,6 +92,7 @@ export interface OrchestratorConfig {
   sideEffectActionsBeforeReview: number;
   allowedTools: string[];
   modelRouting: ModelRoutingConfig;
+  routingPolicy: RoutingPolicyConfig;
   budgetMaxConsumed?: number;
   policyDefaults?: TaskPolicy;
 }
@@ -87,7 +101,16 @@ export interface ModelRoutingConfig {
   planning: string;
   verification: string;
   code: string;
+  apple: string;
   default: string;
+}
+
+export interface RoutingPolicyConfig {
+  plannerRoles: string[];
+  appleRoles: string[];
+  appleTaskHints: string[];
+  codeHints: string[];
+  cloudEscalationHints: string[];
 }
 
 export interface TaskRecord {
@@ -164,9 +187,12 @@ export interface ExecutionEventRecord {
     | 'clarification_requested'
     | 'checkpoint_created'
     | 'verification_requested'
+    | 'verification_completed'
     | 'agent_result'
     | 'plan_proposed'
-    | 'verification_fix_task_created';
+    | 'verification_fix_task_created'
+    | 'handoff_ready'
+    | 'memory_pinned';
   detail: string;
   metadata?: Record<string, unknown>;
   createdAt: string;
@@ -290,6 +316,9 @@ export interface WorkerResultRecord {
   workspaceId?: string;
   engine: string;
   model?: string;
+  modelTier?: string;
+  queueDepth?: number;
+  fallbackCount?: number;
   success: boolean;
   summary: string;
   payloadJson: string;
@@ -324,4 +353,19 @@ export interface OperatorControlActionRecord {
   detail: string;
   metadataJson?: string;
   createdAt: string;
+}
+
+export interface TaskContext {
+  sessionId: string;
+  description: string;
+}
+
+export interface ToolInvocation {
+  name: string;
+  payload: Record<string, unknown>;
+}
+
+export interface AgentAdapter {
+  executeTask(taskContext: TaskContext, invocation: ToolInvocation): Promise<unknown>;
+  canHandle(taskContext: TaskContext): boolean;
 }

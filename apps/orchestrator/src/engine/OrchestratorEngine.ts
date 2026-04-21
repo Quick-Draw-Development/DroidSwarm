@@ -1,43 +1,25 @@
-import { randomUUID } from 'node:crypto';
-
+import type { SocketGateway, MessageSource } from '../socket/SocketGateway';
+import type { OperatorChatResponder } from '../operator/OperatorChatResponder';
+import type { OperatorActionService } from '../operator/OperatorActionService';
+import type { WorkerRegistry } from '../worker-registry';
+import type { RunLifecycleService } from '../run-lifecycle';
+import type { ToolService } from '../tools/ToolService';
+import type { OrchestratorPersistenceService } from '../persistence/service';
+import type { TaskScheduler } from '../scheduler/TaskScheduler';
+import type { AgentSupervisor } from '../AgentSupervisor';
+import type { CodexAgentResult, MessageEnvelope, OrchestratorConfig, SpawnedAgent } from '../types';
+import type { StatusUpdatePayload, ToolRequestPayload } from '@protocol';
 import {
   buildCheckpointCreatedMessage,
   buildOperatorChatResponse,
-  buildOrchestratorStatusUpdate,
   buildPlanProposedMessage,
   buildTaskAssignedMessage,
   buildToolResponseMessage,
   buildVerificationCompletedMessage,
   buildVerificationRequestedMessage,
 } from '../messages';
-import { buildTaskIntakeAccepted } from '../protocol';
-import { isCancellationMessage, resolveTaskFromMessage } from '../task-events';
-import type {
-  ExecutionEventRecord,
-  MessageEnvelope,
-  OrchestratorConfig,
-  PersistedTask,
-  SpawnedAgent,
-  WorkerResult,
-} from '../types';
-import { buildReviewAnnouncement } from '../operator-notifications';
-import { WorkerRegistry } from '../worker-registry';
-import type { OrchestratorPersistenceService } from '../persistence/service';
-import { SocketGateway, MessageSource } from '../socket/SocketGateway';
-import { TaskScheduler } from '../scheduler/TaskScheduler';
-import { AgentSupervisor } from '../AgentSupervisor';
-import { OperatorActionService } from '../operator/OperatorActionService';
-import { OperatorChatResponder } from '../operator/OperatorChatResponder';
-import { OperatorControlAction, parseOperatorIntent } from '../operator/operator-intents';
-import { RunLifecycleService } from '../run-lifecycle';
-import type { TaskSchedulerEvents } from '../scheduler/TaskScheduler';
-import type { ToolRequest } from '../tools/types';
-import { ToolService } from '../tools/ToolService';
-import { WorkerResultService } from '../services/worker-result.service';
-import { CheckpointMergeService } from '../services/checkpoint-merge.service';
-import { TaskChatService } from '../services/task-chat.service';
 
-export interface OrchestratorEngineOptions {
+type EngineDeps = {
   config: OrchestratorConfig;
   persistenceService: OrchestratorPersistenceService;
   scheduler: TaskScheduler;
@@ -48,636 +30,70 @@ export interface OrchestratorEngineOptions {
   registry: WorkerRegistry;
   runLifecycle: RunLifecycleService;
   toolService: ToolService;
-}
+};
 
-export class OrchestratorEngine implements TaskSchedulerEvents {
-  private readonly prefix = '[OrchestratorEngine]';
-  private readonly agentAttemptMap = new Map<string, { attemptId: string; role: string }>();
-  private readonly workerResultService = new WorkerResultService();
-  private readonly checkpointMergeService = new CheckpointMergeService(this.options.persistenceService);
-  private readonly taskChatService = new TaskChatService(this.options.persistenceService);
+export class OrchestratorEngine {
+  private readonly attemptMap = new Map<string, { taskId: string; role: string; agentName: string }>();
 
-  constructor(
-    private readonly options: OrchestratorEngineOptions,
-  ) {}
+  constructor(private readonly deps: EngineDeps) {}
 
-  async handleMessage(message: MessageEnvelope, source: MessageSource): Promise<void> {
-    if (message.project_id !== this.options.config.projectId) {
-      return;
-    }
-
-    if (message.from.actor_name === this.options.config.agentName) {
-      return;
-    }
-
-    const isTaskChannel = source === 'task';
-
-    if (isTaskChannel && message.type === 'status_update') {
-      this.handleAgentStatusUpdate(message as MessageEnvelope<'status_update'>);
-      return;
-    }
-
-    if (isTaskChannel && message.type === 'artifact_created') {
-      this.persistArtifact(message as MessageEnvelope<'artifact_created'>);
-      return;
-    }
-
-    if (isTaskChannel && message.type === 'tool_request') {
-      await this.handleToolRequest(message as MessageEnvelope<'tool_request'>);
-      return;
-    }
-
-    if (isTaskChannel && message.type === 'spawn_requested') {
-    const payload = message.payload as unknown as Record<string, unknown>;
-      this.recordChannelEvent(
-        'spawn_requested',
-        `Spawn requested for ${payload.needed_role ?? 'agent'}`,
-        message,
-        {
-          role: payload.needed_role,
-          reason: payload.reason_code,
-        },
-      );
-      return;
-    }
-
-    if (isTaskChannel && message.type === 'clarification_request') {
-    const payload = message.payload as unknown as Record<string, unknown>;
-      this.recordChannelEvent(
-        'clarification_requested',
-        `Clarification requested: ${payload.question ?? payload.content ?? 'question'}`,
-        message,
-      );
-      return;
-    }
-
-    if (!isTaskChannel && message.type === 'status_update' && message.room_id === 'operator') {
-      const statusMessage = message as MessageEnvelope<'status_update'>;
-      if (isCancellationMessage(statusMessage)) {
-        this.handleCancellation(statusMessage);
-        return;
-      }
-      this.handleOperatorStatusMessage(statusMessage);
-      return;
-    }
-
-    if (!isTaskChannel && message.type === 'task_created') {
-      this.handleTaskCreated(message as MessageEnvelope<'task_created'>);
-      return;
-    }
-
-    if (message.type === 'chat' && message.room_id === 'operator') {
-      await this.handleOperatorChat(message as MessageEnvelope<'chat'>);
-    }
-  }
-
-  handleAgentAssignment(taskId: string, agents: SpawnedAgent[]): void {
-    if (!agents.length) {
-      return;
-    }
-
-    for (const agent of agents) {
-      this.agentAttemptMap.set(agent.agentName, {
-        attemptId: agent.attemptId,
-        role: agent.role,
-      });
-    }
-
-    const details = agents.map((agent) => `${agent.agentName} (${agent.role})`).join(', ');
-    const assignmentId = randomUUID();
-    this.options.gateway.send(buildTaskAssignedMessage(
-      this.options.config,
-      taskId,
-      taskId,
-      assignmentId,
-      agents,
-    ));
-    this.sendStatusUpdate(
-      taskId,
-      taskId,
-      'execution',
-      'agent_assigned',
-      `Assigned agents: ${details}.`,
-      {
-        assignment_id: assignmentId,
-        assigned_agents: agents.map((agent) => ({
-          agent_name: agent.agentName,
-          agent_role: agent.role,
-          attempt_id: agent.attemptId,
-        })),
-      },
-    );
-  }
-
-  handleAgentCommunication(taskId: string, content: string): void {
-    this.sendStatusUpdate(taskId, taskId, 'execution', 'agent_communication', content);
-  }
-
-  private handleAgentStatusUpdate(message: MessageEnvelope<'status_update'>): void {
-    const taskId = message.task_id;
-    if (!taskId) {
-      console.warn('[OrchestratorEngine] received status update without task_id');
-      return;
-    }
-
-    const payload = message.payload as unknown as Record<string, unknown>;
-    const agentName = message.from.actor_name;
-    const attemptMeta = this.agentAttemptMap.get(agentName);
-    const attemptId = attemptMeta?.attemptId ?? '';
-    const role = attemptMeta?.role ?? 'agent';
-
-    const statusCode = this.asString(payload.status_code) ?? 'agent_unknown';
-    const summary = this.asString(payload.content) ?? '';
-    if (statusCode === 'agent_heartbeat') {
-      const heartbeatPayload = typeof payload.heartbeat === 'object' && payload.heartbeat !== null
-        ? payload.heartbeat as Parameters<OrchestratorPersistenceService['recordWorkerHeartbeat']>[0]
-        : undefined;
-      if (heartbeatPayload) {
-        this.options.persistenceService.recordWorkerHeartbeat(heartbeatPayload);
-      }
-      return;
-    }
-    const payloadResult = typeof payload.result === 'object' && payload.result !== null
-      ? payload.result
-      : undefined;
-    const result: WorkerResult = payloadResult
-      ? this.workerResultService.normalize(payloadResult)
-      : {
-      success: this.mapStatusFromCode(statusCode),
-      engine: 'codex-cloud',
-      timedOut: false,
-      durationMs: 0,
-      summary,
-      activity: {
-        filesRead: [],
-        filesChanged: [],
-        commandsRun: [],
-        toolCalls: [],
-      },
-      checkpointDelta: {
-        factsAdded: [],
-        decisionsAdded: [],
-        openQuestions: [],
-        risksFound: [],
-        nextBestActions: [],
-        evidenceRefs: [],
-      },
-      artifacts: [],
-      spawnRequests: [],
-      budget: {},
-    };
-
-    this.recordExecutionEvent(
-      'agent_result',
-      `Agent ${agentName} reported ${statusCode}`,
-      {
-        taskId,
-        attemptId,
-        agentName,
-        role,
-        success: result.success,
-        engine: result.engine,
-        summary: result.summary,
-      },
-    );
-
-    if (typeof this.options.persistenceService.getRunRecord === 'function') {
-      this.checkpointMergeService.merge(result);
-      this.taskChatService.append({
-        taskId,
-        runId: this.options.persistenceService.getRunRecord().runId,
-        projectId: this.options.config.projectId,
-        source: 'agent',
-        authorType: 'agent',
-        authorId: agentName,
-        body: result.summary,
-        metadata: {
-          engine: result.engine,
-        },
-      });
-    }
-
-    this.options.scheduler.handleAgentResult(taskId, attemptId, agentName, role, result);
-  }
-
-  private async handleTaskCreated(message: MessageEnvelope<'task_created'>): Promise<void> {
-    const task = resolveTaskFromMessage(message);
-    if (!task) {
-      return;
-    }
-
-    this.options.registry.register(task);
-    this.options.gateway.watchTaskChannel(task.taskId);
-    const persisted = this.options.persistenceService.createTask({
-      taskId: task.taskId,
-      name: task.title ?? task.taskId,
-      priority: this.normalizePriority(task.priority),
-      metadata: {
-        description: task.description,
-        task_type: task.taskType,
-        created_by: task.createdByUserId,
-        branch_name: task.branchName,
-        project_id: this.options.config.projectId,
-        repo_id: this.options.config.repoId,
-        root_path: this.options.config.projectRoot,
-        branch: task.branchName ?? this.options.config.defaultBranch,
-      },
-    });
-    this.options.gateway.send(
-      buildTaskIntakeAccepted(this.options.config, task.taskId),
-    );
-    this.scheduleTask(persisted.taskId);
-  }
-
-  private handleCancellation(message: MessageEnvelope<'status_update'>): void {
-    const task = resolveTaskFromMessage(message);
-    if (!task) {
-      return;
-    }
-
-    const removedAgents = this.options.supervisor.cancelTask(task.taskId);
-    this.options.persistenceService.setTaskStatus(task.taskId, 'cancelled');
-    this.options.gateway.send(
-      buildOrchestratorStatusUpdate(
-        this.options.config,
-        'operator',
-        'operator',
-        'task_cancelled',
-        'Task cancelled.',
-        task.taskId,
-        {
-          removed_agents: removedAgents,
-          removed_agent_count: removedAgents.length,
-        },
-      ),
-    );
-    const persisted = this.options.persistenceService.getTask(task.taskId);
-    if (persisted) {
-      this.options.runLifecycle.cancelRunById(persisted.runId, 'Operator cancelled task');
-    }
-  }
-
-  private async handleOperatorChat(message: MessageEnvelope<'chat'>): Promise<void> {
-    const payload = message.payload as unknown as Record<string, unknown>;
-    const content = typeof payload.content === 'string' ? payload.content : '';
-    if (!content) {
-      return;
-    }
-
-    const metadataTaskId = typeof payload.metadata === 'object' && payload.metadata !== null
-      ? (payload.metadata as Record<string, unknown>).task_id
-      : undefined;
-    const resolvedTaskId = message.task_id ?? (typeof metadataTaskId === 'string' ? metadataTaskId : undefined);
-    const intent = parseOperatorIntent(content, resolvedTaskId);
-
-    this.sendStatusUpdate(
-      'operator',
-      undefined,
-      'operator_instruction',
-      'processing_operator_instruction',
-      'Processing operator instruction.',
-    );
-
-    if (intent.category === 'command_error') {
-      this.options.controlService.recordRejectedCommand(
-        intent.referencedTaskId,
-        content,
-        message.from.actor_name,
-        intent.message,
-      );
-      this.options.gateway.send(buildOperatorChatResponse(this.options.config, intent.message));
-      return;
-    }
-
-    if (intent.category === 'note') {
-      try {
-        const response = await this.options.chatResponder.respond(content);
-        this.options.gateway.send(buildOperatorChatResponse(this.options.config, response));
-      } catch (error) {
-        this.options.gateway.send(
-          buildOperatorChatResponse(
-            this.options.config,
-            error instanceof Error ? error.message : 'Failed to process operator instruction.',
-          ),
-        );
-      }
-      return;
-    }
-
-    await this.handleOperatorCommand(intent.action, message, intent.referencedTaskId ?? resolvedTaskId);
-  }
-
-  private handleOperatorStatusMessage(message: MessageEnvelope<'status_update'>): void {
-    const metadata = typeof message.payload.metadata === 'object' && message.payload.metadata !== null
-      ? (message.payload.metadata as Record<string, unknown>)
-      : undefined;
-    const taskId = message.task_id ?? (typeof metadata?.task_id === 'string' ? metadata.task_id : undefined);
-    if (!taskId) {
-      return;
-    }
-
-    const status = typeof metadata?.status === 'string' ? metadata.status : undefined;
-    if (status === 'review') {
-      this.sendStatusUpdate(
-        'operator',
-        taskId,
-        'operator_review',
-        'operator_review_notice',
-        buildReviewAnnouncement(message.from.actor_name),
-      );
-    }
-  }
-
-  private normalizePriority(value?: string): PersistedTask['priority'] {
-    if (!value) {
-      return 'medium';
-    }
-
-    if (['low', 'medium', 'high', 'urgent'].includes(value)) {
-      return value as PersistedTask['priority'];
-    }
-
-    return 'medium';
-  }
-
-  private persistArtifact(message: MessageEnvelope<'artifact_created'>): void {
-    const attemptMeta = this.agentAttemptMap.get(message.from.actor_name);
-    if (!attemptMeta) {
-      console.warn('[OrchestratorEngine] missing attempt for artifact', message.payload.artifact_id);
-      return;
-    }
-
-    const metadata = typeof message.payload.metadata === 'object' && message.payload.metadata !== null
-      ? (message.payload.metadata as Record<string, unknown>)
-      : undefined;
-
-    this.recordChannelEvent(
-      'artifact_created',
-      `Artifact ${message.payload.artifact_id} (${message.payload.kind})`,
-      message,
-      {
-        artifactId: message.payload.artifact_id,
-        kind: message.payload.kind,
-        summary: message.payload.summary,
-      },
-    );
-
-    this.options.persistenceService.recordArtifact({
-      artifactId: message.payload.artifact_id,
-      attemptId: attemptMeta.attemptId,
-      taskId: message.payload.task_id,
-      kind: message.payload.kind,
-      summary: message.payload.summary,
-      content: message.payload.content,
-      metadata,
-      createdAt: message.timestamp,
-    });
-
-    this.options.scheduler.handleArtifactRecorded(
-      message.payload.task_id,
-      attemptMeta.attemptId,
-      message.payload.artifact_id,
-      message.payload.kind,
-      message.payload.summary,
-    );
-  }
-
-  private async handleToolRequest(message: MessageEnvelope<'tool_request'>): Promise<void> {
-    const taskId = message.task_id;
-    if (!taskId) {
-      console.warn('[OrchestratorEngine] tool request without task_id');
-      return;
-    }
-
-    const request: ToolRequest = {
-      requestId: message.payload.request_id,
-      taskId,
-      toolName: message.payload.tool_name,
-      parameters: message.payload.parameters,
-      agentName: message.from.actor_name,
-    };
-    const response = await this.options.toolService.handleRequest(request);
-    const responseMessage = buildToolResponseMessage(
-      this.options.config,
-      taskId,
-      request.requestId,
-      response.status,
-      response.result,
-      response.error,
-    );
-    this.options.gateway.sendToTask(taskId, responseMessage);
-  }
-
-  private sendStatusUpdate(
-    roomId: string,
-    taskId: string | undefined,
-    phase: string,
-    statusCode: string,
-    content: string,
-    extraPayload?: Record<string, unknown>,
-  ): void {
-    this.options.gateway.send(
-      buildOrchestratorStatusUpdate(
-        this.options.config,
-        roomId,
-        phase,
-        statusCode,
-        content,
-        taskId,
-        extraPayload,
-      ),
-    );
-  }
-
-  private asString(value: unknown): string | undefined {
-    return typeof value === 'string' ? value : undefined;
-  }
-
-  private mapStatusFromCode(code: string): boolean {
-    return code === 'agent_completed';
-  }
-
-  private recordExecutionEvent(
-    eventType: ExecutionEventRecord['eventType'],
-    detail: string,
-    metadata?: Record<string, unknown>,
-  ): void {
-    this.options.persistenceService.recordExecutionEvent(eventType, detail, metadata);
-  }
-
-  private recordChannelEvent(
-    eventType: ExecutionEventRecord['eventType'],
-    detail: string,
-    message: MessageEnvelope,
-    metadata?: Record<string, unknown>,
-  ): void {
-    this.recordExecutionEvent(
-      eventType,
-      detail,
-      {
-        taskId: message.task_id,
-        actor_type: message.from.actor_type,
-        actor_id: message.from.actor_id,
-        actor_name: message.from.actor_name,
-        ...metadata,
-      },
-    );
-  }
-
-  private async handleOperatorCommand(
-    action: OperatorControlAction,
-    message: MessageEnvelope<'chat'>,
-    taskId?: string,
-  ): Promise<void> {
-    if (!taskId) {
-      this.options.gateway.send(buildOperatorChatResponse(
-        this.options.config,
-        'Could not determine which task you meant; please include a task identifier.',
-      ));
-      return;
-    }
-
-    const detail = action.reason ?? message.payload.content ?? action.type;
-    const outcome = this.options.controlService.execute(action, taskId, message.from.actor_name, detail);
-
-    if (outcome.actionType === 'cancel_task') {
-      const removedAgents = outcome.removedAgents ?? [];
-      this.options.gateway.send(
-        buildOrchestratorStatusUpdate(
-          this.options.config,
-          'operator',
-          'operator',
-          'task_cancelled',
-          `Cancelled task per operator: ${detail}`,
-          taskId,
-          {
-            removed_agents: removedAgents,
-            removed_agent_count: removedAgents.length,
-          },
-        ),
-      );
-    }
-
-    if (outcome.reviewRequested) {
-      this.onVerificationRequested(taskId, 'operator_review', message.from.actor_name, detail);
-    }
-
-    if (outcome.priority) {
-      this.sendStatusUpdate(
-        'operator',
-        taskId,
-        'operator_instruction',
-        'reprioritized',
-        `Updated priority to ${outcome.priority}.`,
-      );
-    }
-
-    this.options.gateway.send(buildOperatorChatResponse(
-      this.options.config,
-      `Recorded operator action: ${outcome.actionType}.`,
-    ));
-  }
-
-  private scheduleTask(taskId: string): void {
-    this.options.scheduler.handleNewTask(taskId);
-  }
-
-  private log(...items: unknown[]): void {
-    console.log(this.prefix, ...items);
-  }
-
-  onPlanProposed = (
+  readonly onPlanProposed = (
     taskId: string,
     planId: string,
     summary: string,
     plan?: string,
     dependencies?: string[],
   ): void => {
-    this.recordExecutionEvent(
-      'plan_proposed',
-      `Plan ${planId} proposed for ${taskId}`,
-      {
-        taskId,
-        planId,
-        dependencies,
-        summary,
-      },
-    );
-    this.options.gateway.send(
-      buildPlanProposedMessage(
-        this.options.config,
-        taskId,
-        planId,
-        summary,
-        plan,
-        dependencies,
-      ),
-    );
+    this.deps.persistenceService.recordExecutionEvent('plan_proposed', summary, {
+      taskId,
+      planId,
+      dependencies,
+    });
+    this.deps.gateway.send(buildPlanProposedMessage(this.deps.config, taskId, planId, summary, plan, dependencies));
   };
 
-  onCheckpointCreated = (
+  readonly onCheckpointCreated = (
     taskId: string,
     checkpointId: string,
     summary: string,
     metadata?: Record<string, unknown>,
   ): void => {
-    this.recordExecutionEvent(
-      'checkpoint_created',
-      `Checkpoint ${checkpointId} for ${taskId}`,
-      {
-        taskId,
-        checkpointId,
-        metadata,
-      },
-    );
-    this.options.gateway.send(
-      buildCheckpointCreatedMessage(
-        this.options.config,
-        taskId,
-        taskId,
-        checkpointId,
-        summary,
-        metadata,
-      ),
-    );
+    this.deps.persistenceService.recordExecutionEvent('checkpoint_created', summary, {
+      taskId,
+      checkpointId,
+      metadata,
+    });
+    this.deps.gateway.send(buildCheckpointCreatedMessage(
+      this.deps.config,
+      taskId,
+      taskId,
+      checkpointId,
+      summary,
+      metadata,
+    ));
   };
 
-  onVerificationRequested = (
+  readonly onVerificationRequested = (
     taskId: string,
     verificationType: string,
     requestedBy: string,
     detail?: string,
   ): void => {
-    this.recordExecutionEvent(
-      'verification_requested',
-      `Verification ${verificationType} requested for ${taskId}`,
-      {
-        taskId,
-        verificationType,
-        requestedBy,
-        detail,
-      },
-    );
-    this.options.gateway.send(
-      buildVerificationRequestedMessage(
-        this.options.config,
-        taskId,
-        verificationType,
-        requestedBy,
-        detail,
-      ),
-    );
-    this.sendStatusUpdate(
-      'operator',
+    this.deps.persistenceService.recordExecutionEvent('verification_requested', detail ?? verificationType, {
       taskId,
-      'operator_review',
-      'verification_requested',
-      'Verification requested for task.',
-      { verification_type: verificationType, detail },
-    );
+      verificationType,
+      requestedBy,
+    });
+    this.deps.gateway.send(buildVerificationRequestedMessage(
+      this.deps.config,
+      taskId,
+      verificationType,
+      requestedBy,
+      detail,
+    ));
   };
 
-  onVerificationOutcome = (
+  readonly onVerificationOutcome = (
     taskId: string,
     stage: 'verification' | 'review',
     status: 'passed' | 'failed' | 'blocked',
@@ -685,29 +101,151 @@ export class OrchestratorEngine implements TaskSchedulerEvents {
     attemptId?: string,
     reviewer?: string,
   ): void => {
-    this.options.gateway.send(
-      buildVerificationCompletedMessage(
-        this.options.config,
-        taskId,
-        stage,
-        status,
-        reviewer ?? this.options.config.agentName,
-        summary,
-      ),
-    );
-
-    this.sendStatusUpdate(
-      'operator',
+    this.deps.persistenceService.recordExecutionEvent('verification_completed', summary ?? status, {
       taskId,
-      'operator_review',
-      stage === 'verification' ? 'verification_completed' : 'review_completed',
-      `${stage} ${status}`,
-      {
-        stage,
-        status,
-        attempt_id: attemptId,
-        reviewer,
-      },
-    );
+      stage,
+      status,
+      attemptId,
+      reviewer,
+    });
+    this.deps.gateway.send(buildVerificationCompletedMessage(
+      this.deps.config,
+      taskId,
+      stage,
+      status,
+      reviewer ?? this.deps.config.agentName,
+      summary,
+    ));
   };
+
+  handleAgentAssignment(taskId: string, agents: SpawnedAgent[]): void {
+    for (const agent of agents) {
+      this.attemptMap.set(agent.attemptId, {
+        taskId: agent.taskId,
+        role: agent.role,
+        agentName: agent.agentName,
+      });
+    }
+    const assignmentId = `${taskId}-${agents.map((agent) => agent.attemptId).join('-')}`;
+    this.deps.gateway.send(buildTaskAssignedMessage(this.deps.config, taskId, taskId, assignmentId, agents));
+  }
+
+  handleAgentCommunication(_taskId: string, _message: string): void {
+    // Runtime-only chatter is intentionally left out of persistence.
+  }
+
+  async handleMessage(message: MessageEnvelope, source: MessageSource): Promise<void> {
+    if (message.type === 'task_created') {
+      this.handleTaskCreated(message);
+      return;
+    }
+    if (message.type === 'tool_request') {
+      await this.handleToolRequest(message);
+      return;
+    }
+    if (message.type === 'chat' && source === 'operator') {
+      const content = await this.deps.chatResponder.respond(message.payload.content);
+      this.deps.gateway.send(buildOperatorChatResponse(this.deps.config, content));
+      return;
+    }
+    if (message.type !== 'status_update') {
+      return;
+    }
+    this.handleStatusUpdate(message);
+  }
+
+  private handleTaskCreated(message: MessageEnvelope<'task_created'>): void {
+    const payload = message.payload;
+    const task = this.deps.persistenceService.createTask({
+      taskId: payload.task_id,
+      name: payload.title ?? payload.task_id,
+      priority: (payload.priority as 'low' | 'medium' | 'high' | 'urgent' | undefined) ?? 'medium',
+      status: 'planning',
+      metadata: {
+        description: payload.description ?? '',
+        task_type: payload.task_type ?? 'task',
+        created_by: payload.created_by ?? payload.created_by_user_id ?? 'operator',
+        branch_name: payload.branch_name,
+        queue_depth: 0,
+        fallback_count: 0,
+      },
+    });
+    this.deps.registry.register({
+      taskId: task.taskId,
+      projectId: task.projectId,
+      repoId: task.repoId,
+      rootPath: task.rootPath,
+      workspaceId: task.workspaceId,
+      title: task.name,
+      description: String(task.metadata?.description ?? ''),
+      taskType: String(task.metadata?.task_type ?? 'task'),
+      priority: task.priority,
+      createdAt: task.createdAt,
+      createdByUserId: typeof task.metadata?.created_by === 'string' ? task.metadata.created_by : undefined,
+      branchName: typeof task.metadata?.branch_name === 'string' ? task.metadata.branch_name : undefined,
+    });
+    this.deps.gateway.watchTaskChannel(task.taskId);
+    this.deps.scheduler.handleNewTask(task.taskId);
+  }
+
+  private handleStatusUpdate(message: MessageEnvelope<'status_update'>): void {
+    const payload = message.payload as StatusUpdatePayload & { result?: CodexAgentResult };
+    const taskId = message.task_id ?? message.room_id;
+    if (payload.status_code === 'task_cancelled') {
+      const detail = payload.content;
+      this.deps.controlService.execute({ type: 'cancel_task' }, taskId, message.from.actor_name, detail);
+      return;
+    }
+    if (!payload.result || !['agent_completed', 'agent_blocked', 'agent_failed'].includes(payload.status_code)) {
+      return;
+    }
+    const attempt = this.lookupAttempt(taskId, message.from.actor_id);
+    if (!attempt) {
+      return;
+    }
+    this.deps.persistenceService.recordExecutionEvent('agent_result', payload.content, {
+      taskId,
+      attemptId: attempt.attemptId,
+      agentName: attempt.agentName,
+      role: attempt.role,
+      verb: message.verb,
+      shorthand: message.shorthand,
+    });
+    this.deps.scheduler.handleAgentResult(taskId, attempt.attemptId, attempt.agentName, attempt.role, payload.result);
+  }
+
+  private async handleToolRequest(message: MessageEnvelope<'tool_request'>): Promise<void> {
+    const payload = message.payload as ToolRequestPayload;
+    const response = await this.deps.toolService.handleRequest({
+      requestId: payload.request_id,
+      toolName: payload.tool_name,
+      taskId: message.task_id ?? message.room_id,
+      agentName: message.from.actor_id,
+      parameters: payload.parameters,
+    });
+    this.deps.gateway.send(buildToolResponseMessage(
+      this.deps.config,
+      message.task_id ?? message.room_id,
+      payload.request_id,
+      response.status,
+      response.result,
+      response.error,
+    ));
+  }
+
+  private lookupAttempt(taskId: string, agentName: string): { attemptId: string; taskId: string; role: string; agentName: string } | undefined {
+    for (const [attemptId, attempt] of this.attemptMap.entries()) {
+      if (attempt.taskId === taskId && attempt.agentName === agentName) {
+        return { attemptId, ...attempt };
+      }
+    }
+    const attempts = this.deps.persistenceService.listAttemptsForTask(taskId);
+    const matched = attempts.find((attempt) => attempt.agentName === agentName);
+    if (!matched) {
+      return undefined;
+    }
+    const role = typeof matched.metadata?.role === 'string' ? matched.metadata.role : 'worker';
+    this.attemptMap.set(matched.attemptId, { taskId, role, agentName });
+    return { attemptId: matched.attemptId, taskId, role, agentName };
+  }
 }

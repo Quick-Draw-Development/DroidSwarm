@@ -30,11 +30,58 @@ const usageSchema = z.object({
   reasoning_output_tokens: z.number().int().nonnegative().optional(),
 });
 
+const envelopeVerbEnum = z.enum([
+  'task.create',
+  'task.accept',
+  'task.ready',
+  'task.blocked',
+  'plan.proposed',
+  'spawn.requested',
+  'spawn.approved',
+  'spawn.denied',
+  'artifact.created',
+  'checkpoint.created',
+  'verification.requested',
+  'verification.completed',
+  'run.completed',
+  'handoff.ready',
+  'summary.emitted',
+  'memory.pinned',
+  'status.updated',
+  'tool.request',
+  'tool.response',
+  'chat.message',
+  'heartbeat',
+] as const);
+
+const envelopeRiskSchema = z.object({
+  level: z.enum(['low', 'medium', 'high']).optional(),
+  code: z.string().min(1).optional(),
+  summary: z.string().min(1).optional(),
+}).passthrough();
+
+const shorthandSchema = z.object({
+  compact: z.string().min(1).optional(),
+  expanded: z.string().min(1).optional(),
+}).optional();
+
 const baseEnvelopeSchema = z.object({
+  id: z.string().min(1).optional(),
   message_id: z.string().min(1),
+  ts: isoTimestampSchema.optional(),
   project_id: z.string().min(1),
+  swarm_id: z.string().min(1).optional(),
+  run_id: z.string().min(1).optional(),
   room_id: z.string().min(1),
   task_id: z.string().min(1).optional(),
+  agent_id: z.string().min(1).optional(),
+  role: z.string().min(1).optional(),
+  verb: envelopeVerbEnum.optional(),
+  depends_on: z.array(z.string().min(1)).optional(),
+  artifact_refs: z.array(z.string().min(1)).optional(),
+  memory_refs: z.array(z.string().min(1)).optional(),
+  risk: envelopeRiskSchema.optional(),
+  body: z.record(z.string(), z.unknown()).optional(),
   from: actorRefSchema,
   timestamp: isoTimestampSchema,
   reply_to: z.string().min(1).optional(),
@@ -43,7 +90,8 @@ const baseEnvelopeSchema = z.object({
   session_id: z.string().min(1).optional(),
   usage: usageSchema.optional(),
   compression: compressionSchema.optional(),
-});
+  shorthand: shorthandSchema,
+}).passthrough();
 
 const statusUpdatePayloadSchema = z.object({
   phase: z.string().min(1),
@@ -296,3 +344,57 @@ const authMessageSchema: z.ZodType<AuthMessage> = z.object({
 });
 
 export { messageEnvelopeSchema, authMessageSchema };
+
+const VERB_BY_TYPE: Record<MessageType, z.infer<typeof envelopeVerbEnum>> = {
+  status_update: 'status.updated',
+  task_created: 'task.create',
+  task_intake_accepted: 'task.accept',
+  chat: 'chat.message',
+  heartbeat: 'heartbeat',
+  request_help: 'spawn.requested',
+  artifact: 'artifact.created',
+  artifact_created: 'artifact.created',
+  clarification_request: 'task.blocked',
+  plan_proposed: 'plan.proposed',
+  task_decomposed: 'plan.proposed',
+  task_assigned: 'task.ready',
+  spawn_requested: 'spawn.requested',
+  spawn_approved: 'spawn.approved',
+  spawn_denied: 'spawn.denied',
+  verification_requested: 'verification.requested',
+  verification_completed: 'verification.completed',
+  checkpoint_created: 'checkpoint.created',
+  run_completed: 'run.completed',
+  handoff_event: 'handoff.ready',
+  guardrail_event: 'summary.emitted',
+  trace_event: 'summary.emitted',
+  limit_event: 'task.blocked',
+  checkpoint_event: 'memory.pinned',
+  tool_request: 'tool.request',
+  tool_response: 'tool.response',
+};
+
+export const normalizeEnvelopeV2 = (input: unknown): MessageEnvelope => {
+  const parsed = messageEnvelopeSchema.parse(input);
+  const payload = parsed.payload as Record<string, unknown>;
+  return {
+    ...parsed,
+    id: parsed.id ?? parsed.message_id,
+    ts: parsed.ts ?? parsed.timestamp,
+    agent_id: parsed.agent_id ?? parsed.from.actor_id,
+    role: parsed.role ?? parsed.from.actor_name,
+    verb: parsed.verb ?? VERB_BY_TYPE[parsed.type],
+    depends_on: parsed.depends_on ?? (
+      Array.isArray(payload.dependencies)
+        ? payload.dependencies.filter((value): value is string => typeof value === 'string')
+        : undefined
+    ),
+    artifact_refs: parsed.artifact_refs ?? (
+      typeof payload.artifact_id === 'string' ? [payload.artifact_id] : undefined
+    ),
+    memory_refs: parsed.memory_refs ?? (
+      typeof payload.checkpoint_id === 'string' ? [payload.checkpoint_id] : undefined
+    ),
+    body: parsed.body ?? payload,
+  };
+};

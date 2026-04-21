@@ -10,20 +10,22 @@ This project now relies on `apps/orchestrator` as the durable control plane: it 
 2. **Scheduler and state management**
     - `TaskScheduler` owns the task graph: it tracks queued workloads, enforces depth/fan-out limits, launches verified workers through the supervisor, starts verification/review stages, records checkpoints/artifacts, and emits policy/budget events. When side-effect-heavy artifacts are emitted, the scheduler blocks the attempt, records a budget event, and injects an explicit review task before allowing further work.
     - The scheduler now resolves each task’s policy by merging metadata overrides with the global `policyDefaults` from configuration and persists that `effective_policy` on every attempt, ensuring auditability and consistent enforcement after restarts.
-   - `OrchestratorEngine` wires the scheduler to the `AgentSupervisor`, operator commands, and the gateway. It also keeps an agent→attempt map and forwards structured events such as plan proposals, checkpoint creation, and verification outcomes to both the socket channel and the dashboard timeline.
+   - `OrchestratorEngine` wires the scheduler to the `AgentSupervisor`, operator commands, and the gateway. It also keeps an agent→attempt map, normalizes incoming traffic through `EnvelopeV2`, and forwards structured events such as plan proposals, checkpoint creation, and verification outcomes to both the socket channel and the dashboard timeline.
    - `WorkerRegistry` is now a small helper for broadcasting agent presence; the durable persistence layer is the canonical source of truth.
 
 3. **Supervisor and agent runtime**
    - `AgentSupervisor` is limited to process lifecycle tasks (spawn, terminate, callbacks, agent counting). It no longer interprets workflow topology or requested-agent fan-out directly.
    - Codex workers emit structured `CodexAgentResult` messages (status, requested agents, artifacts, compression) that the scheduler consumes, persists, and uses to gate the next action.
+   - Spawned helpers receive the latest `TaskStateDigest` plus a `HandoffPacket` with required reads, preserving continuity without replaying the full room transcript.
 
 ## Execution Flow
 
 1. Operator creates a task via the dashboard or CLI; the dashboard writes it locally and the socket server surfaces a `task_created` message.
 2. `OrchestratorEngine.handleTaskCreated` registers the task, calls the scheduler, and publishes a `task_intake_accepted` response.
-3. The scheduler looks at dependencies, policies, and budgets, then asks the supervisor to start an agent attempt. Each attempt is logged in `task_attempts` and `agent_assignments`.
+3. The scheduler looks at dependencies, policies, budgets, and local-first routing tiers, then asks the supervisor to start an agent attempt. Each attempt is logged in `task_attempts` and `agent_assignments`.
 4. When an agent finishes with `CodexAgentResult`, the scheduler:
    - Persists artifacts/checkpoints/budget events as durable records.
+   - Refreshes the `TaskStateDigest` and creates handoff packets for helper fanout and recovery.
    - Creates child tasks for requested agents and marks the parent as waiting.
    - Triggers verification/review stage tasks when implementation completes.
    - Emits execution events (`plan_proposed`, `task_assigned`, `verification_requested`, `verification_completed`, etc.) via the engine gateway and the `task_events` table to keep the dashboard timeline accurate.
@@ -45,10 +47,13 @@ The following tables are now the orchestrator’s ground truth (indexes on run/t
 - `agent_assignments`: which agents were assigned to which task attempts.
 - `artifacts`: structured worker outputs attached to tasks.
 - `checkpoints`: resumable payloads and summaries from agents.
+- `task_state_digests`: durable continuity packets used for helper bootstrap and restart.
+- `handoff_packets`: digest-linked helper handoffs with required reads.
 - `budget_events`: limit/regulation hits.
 - `task_dependencies`: explicit parent/child/dependency graph.
 - `verification_reviews`: verification/review outcomes.
 - `task_events`: extended execution events used by the dashboard timeline.
+- `worker_results` / `worker_heartbeats`: include model-tier, queue-depth, and fallback telemetry for local-first routing.
 
 ## Dashboard Integration
 

@@ -127,11 +127,27 @@ start_service() {
   local port="$2"
   shift 2
 
-  local log_file pid_file
+  local log_file pid_file existing_pid
   log_file="$(component_log_file "$swarm_id" "$name")"
   pid_file="$(service_pid_file "$name" "$state_dir")"
   local attempt=1
   local pid=""
+
+  existing_pid=""
+  if [[ -f "$pid_file" ]]; then
+    existing_pid="$(<"$pid_file")"
+  fi
+
+  if port_is_listening "$port"; then
+    if [[ -n "$existing_pid" ]] && is_pid_running "$existing_pid"; then
+      mark_service_status "$name" "running"
+      printf '[%s] reusing existing %s on port %s (pid %s)\n' "$(now_utc)" "$name" "$port" "$existing_pid" >>"$log_file"
+      return 0
+    fi
+
+    mark_service_status "$name" "failed"
+    fail_daemon "Service port already in use before startup: $name on port $port"
+  fi
 
   while [[ "$attempt" -le "$service_start_retries" ]]; do
     mark_service_status "$name" "starting"
@@ -141,7 +157,7 @@ start_service() {
     pid="$!"
     printf '%s\n' "$pid" >"$pid_file"
 
-    if wait_for_port "$port" 20 1; then
+    if wait_for_port "$port" 20 1 && is_pid_running "$pid"; then
       mark_service_status "$name" "running"
       return 0
     fi
@@ -383,9 +399,21 @@ for required_file in \
 done
 
 if [[ -f "$DROIDSWARM_SERVICE_CONFIG" ]]; then
+  swarm_blink_port="${DROIDSWARM_BLINK_SERVER_PORT:-}"
+  swarm_mux_port="${DROIDSWARM_MUX_PORT:-}"
+  swarm_llama_port="${DROIDSWARM_LLAMA_PORT:-}"
+  swarm_llama_model="${DROIDSWARM_LLAMA_MODEL:-}"
   # shellcheck disable=SC1090
   source "$DROIDSWARM_SERVICE_CONFIG"
+  [[ -n "$swarm_blink_port" ]] && DROIDSWARM_BLINK_SERVER_PORT="$swarm_blink_port"
+  [[ -n "$swarm_mux_port" ]] && DROIDSWARM_MUX_PORT="$swarm_mux_port"
+  [[ -n "$swarm_llama_port" ]] && DROIDSWARM_LLAMA_PORT="$swarm_llama_port"
+  [[ -n "$swarm_llama_model" ]] && DROIDSWARM_LLAMA_MODEL="$swarm_llama_model"
 fi
+
+DROIDSWARM_BLINK_SERVER_START_CMD="${DROIDSWARM_BLINK_SERVER_BIN} --host 127.0.0.1 --port ${DROIDSWARM_BLINK_SERVER_PORT}"
+DROIDSWARM_MUX_START_CMD="${DROIDSWARM_MUX_BIN} server --port ${DROIDSWARM_MUX_PORT}"
+DROIDSWARM_LLAMA_START_CMD="${DROIDSWARM_LLAMA_SERVER_BIN} --host 127.0.0.1 --port ${DROIDSWARM_LLAMA_PORT} -m ${DROIDSWARM_LLAMA_MODEL}"
 
 for required_var in \
   DROIDSWARM_BLINK_SERVER_BIN \

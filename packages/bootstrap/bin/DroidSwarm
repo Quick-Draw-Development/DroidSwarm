@@ -69,6 +69,7 @@ Commands:
   swarm       Start and register a managed DroidSwarm instance
   list        List tracked swarms running on this machine
   status      Show detailed status for one managed DroidSwarm instance
+  cleanup     Remove stopped/failed swarm records and logs
   repair      Repair the local DroidSwarm install and optionally reinstall cleanly
   shutdown    Shut down one swarm or all swarms
   version     Show the installed DroidSwarm version
@@ -80,6 +81,8 @@ Examples:
   DroidSwarm swarm --project-root "$PWD" --env OPENAI_API_KEY=example --config mode=dev
   DroidSwarm list
   DroidSwarm status --swarm-id <id>
+  DroidSwarm cleanup
+  DroidSwarm cleanup --all --shutdown-running
   DroidSwarm repair
   DroidSwarm repair --clean
   DroidSwarm shutdown --swarm-id <id>
@@ -177,6 +180,19 @@ Options:
 EOF
 }
 
+print_cleanup_help() {
+  cat <<'EOF'
+Usage:
+  DroidSwarm cleanup [options]
+
+Options:
+  --swarm-id ID
+  --all
+  --shutdown-running
+  --help
+EOF
+}
+
 print_version() {
   printf 'DroidSwarm %s\n' "${DROIDSWARM_VERSION:-0.0.0}"
 }
@@ -219,6 +235,66 @@ resolve_runtime_dir_value() {
   done
 
   return 1
+}
+
+resolve_repair_script_path() {
+  local candidate
+  for candidate in \
+    "$ROOT_DIR/scripts/repair-droidswarm.sh" \
+    "$ROOT_DIR/bin/repair-droidswarm"; do
+    if [[ -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+service_runtime_config_is_valid() {
+  local config_file="${1:-$DROIDSWARM_SERVICE_CONFIG}"
+
+  [[ -f "$config_file" ]] || return 1
+  /bin/bash -n "$config_file" >/dev/null 2>&1 || return 1
+
+  env -i DROIDSWARM_SERVICE_CONFIG="$config_file" /bin/bash -lc '
+    set -euo pipefail
+    source "$DROIDSWARM_SERVICE_CONFIG"
+    [[ -n "${DROIDSWARM_BLINK_SERVER_BIN:-}" ]]
+    [[ -n "${DROIDSWARM_MUX_BIN:-}" ]]
+    [[ -n "${DROIDSWARM_LLAMA_SERVER_BIN:-}" ]]
+    [[ -n "${DROIDSWARM_LLAMA_MODEL:-}" ]]
+    [[ -x "${DROIDSWARM_BLINK_SERVER_BIN:-}" ]]
+    [[ -x "${DROIDSWARM_MUX_BIN:-}" ]]
+    [[ -x "${DROIDSWARM_LLAMA_SERVER_BIN:-}" ]]
+    [[ -f "${DROIDSWARM_LLAMA_MODEL:-}" ]]
+  ' >/dev/null 2>&1
+}
+
+ensure_service_runtime_ready() {
+  local repair_script=""
+  local install_root="${DROIDSWARM_INSTALL_ROOT:-$DROIDSWARM_HOME/install}"
+  local bin_dir="${DROIDSWARM_BIN_DIR:-$HOME/.local/bin}"
+
+  if service_runtime_config_is_valid "$DROIDSWARM_SERVICE_CONFIG"; then
+    return 0
+  fi
+
+  warn "Local DroidSwarm service runtime is missing or invalid. Attempting automatic repair."
+  repair_script="$(resolve_repair_script_path)" || {
+    err "Unable to locate repair script for automatic service recovery."
+    return 1
+  }
+
+  DROIDSWARM_INSTALL_ROOT="$install_root" \
+    DROIDSWARM_BIN_DIR="$bin_dir" \
+    DROIDSWARM_HOME="$DROIDSWARM_HOME" \
+    /bin/bash "$repair_script" --no-restart
+
+  if ! service_runtime_config_is_valid "$DROIDSWARM_SERVICE_CONFIG"; then
+    err "Automatic service repair completed, but the runtime configuration is still invalid."
+    return 1
+  fi
 }
 
 
@@ -482,6 +558,7 @@ cmd_swarm() {
   local project_root project_name project_id project_mode swarm_id dashboard_port ws_port db_path
   local agent_count main_branch production_branch repo_url foreground dry_run
   local dashboard_port_explicit ws_port_explicit
+  local blink_port_explicit mux_port_explicit llama_port_explicit
   local node_bin operator_token socket_server_entry orchestrator_entry dashboard_server_entry
   local blink_bridge_entry worker_host_entry
   local dashboard_static_dir dashboard_public_dir dashboard_workdir
@@ -503,6 +580,9 @@ cmd_swarm() {
   dry_run="0"
   dashboard_port_explicit="0"
   ws_port_explicit="0"
+  blink_port_explicit="0"
+  mux_port_explicit="0"
+  llama_port_explicit="0"
   node_bin="${DROIDSWARM_NODE_BIN:-$(command -v node || true)}"
   operator_token="${DROIDSWARM_OPERATOR_TOKEN:-}"
   socket_server_entry=""
@@ -579,16 +659,19 @@ cmd_swarm() {
         shift
         require_value "--blink-port" "${1:-}"
         blink_port="$1"
+        blink_port_explicit="1"
         ;;
       --mux-port)
         shift
         require_value "--mux-port" "${1:-}"
         mux_port="$1"
+        mux_port_explicit="1"
         ;;
       --llama-port)
         shift
         require_value "--llama-port" "${1:-}"
         llama_port="$1"
+        llama_port_explicit="1"
         ;;
       --llama-model)
         shift
@@ -769,20 +852,48 @@ cmd_swarm() {
     operator_token="$(uuid)"
   fi
 
+  if ! ensure_service_runtime_ready; then
+    return 1
+  fi
+
   if [[ -f "$DROIDSWARM_SERVICE_CONFIG" ]]; then
     # shellcheck disable=SC1090
     source "$DROIDSWARM_SERVICE_CONFIG"
   fi
 
   if [[ -z "$blink_port" ]]; then
-    blink_port="${DROIDSWARM_BLINK_SERVER_PORT:-$(next_available_port 8950)}"
+    blink_port="${DROIDSWARM_BLINK_SERVER_PORT:-8950}"
   fi
+  if ! port_is_free "$blink_port"; then
+    if [[ "$blink_port_explicit" == "1" ]]; then
+      err "Blink port is already in use: $blink_port"
+      return 1
+    fi
+    blink_port="$(next_available_port 8950)"
+  fi
+
   if [[ -z "$mux_port" ]]; then
-    mux_port="${DROIDSWARM_MUX_PORT:-$(next_available_port 8960)}"
+    mux_port="${DROIDSWARM_MUX_PORT:-8960}"
   fi
+  if ! port_is_free "$mux_port"; then
+    if [[ "$mux_port_explicit" == "1" ]]; then
+      err "Mux port is already in use: $mux_port"
+      return 1
+    fi
+    mux_port="$(next_available_port 8960)"
+  fi
+
   if [[ -z "$llama_port" ]]; then
-    llama_port="${DROIDSWARM_LLAMA_PORT:-$(next_available_port 11434)}"
+    llama_port="${DROIDSWARM_LLAMA_PORT:-11434}"
   fi
+  if ! port_is_free "$llama_port"; then
+    if [[ "$llama_port_explicit" == "1" ]]; then
+      err "llama.cpp port is already in use: $llama_port"
+      return 1
+    fi
+    llama_port="$(next_available_port 11434)"
+  fi
+
   if [[ -z "$llama_model" ]]; then
     llama_model="${DROIDSWARM_LLAMA_MODEL:-${DROIDSWARM_DEFAULT_LLAMA_MODEL:-$install_models_root/default.gguf}}"
   fi
@@ -949,6 +1060,29 @@ print_swarm_runtime_status() {
     "$blink_component_status" \
     "$mux_component_status" \
     "$llama_component_status"
+}
+
+swarm_runtime_status() {
+  local swarm_id="$1"
+  local pid status
+
+  pid=""
+  status="stopped"
+
+  if [[ -f "$(swarm_status_file "$swarm_id")" ]]; then
+    status="$(<"$(swarm_status_file "$swarm_id")")"
+  fi
+
+  if [[ -f "$(swarm_pid_file "$swarm_id")" ]]; then
+    pid="$(<"$(swarm_pid_file "$swarm_id")")"
+    if [[ -n "$pid" && "$pid" != "-" ]] && is_pid_running "$pid"; then
+      [[ "$status" == "stopped" ]] && status="running"
+    else
+      [[ "$status" == "running" || "$status" == "starting" ]] && status="degraded"
+    fi
+  fi
+
+  printf '%s\n' "$status"
 }
 
 cmd_list() {
@@ -1205,6 +1339,124 @@ cmd_repair() {
     "${repair_cmd[@]}"
 }
 
+remove_swarm_artifacts() {
+  local swarm_id="$1"
+  local state_dir
+  state_dir="$(swarm_dir "$swarm_id")"
+
+  rm -rf "$state_dir"
+  rm -f \
+    "$(swarm_log_file "$swarm_id")" \
+    "$(component_log_file "$swarm_id" "socket-server")" \
+    "$(component_log_file "$swarm_id" "dashboard")" \
+    "$(component_log_file "$swarm_id" "orchestrator")" \
+    "$(component_log_file "$swarm_id" "blink-bridge")" \
+    "$(component_log_file "$swarm_id" "worker-host")" \
+    "$(component_log_file "$swarm_id" "blink-server")" \
+    "$(component_log_file "$swarm_id" "mux")" \
+    "$(component_log_file "$swarm_id" "llama.cpp")"
+}
+
+cmd_cleanup() {
+  ensure_runtime_dirs
+
+  local swarm_id=""
+  local cleanup_all="0"
+  local shutdown_running="0"
+  local removed_count="0"
+  local skipped_count="0"
+  local found_count="0"
+  local target_ids=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --swarm-id)
+        shift
+        require_value "--swarm-id" "${1:-}"
+        swarm_id="$1"
+        ;;
+      --all)
+        cleanup_all="1"
+        ;;
+      --shutdown-running)
+        shutdown_running="1"
+        ;;
+      --help|-h)
+        print_cleanup_help
+        return 0
+        ;;
+      *)
+        err "Unknown cleanup option: $1"
+        print_cleanup_help
+        return 1
+        ;;
+    esac
+    shift
+  done
+
+  if [[ -n "$swarm_id" && "$cleanup_all" == "1" ]]; then
+    err "Use either --swarm-id or --all, not both."
+    return 1
+  fi
+
+  if [[ -n "$swarm_id" ]]; then
+    if ! swarm_exists "$swarm_id"; then
+      err "Unknown swarm: $swarm_id"
+      return 1
+    fi
+    target_ids=("$swarm_id")
+  else
+    local id
+    for id in $(active_swarm_ids); do
+      target_ids+=("$id")
+    done
+  fi
+
+  if [[ "${#target_ids[@]}" -eq 0 ]]; then
+    info "No DroidSwarm instances found."
+    return 0
+  fi
+
+  local id runtime_status
+  for id in "${target_ids[@]}"; do
+    found_count=$((found_count + 1))
+    runtime_status="$(swarm_runtime_status "$id")"
+
+    if [[ "$runtime_status" == "running" || "$runtime_status" == "starting" ]]; then
+      if [[ "$shutdown_running" == "1" ]]; then
+        shutdown_one "$id"
+        runtime_status="$(swarm_runtime_status "$id")"
+      else
+        info "Skipping active swarm '$id' (status: $runtime_status). Re-run with --shutdown-running to remove it."
+        skipped_count=$((skipped_count + 1))
+        continue
+      fi
+    fi
+
+    if [[ "$cleanup_all" != "1" && -z "$swarm_id" ]]; then
+      case "$runtime_status" in
+        stopped|failed|degraded)
+          ;;
+        *)
+          info "Skipping swarm '$id' (status: $runtime_status)."
+          skipped_count=$((skipped_count + 1))
+          continue
+          ;;
+      esac
+    fi
+
+    remove_swarm_artifacts "$id"
+    info "Removed DroidSwarm '$id'"
+    removed_count=$((removed_count + 1))
+  done
+
+  if [[ "$found_count" -gt 0 && "$removed_count" -eq 0 ]]; then
+    info "No matching stopped or failed swarms were removed."
+  fi
+
+  info "Cleanup complete. removed=$removed_count skipped=$skipped_count"
+}
+
 shutdown_one() {
   local swarm_id="$1"
   if ! swarm_exists "$swarm_id"; then
@@ -1338,6 +1590,9 @@ case "$COMMAND" in
     ;;
   shutdown)
     cmd_shutdown "$@"
+    ;;
+  cleanup)
+    cmd_cleanup "$@"
     ;;
   version)
     print_version

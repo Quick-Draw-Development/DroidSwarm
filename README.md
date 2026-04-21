@@ -52,6 +52,18 @@ List active swarms:
 DroidSwarm list
 ```
 
+Remove stopped or failed swarms and their logs:
+
+```bash
+DroidSwarm cleanup
+```
+
+Remove every tracked swarm, shutting down live ones first:
+
+```bash
+DroidSwarm cleanup --all --shutdown-running
+```
+
 Repair the local install or do a clean reinstall:
 
 ```bash

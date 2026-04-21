@@ -377,6 +377,46 @@ install_runtime_dependencies() {
   fi
 }
 
+normalize_dashboard_runtime() {
+  local dashboard_root="$1"
+  local package_file="$dashboard_root/apps/dashboard/package.json"
+  local server_file="$dashboard_root/apps/dashboard/server.js"
+
+  if [[ ! -f "$package_file" || ! -f "$server_file" ]]; then
+    return 0
+  fi
+
+  if ! grep -q '"type"[[:space:]]*:[[:space:]]*"module"' "$package_file"; then
+    return 0
+  fi
+
+  if ! grep -q "require('path')" "$server_file"; then
+    return 0
+  fi
+
+  cat >"$package_file" <<'EOF'
+{
+  "type": "commonjs"
+}
+EOF
+}
+
+dashboard_runtime_app_root() {
+  local dashboard_root="$1"
+
+  if [[ -f "$dashboard_root/apps/dashboard/server.js" ]]; then
+    printf '%s\n' "$dashboard_root/apps/dashboard"
+    return 0
+  fi
+
+  if [[ -f "$dashboard_root/server.js" ]]; then
+    printf '%s\n' "$dashboard_root"
+    return 0
+  fi
+
+  printf '%s\n' "$dashboard_root"
+}
+
 write_assignment() {
   local file="$1"
   local key="$2"
@@ -974,11 +1014,16 @@ if [[ -d "$WORKER_HOST_RUNTIME_SOURCE" ]]; then
 fi
 cp -R "$DASHBOARD_RUNTIME_SOURCE/." "$INSTALL_ROOT/runtime/dashboard/"
 install_runtime_dependencies "$INSTALL_ROOT/runtime/dashboard" "dashboard"
+normalize_dashboard_runtime "$INSTALL_ROOT/runtime/dashboard"
+dashboard_app_root="$(dashboard_runtime_app_root "$INSTALL_ROOT/runtime/dashboard")"
+mkdir -p "$dashboard_app_root/.next"
 if [[ -d "$DASHBOARD_STATIC_SOURCE" ]]; then
-  cp -R "$DASHBOARD_STATIC_SOURCE" "$INSTALL_ROOT/runtime/dashboard/.next/"
+  rm -rf "$dashboard_app_root/.next/static"
+  cp -R "$DASHBOARD_STATIC_SOURCE" "$dashboard_app_root/.next/static"
 fi
 if [[ -d "$DASHBOARD_PUBLIC_SOURCE" ]]; then
-  cp -R "$DASHBOARD_PUBLIC_SOURCE" "$INSTALL_ROOT/runtime/dashboard/public"
+  rm -rf "$dashboard_app_root/public"
+  cp -R "$DASHBOARD_PUBLIC_SOURCE" "$dashboard_app_root/public"
 fi
 if [[ -d "$DASHBOARD_DIST_SOURCE" ]]; then
   DASHBOARD_RUNTIME_DIST="$INSTALL_ROOT/runtime/dashboard/dist/apps/dashboard/.next"

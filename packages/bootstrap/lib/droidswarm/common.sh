@@ -281,17 +281,29 @@ port_is_listening() {
     node - "$port" <<'NODE' >/dev/null 2>&1
 const net = require('net');
 const port = Number(process.argv[2]);
-const socket = net.createConnection({ host: '127.0.0.1', port });
-socket.setTimeout(1000);
-socket.once('connect', () => {
-  socket.destroy();
-  process.exit(0);
-});
-socket.once('timeout', () => {
-  socket.destroy();
-  process.exit(1);
-});
-socket.once('error', () => process.exit(1));
+const hosts = ['127.0.0.1', '::1', 'localhost'];
+let index = 0;
+const tryHost = () => {
+  if (index >= hosts.length) {
+    process.exit(1);
+  }
+  const socket = net.createConnection({ host: hosts[index], port });
+  index += 1;
+  socket.setTimeout(1000);
+  socket.once('connect', () => {
+    socket.destroy();
+    process.exit(0);
+  });
+  socket.once('timeout', () => {
+    socket.destroy();
+    tryHost();
+  });
+  socket.once('error', () => {
+    socket.destroy();
+    tryHost();
+  });
+};
+tryHost();
 NODE
     return $?
   fi
@@ -301,14 +313,22 @@ NODE
 import socket
 import sys
 
-sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-sock.settimeout(1)
-try:
-    sock.connect(("127.0.0.1", int(sys.argv[1])))
-except OSError:
-    sys.exit(1)
-finally:
-    sock.close()
+port = int(sys.argv[1])
+hosts = ["127.0.0.1", "::1", "localhost"]
+for host in hosts:
+    try:
+        family = socket.AF_INET6 if ":" in host else socket.AF_INET
+        sock = socket.socket(family, socket.SOCK_STREAM)
+        sock.settimeout(1)
+        sock.connect((host, port))
+        sock.close()
+        sys.exit(0)
+    except OSError:
+        try:
+            sock.close()
+        except Exception:
+            pass
+sys.exit(1)
 PY
     return $?
   fi

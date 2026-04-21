@@ -386,7 +386,11 @@ install_runtime_dependencies() {
       err "Failed to install runtime dependencies for $runtime_name."
       exit 1
     fi
-    return 0
+  fi
+
+  if [[ -d "$runtime_dir/packages" ]] && compgen -G "$runtime_dir/packages/shared-*" >/dev/null; then
+    ensure_runtime_support_dependency "$runtime_dir" "tslib"
+    ensure_runtime_support_dependency "$runtime_dir" "zod"
   fi
 
   better_sqlite_package="$runtime_dir/node_modules/better-sqlite3/package.json"
@@ -418,6 +422,25 @@ install_runtime_dependencies() {
       rm -rf "$rebuild_root"
     fi
   fi
+}
+
+ensure_runtime_support_dependency() {
+  local runtime_dir="$1"
+  local dependency_name="$2"
+  local source_dir target_dir
+
+  source_dir="$WORKSPACE_SOURCE_ROOT/node_modules/$dependency_name"
+  target_dir="$runtime_dir/node_modules/$dependency_name"
+
+  if [[ ! -d "$source_dir" ]]; then
+    err "Runtime support dependency '$dependency_name' is missing from workspace node_modules."
+    err "Expected to find: $source_dir"
+    exit 1
+  fi
+
+  mkdir -p "$runtime_dir/node_modules"
+  rm -rf "$target_dir"
+  cp -R "$source_dir" "$target_dir"
 }
 
 normalize_dashboard_runtime() {

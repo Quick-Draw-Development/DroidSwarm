@@ -74,6 +74,17 @@ const parseBooleanFlag = (value, fallback = false) => {
   }
   return ["1", "true", "yes", "on"].includes(value.toLowerCase());
 };
+const resolveFirstExistingPath = (candidates) => {
+  for (const candidate of candidates) {
+    if (!candidate) {
+      continue;
+    }
+    if (import_node_fs.default.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return void 0;
+};
 const envSchema = import_zod.z.object({
   NODE_ENV: import_zod.z.enum(["development", "test", "production"]).default("development"),
   DROIDSWARM_DEBUG: import_zod.z.string().optional(),
@@ -190,6 +201,13 @@ const loadConfig = () => {
   const repoId = env.DROIDSWARM_REPO_ID ?? `${env.DROIDSWARM_PROJECT_ID ?? "droidswarm"}-repo`;
   const defaultBranch = env.DROIDSWARM_DEFAULT_BRANCH ?? env.DROIDSWARM_GIT_MAIN_BRANCH ?? "main";
   const developBranch = env.DROIDSWARM_DEVELOP_BRANCH ?? env.DROIDSWARM_GIT_DEVELOP_BRANCH ?? "develop";
+  const workerHostEntry = resolveFirstExistingPath([
+    env.DROIDSWARM_WORKER_HOST_ENTRY,
+    import_node_path.default.resolve(runtimeDir, "worker-host", "main.cjs"),
+    import_node_path.default.resolve(runtimeDir, "worker-host", "main.js"),
+    import_node_path.default.resolve(process.cwd(), "dist", "apps", "worker-host", "main.cjs"),
+    import_node_path.default.resolve(process.cwd(), "dist", "apps", "worker-host", "main.js")
+  ]) ?? import_node_path.default.resolve(runtimeDir, "worker-host", "main.cjs");
   const allowedRepoRoots = parseCommaList(env.DROIDSWARM_ALLOWED_REPO_ROOTS);
   const gitPolicy = {
     mainBranch: env.DROIDSWARM_GIT_MAIN_BRANCH ?? import_shared_git.defaultGitPolicy.mainBranch,
@@ -212,7 +230,7 @@ const loadConfig = () => {
     developBranch,
     allowedRepoRoots: allowedRepoRoots.length > 0 ? allowedRepoRoots : [projectRoot],
     workspaceRoot: env.DROIDSWARM_WORKSPACE_ROOT ?? import_node_path.default.resolve(projectRoot, ".droidswarm", "workspaces"),
-    workerHostEntry: env.DROIDSWARM_WORKER_HOST_ENTRY ?? import_node_path.default.resolve(runtimeDir, "worker-host", "main.js"),
+    workerHostEntry,
     operatorToken: env.DROIDSWARM_OPERATOR_TOKEN,
     agentName: env.DROIDSWARM_ORCHESTRATOR_NAME ?? "Orchestrator",
     agentRole: env.DROIDSWARM_ORCHESTRATOR_ROLE ?? "control-plane",

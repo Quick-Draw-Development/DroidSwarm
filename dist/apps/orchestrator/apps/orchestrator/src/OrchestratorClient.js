@@ -58,7 +58,7 @@ class DroidSwarmOrchestratorClient {
     this.supervisor = new import_AgentSupervisor.AgentSupervisor(
       config,
       this.registry,
-      this.config.workerHostEntry ?? import_node_path.default.resolve(__dirname, "main.js")
+      this.config.workerHostEntry ?? import_node_path.default.resolve(process.cwd(), "dist", "apps", "worker-host", "main.cjs")
     );
   }
   start() {

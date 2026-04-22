@@ -67,6 +67,7 @@ Usage:
 Commands:
   setup       Initialize a project for DroidSwarm
   swarm       Start and register a managed DroidSwarm instance
+  orchestrator Inspect orchestrator state and send task-channel messages
   list        List tracked swarms running on this machine
   status      Show detailed status for one managed DroidSwarm instance
   cleanup     Remove stopped/failed swarm records and logs
@@ -79,6 +80,9 @@ Commands:
 Examples:
   DroidSwarm setup --project-root "$PWD" --project-mode greenfield
   DroidSwarm swarm --project-root "$PWD" --env OPENAI_API_KEY=example --config mode=dev
+  DroidSwarm orchestrator status
+  DroidSwarm orchestrator status --task-id <task-id>
+  DroidSwarm orchestrator message --task-id <task-id> --content "Need an update"
   DroidSwarm list
   DroidSwarm status --swarm-id <id>
   DroidSwarm cleanup
@@ -199,11 +203,35 @@ print_version() {
   printf 'DroidSwarm %s\n' "${DROIDSWARM_VERSION:-0.0.0}"
 }
 
+print_orchestrator_help() {
+  cat <<'EOF'
+Usage:
+  DroidSwarm orchestrator status [options]
+  DroidSwarm orchestrator message [options]
+
+Status options:
+  --swarm-id ID
+  --task-id ID
+  --limit N
+
+Message options:
+  --swarm-id ID
+  --task-id ID              Required
+  --content TEXT            Required
+  --username NAME           Default: operator_cli
+
+Examples:
+  DroidSwarm orchestrator status
+  DroidSwarm orchestrator status --task-id <task-id>
+  DroidSwarm orchestrator message --task-id <task-id> --content "What is blocked?"
+EOF
+}
+
 resolve_runtime_value() {
   local env_value="$1"
   shift
 
-  if [[ -n "$env_value" ]]; then
+  if [[ -n "$env_value" && -f "$env_value" ]]; then
     printf '%s\n' "$env_value"
     return 0
   fi
@@ -223,7 +251,7 @@ resolve_runtime_dir_value() {
   local env_value="$1"
   shift
 
-  if [[ -n "$env_value" ]]; then
+  if [[ -n "$env_value" && -d "$env_value" ]]; then
     printf '%s\n' "$env_value"
     return 0
   fi
@@ -237,6 +265,42 @@ resolve_runtime_dir_value() {
   done
 
   return 1
+}
+
+resolve_swarm_id() {
+  local swarm_id="${1:-}"
+  if [[ -n "$swarm_id" ]]; then
+    if ! swarm_exists "$swarm_id"; then
+      err "Unknown swarm: $swarm_id"
+      return 1
+    fi
+    printf '%s\n' "$swarm_id"
+    return 0
+  fi
+
+  local detected_ids=()
+  local active_id
+  for active_id in $(active_swarm_ids); do
+    detected_ids+=("$active_id")
+  done
+
+  if [[ "${#detected_ids[@]}" -eq 0 ]]; then
+    err "No DroidSwarm instances found."
+    return 1
+  fi
+
+  if [[ "${#detected_ids[@]}" -gt 1 ]]; then
+    err "Multiple swarms found. Re-run with --swarm-id."
+    cmd_list --all
+    return 1
+  fi
+
+  printf '%s\n' "${detected_ids[0]}"
+}
+
+sql_escape() {
+  local value="${1:-}"
+  printf "%s" "${value//\'/\'\'}"
 }
 
 resolve_repair_script_path() {
@@ -943,8 +1007,10 @@ cmd_swarm() {
     "$install_runtime_root/blink-bridge/main.js" \
     "$workspace_root/dist/apps/blink-bridge/main.js" || true)"
   worker_host_entry="$(resolve_runtime_value "${DROIDSWARM_WORKER_HOST_ENTRY:-}" \
-    "${DROIDSWARM_DEFAULT_WORKER_HOST_ENTRY:-$install_runtime_root/worker-host/main.js}" \
+    "${DROIDSWARM_DEFAULT_WORKER_HOST_ENTRY:-$install_runtime_root/worker-host/main.cjs}" \
+    "$install_runtime_root/worker-host/main.cjs" \
     "$install_runtime_root/worker-host/main.js" \
+    "$workspace_root/dist/apps/worker-host/main.cjs" \
     "$workspace_root/dist/apps/worker-host/main.js" || true)"
 
   if [[ -z "$socket_server_entry" ]]; then
@@ -1341,33 +1407,216 @@ cmd_status() {
     shift
   done
 
-  if [[ -z "$swarm_id" ]]; then
-    local detected_ids=()
-    local active_id
-    for active_id in $(active_swarm_ids); do
-      detected_ids+=("$active_id")
-    done
-
-    if [[ "${#detected_ids[@]}" -eq 0 ]]; then
-      info "No DroidSwarm instances found."
-      return 0
-    fi
-
-    if [[ "${#detected_ids[@]}" -gt 1 ]]; then
-      err "Multiple swarms found. Re-run with --swarm-id."
-      cmd_list --all
-      return 1
-    fi
-
-    swarm_id="${detected_ids[0]}"
-  fi
-
-  if ! swarm_exists "$swarm_id"; then
-    err "Unknown swarm: $swarm_id"
+  if ! swarm_id="$(resolve_swarm_id "$swarm_id")"; then
     return 1
   fi
 
   print_swarm_runtime_status "$swarm_id"
+}
+
+cmd_orchestrator_status() {
+  ensure_runtime_dirs
+
+  local swarm_id=""
+  local task_id=""
+  local limit="10"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --swarm-id)
+        shift
+        require_value "--swarm-id" "${1:-}"
+        swarm_id="$1"
+        ;;
+      --task-id)
+        shift
+        require_value "--task-id" "${1:-}"
+        task_id="$1"
+        ;;
+      --limit)
+        shift
+        require_value "--limit" "${1:-}"
+        limit="$1"
+        ;;
+      --help|-h)
+        print_orchestrator_help
+        return 0
+        ;;
+      *)
+        err "Unknown orchestrator status option: $1"
+        print_orchestrator_help
+        return 1
+        ;;
+    esac
+    shift
+  done
+
+  if ! swarm_id="$(resolve_swarm_id "$swarm_id")"; then
+    return 1
+  fi
+
+  if ! command -v sqlite3 >/dev/null 2>&1; then
+    err "sqlite3 is required for orchestrator status."
+    return 1
+  fi
+
+  load_swarm_env "$swarm_id" || return 1
+
+  local db_path="${DROIDSWARM_DB_PATH:-}"
+  if [[ -z "$db_path" || ! -f "$db_path" ]]; then
+    err "Shared project database not found for swarm: $swarm_id"
+    return 1
+  fi
+
+  info "Swarm: $swarm_id"
+  info "Database: $db_path"
+  info "Project: ${DROIDSWARM_PROJECT_NAME:-unknown} (${DROIDSWARM_PROJECT_ID:-unknown})"
+
+  if [[ -n "$task_id" ]]; then
+    local escaped_task_id
+    escaped_task_id="$(sql_escape "$task_id")"
+
+    sqlite3 "$db_path" ".mode box" "
+select task_id,name,status,priority,run_id,updated_at,metadata_json
+from tasks
+where task_id='${escaped_task_id}';
+
+select attempt_id,agent_name,status,created_at,updated_at,metadata_json
+from task_attempts
+where task_id='${escaped_task_id}'
+order by created_at desc
+limit ${limit};
+
+select message_id,message_type,sender_name,substr(coalesce(content,''),1,120) as content_preview,created_at
+from messages
+where task_id='${escaped_task_id}' or channel_id='${escaped_task_id}'
+order by created_at desc
+limit ${limit};
+
+select event_id,event_type,detail,normalized_verb,created_at
+from execution_events
+where task_id='${escaped_task_id}'
+order by created_at desc
+limit ${limit};
+"
+    return 0
+  fi
+
+  sqlite3 "$db_path" ".mode box" "
+select run_id,status,created_at,updated_at
+from runs
+order by created_at desc
+limit ${limit};
+
+select task_id,name,status,priority,updated_at
+from tasks
+order by updated_at desc
+limit ${limit};
+
+select attempt_id,task_id,agent_name,status,updated_at
+from task_attempts
+order by updated_at desc
+limit ${limit};
+"
+}
+
+cmd_orchestrator_message() {
+  ensure_runtime_dirs
+
+  local swarm_id=""
+  local task_id=""
+  local content=""
+  local username="operator_cli"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --swarm-id)
+        shift
+        require_value "--swarm-id" "${1:-}"
+        swarm_id="$1"
+        ;;
+      --task-id)
+        shift
+        require_value "--task-id" "${1:-}"
+        task_id="$1"
+        ;;
+      --content)
+        shift
+        require_value "--content" "${1:-}"
+        content="$1"
+        ;;
+      --username)
+        shift
+        require_value "--username" "${1:-}"
+        username="$1"
+        ;;
+      --help|-h)
+        print_orchestrator_help
+        return 0
+        ;;
+      *)
+        err "Unknown orchestrator message option: $1"
+        print_orchestrator_help
+        return 1
+        ;;
+    esac
+    shift
+  done
+
+  if [[ -z "$task_id" || -z "$content" ]]; then
+    err "Provide --task-id and --content."
+    print_orchestrator_help
+    return 1
+  fi
+
+  if ! command -v curl >/dev/null 2>&1; then
+    err "curl is required for orchestrator message."
+    return 1
+  fi
+
+  if ! swarm_id="$(resolve_swarm_id "$swarm_id")"; then
+    return 1
+  fi
+
+  load_swarm_env "$swarm_id" || return 1
+
+  local dashboard_port="${DROIDSWARM_DASHBOARD_PORT:-}"
+  if [[ -z "$dashboard_port" ]]; then
+    err "Dashboard port not found for swarm: $swarm_id"
+    return 1
+  fi
+
+  curl -sS -X POST \
+    "http://127.0.0.1:${dashboard_port}/api/channels/${task_id}/messages" \
+    -H 'Content-Type: application/json' \
+    --data "{\"username\":\"$(json_escape "$username")\",\"content\":\"$(json_escape "$content")\"}"
+  printf '\n'
+}
+
+cmd_orchestrator() {
+  ensure_runtime_dirs
+
+  local action="${1:-status}"
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
+
+  case "$action" in
+    status)
+      cmd_orchestrator_status "$@"
+      ;;
+    message|send)
+      cmd_orchestrator_message "$@"
+      ;;
+    --help|-h|help)
+      print_orchestrator_help
+      ;;
+    *)
+      err "Unknown orchestrator command: $action"
+      print_orchestrator_help
+      return 1
+      ;;
+  esac
 }
 
 cmd_update() {
@@ -1743,6 +1992,9 @@ case "$COMMAND" in
     ;;
   swarm)
     cmd_swarm "$@"
+    ;;
+  orchestrator)
+    cmd_orchestrator "$@"
     ;;
   update)
     cmd_update "$@"

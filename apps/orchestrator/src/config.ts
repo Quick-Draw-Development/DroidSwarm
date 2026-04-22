@@ -58,6 +58,18 @@ const parseBooleanFlag = (value: string | undefined, fallback = false): boolean 
   return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase());
 };
 
+const resolveFirstExistingPath = (candidates: Array<string | undefined>): string | undefined => {
+  for (const candidate of candidates) {
+    if (!candidate) {
+      continue;
+    }
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return undefined;
+};
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   DROIDSWARM_DEBUG: z.string().optional(),
@@ -185,6 +197,13 @@ export const loadConfig = (): OrchestratorConfig => {
   const repoId = env.DROIDSWARM_REPO_ID ?? `${env.DROIDSWARM_PROJECT_ID ?? 'droidswarm'}-repo`;
   const defaultBranch = env.DROIDSWARM_DEFAULT_BRANCH ?? env.DROIDSWARM_GIT_MAIN_BRANCH ?? 'main';
   const developBranch = env.DROIDSWARM_DEVELOP_BRANCH ?? env.DROIDSWARM_GIT_DEVELOP_BRANCH ?? 'develop';
+  const workerHostEntry = resolveFirstExistingPath([
+    env.DROIDSWARM_WORKER_HOST_ENTRY,
+    path.resolve(runtimeDir, 'worker-host', 'main.cjs'),
+    path.resolve(runtimeDir, 'worker-host', 'main.js'),
+    path.resolve(process.cwd(), 'dist', 'apps', 'worker-host', 'main.cjs'),
+    path.resolve(process.cwd(), 'dist', 'apps', 'worker-host', 'main.js'),
+  ]) ?? path.resolve(runtimeDir, 'worker-host', 'main.cjs');
   const allowedRepoRoots = parseCommaList(env.DROIDSWARM_ALLOWED_REPO_ROOTS);
   const gitPolicy = {
     mainBranch: env.DROIDSWARM_GIT_MAIN_BRANCH ?? defaultGitPolicy.mainBranch,
@@ -208,7 +227,7 @@ export const loadConfig = (): OrchestratorConfig => {
     developBranch,
     allowedRepoRoots: allowedRepoRoots.length > 0 ? allowedRepoRoots : [projectRoot],
     workspaceRoot: env.DROIDSWARM_WORKSPACE_ROOT ?? path.resolve(projectRoot, '.droidswarm', 'workspaces'),
-    workerHostEntry: env.DROIDSWARM_WORKER_HOST_ENTRY ?? path.resolve(runtimeDir, 'worker-host', 'main.js'),
+    workerHostEntry,
     operatorToken: env.DROIDSWARM_OPERATOR_TOKEN,
     agentName: env.DROIDSWARM_ORCHESTRATOR_NAME ?? 'Orchestrator',
     agentRole: env.DROIDSWARM_ORCHESTRATOR_ROLE ?? 'control-plane',

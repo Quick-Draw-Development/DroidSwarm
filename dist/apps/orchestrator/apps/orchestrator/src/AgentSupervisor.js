@@ -54,6 +54,7 @@ class AgentSupervisor {
     if (!this.canSpawn(task)) {
       return null;
     }
+    this.registry.register(task);
     const agentName = this.nextAgentName(role);
     const mode = role === "tester" ? "verifier" : "worker";
     const child = (0, import_node_child_process.fork)(this.entryScript, [mode, JSON.stringify({

@@ -17,6 +17,7 @@ import type { OrchestratorConfig, RunRecord } from './types';
 import { finalizeRunOnShutdown } from './run-shutdown';
 import { ToolService } from './tools/ToolService';
 import { ProjectRegistryService } from './services/project-registry.service';
+import type { PersistedTask, TaskRecord } from './types';
 
 export class DroidSwarmOrchestratorClient {
   private readonly registry = new WorkerRegistry();
@@ -115,6 +116,10 @@ export class DroidSwarmOrchestratorClient {
 
     this.gateway.setMessageHandler(this.engine.handleMessage.bind(this.engine));
 
+    for (const task of this.persistenceService.getTasks()) {
+      this.registry.register(this.toTaskRecord(task));
+    }
+
     const recoveredSummaries = this.runLifecycle.getRecoverySummaries();
     for (const summary of recoveredSummaries) {
       for (const taskId of summary.resumedTasks) {
@@ -149,5 +154,22 @@ export class DroidSwarmOrchestratorClient {
       return;
     }
     console.log(this.prefix, ...args);
+  }
+
+  private toTaskRecord(task: PersistedTask): TaskRecord {
+    return {
+      taskId: task.taskId,
+      projectId: task.projectId,
+      repoId: task.repoId,
+      rootPath: task.rootPath,
+      workspaceId: task.workspaceId,
+      title: task.name,
+      description: typeof task.metadata?.description === 'string' ? task.metadata.description : '',
+      taskType: typeof task.metadata?.task_type === 'string' ? task.metadata.task_type : 'task',
+      priority: task.priority,
+      createdAt: task.createdAt,
+      createdByUserId: typeof task.metadata?.created_by === 'string' ? task.metadata.created_by : undefined,
+      branchName: typeof task.metadata?.branch_name === 'string' ? task.metadata.branch_name : undefined,
+    };
   }
 }

@@ -93,6 +93,8 @@ export class AgentSupervisor {
       return null;
     }
 
+    this.registry.register(task);
+
     const agentName = this.nextAgentName(role);
     const mode = role === 'tester' ? 'verifier' : 'worker';
     const child = fork(this.entryScript, [mode, JSON.stringify({

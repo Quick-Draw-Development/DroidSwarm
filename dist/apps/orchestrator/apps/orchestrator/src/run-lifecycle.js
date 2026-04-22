@@ -25,7 +25,7 @@ module.exports = __toCommonJS(run_lifecycle_exports);
 const nowIso = () => (/* @__PURE__ */ new Date()).toISOString();
 const terminalRunStatuses = ["completed", "failed", "cancelled"];
 const terminalTaskStatuses = ["completed", "verified", "failed", "cancelled"];
-const runningAttemptStatus = "running";
+const interruptedAttemptStatuses = ["running", "blocked"];
 class RunLifecycleService {
   constructor(persistence) {
     this.persistence = persistence;
@@ -94,7 +94,7 @@ class RunLifecycleService {
   }
   recoverRun(run) {
     const reason = "unexpected orchestrator restart";
-    this.markRunningAttemptsFailed(run.runId, reason);
+    this.markInterruptedAttemptsFailed(run.runId, reason);
     const tasks = this.persistence.tasks.listByRun(run.runId);
     const resumedTasks = [];
     const failedTasks = [];
@@ -112,6 +112,7 @@ class RunLifecycleService {
           metadata: {
             ...task.metadata ?? {},
             recovery_reason: "requeued_after_restart",
+            recovery_previous_status: task.status,
             recovery_digest_id: latestDigest?.id,
             recovery_handoff_id: latestHandoff?.id
           },
@@ -150,25 +151,22 @@ class RunLifecycleService {
     const resumableStatuses = [
       "queued",
       "planning",
+      "running",
       "waiting_on_dependency",
-      "waiting_on_human"
+      "waiting_on_human",
+      "in_review"
     ];
-    if (resumableStatuses.includes(task.status)) {
-      return true;
-    }
-    if (task.status === "running") {
-      return this.hasCheckpoint(task.taskId);
-    }
-    return false;
+    return resumableStatuses.includes(task.status);
   }
-  hasCheckpoint(taskId) {
-    const row = this.persistence.database.prepare("SELECT 1 FROM checkpoints WHERE task_id = ? ORDER BY created_at DESC LIMIT 1").get(taskId);
-    return Boolean(row);
-  }
-  markRunningAttemptsFailed(runId, reason) {
-    const rows = this.persistence.database.prepare("SELECT attempt_id FROM task_attempts WHERE run_id = ? AND status = ?").all(runId, runningAttemptStatus);
-    for (const row of rows) {
-      this.persistence.attempts.updateStatus(row.attempt_id, "failed", { reason });
+  markInterruptedAttemptsFailed(runId, reason) {
+    for (const status of interruptedAttemptStatuses) {
+      const rows = this.persistence.database.prepare("SELECT attempt_id FROM task_attempts WHERE run_id = ? AND status = ?").all(runId, status);
+      for (const row of rows) {
+        this.persistence.attempts.updateStatus(row.attempt_id, "failed", {
+          reason,
+          recovery_interrupted_status: status
+        });
+      }
     }
   }
 }

@@ -40,7 +40,7 @@ describe('RunLifecycleService', () => {
     rmSync(workspace, { recursive: true, force: true });
   });
 
-  it('recovers an interrupted run and fails pending tasks/attempts', () => {
+  it('requeues interrupted running tasks even without checkpoints', () => {
     const workspace = mkdtempSync(path.join(tmpdir(), 'droidswarm-runlifecycles-'));
     const dbPath = path.join(workspace, 'state.db');
     const database = openPersistenceDatabase(dbPath);
@@ -60,21 +60,20 @@ describe('RunLifecycleService', () => {
     const summaries = lifecycle.recoverInterruptedRuns();
 
     const runRow = persistence.runs.get(run.runId);
-    assert.equal(runRow?.status, 'failed');
+    assert.equal(runRow?.status, 'running');
 
     const updatedTask = persistence.tasks.get(task.taskId);
-    assert.equal(updatedTask?.status, 'failed');
-    assert.equal(
-      updatedTask?.metadata?.recovery_reason,
-      `Task ${task.taskId} in status running cannot resume after restart`,
-    );
+    assert.equal(updatedTask?.status, 'queued');
+    assert.equal(updatedTask?.metadata?.recovery_reason, 'requeued_after_restart');
+    assert.equal(updatedTask?.metadata?.recovery_previous_status, 'running');
 
     const attemptRow = service.getAttempt(attempt.attemptId);
     assert.equal(attemptRow?.status, 'failed');
+    assert.equal(attemptRow?.metadata?.recovery_interrupted_status, 'running');
 
     assert.equal(summaries.length, 1);
-    assert.equal(summaries[0].resumedTasks.length, 0);
-    assert.equal(summaries[0].failedTasks[0]?.taskId, task.taskId);
+    assert.deepEqual(summaries[0].resumedTasks, [task.taskId]);
+    assert.equal(summaries[0].failedTasks.length, 0);
 
     const events = database
       .prepare('SELECT event_type FROM execution_events WHERE run_id = ?')
@@ -110,12 +109,47 @@ describe('RunLifecycleService', () => {
     const updatedTask = persistence.tasks.get(task.taskId);
     assert.equal(updatedTask?.status, 'queued');
     assert.equal(updatedTask?.metadata?.recovery_reason, 'requeued_after_restart');
+    assert.equal(updatedTask?.metadata?.recovery_previous_status, 'running');
 
     const runRow = persistence.runs.get(run.runId);
     assert.equal(runRow?.status, 'running');
     assert.equal(summaries.length, 1);
     assert.deepEqual(summaries[0].resumedTasks, [task.taskId]);
     assert.equal(summaries[0].failedTasks.length, 0);
+
+    database.close();
+    rmSync(workspace, { recursive: true, force: true });
+  });
+
+  it('requeues blocked attempts after restart', () => {
+    const workspace = mkdtempSync(path.join(tmpdir(), 'droidswarm-runlifecycles-'));
+    const dbPath = path.join(workspace, 'state.db');
+    const database = openPersistenceDatabase(dbPath);
+    const persistence = PersistenceClient.fromDatabase(database);
+    const lifecycle = new RunLifecycleService(persistence);
+    const run = persistence.createRun('droidswarm');
+    const service = new OrchestratorPersistenceService(persistence, run);
+
+    const task = service.createTask({
+      taskId: 'task-blocked',
+      name: 'blocked task',
+      priority: 'medium',
+      status: 'waiting_on_human',
+    });
+    const attempt = service.createAttempt('attempt-blocked', task, 'Agent', 'worker');
+    service.updateAttemptStatus(attempt.attemptId, 'blocked', { reason: 'waiting for review' });
+
+    const summaries = lifecycle.recoverInterruptedRuns();
+
+    const updatedTask = persistence.tasks.get(task.taskId);
+    assert.equal(updatedTask?.status, 'queued');
+    assert.equal(updatedTask?.metadata?.recovery_previous_status, 'waiting_on_human');
+
+    const attemptRow = service.getAttempt(attempt.attemptId);
+    assert.equal(attemptRow?.status, 'failed');
+    assert.equal(attemptRow?.metadata?.recovery_interrupted_status, 'blocked');
+
+    assert.deepEqual(summaries[0].resumedTasks, [task.taskId]);
 
     database.close();
     rmSync(workspace, { recursive: true, force: true });

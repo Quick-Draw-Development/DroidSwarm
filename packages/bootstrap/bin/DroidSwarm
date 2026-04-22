@@ -1007,11 +1007,11 @@ cmd_swarm() {
     "$install_runtime_root/blink-bridge/main.js" \
     "$workspace_root/dist/apps/blink-bridge/main.js" || true)"
   worker_host_entry="$(resolve_runtime_value "${DROIDSWARM_WORKER_HOST_ENTRY:-}" \
-    "${DROIDSWARM_DEFAULT_WORKER_HOST_ENTRY:-$install_runtime_root/worker-host/main.cjs}" \
-    "$install_runtime_root/worker-host/main.cjs" \
+    "${DROIDSWARM_DEFAULT_WORKER_HOST_ENTRY:-$install_runtime_root/worker-host/main.js}" \
     "$install_runtime_root/worker-host/main.js" \
-    "$workspace_root/dist/apps/worker-host/main.cjs" \
-    "$workspace_root/dist/apps/worker-host/main.js" || true)"
+    "$install_runtime_root/worker-host/main.cjs" \
+    "$workspace_root/dist/apps/worker-host/main.js" \
+    "$workspace_root/dist/apps/worker-host/main.cjs" || true)"
 
   if [[ -z "$socket_server_entry" ]]; then
     err "Missing socket-server build artifact."

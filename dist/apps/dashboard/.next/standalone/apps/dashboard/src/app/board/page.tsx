@@ -6,6 +6,7 @@ import { USERNAME_COOKIE } from '../../lib/identity';
 import { getAppVersion } from '../../lib/version';
 import {
   getProjectIdentity,
+  getPreferredBoardRunId,
   listAgentAssignmentsForRun,
   listArtifactsForRun,
   listBudgetEventsForRun,
@@ -31,7 +32,7 @@ export default async function BoardPage() {
 
   const project = getProjectIdentity();
   const runs = listRuns();
-  const latestRunId = runs[0]?.runId;
+  const latestRunId = getPreferredBoardRunId();
   const tasks = listBoardTasksForRun(latestRunId);
   const insights = {
     runs,

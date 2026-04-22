@@ -39,7 +39,7 @@ export class DroidSwarmOrchestratorClient {
     this.supervisor = new AgentSupervisor(
       config,
       this.registry,
-      this.config.workerHostEntry ?? path.resolve(process.cwd(), 'dist', 'apps', 'worker-host', 'main.cjs'),
+      this.config.workerHostEntry ?? path.resolve(process.cwd(), 'dist', 'apps', 'worker-host', 'main.js'),
     );
   }
 

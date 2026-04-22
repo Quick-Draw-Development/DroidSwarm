@@ -203,11 +203,11 @@ const loadConfig = () => {
   const developBranch = env.DROIDSWARM_DEVELOP_BRANCH ?? env.DROIDSWARM_GIT_DEVELOP_BRANCH ?? "develop";
   const workerHostEntry = resolveFirstExistingPath([
     env.DROIDSWARM_WORKER_HOST_ENTRY,
-    import_node_path.default.resolve(runtimeDir, "worker-host", "main.cjs"),
     import_node_path.default.resolve(runtimeDir, "worker-host", "main.js"),
-    import_node_path.default.resolve(process.cwd(), "dist", "apps", "worker-host", "main.cjs"),
-    import_node_path.default.resolve(process.cwd(), "dist", "apps", "worker-host", "main.js")
-  ]) ?? import_node_path.default.resolve(runtimeDir, "worker-host", "main.cjs");
+    import_node_path.default.resolve(runtimeDir, "worker-host", "main.cjs"),
+    import_node_path.default.resolve(process.cwd(), "dist", "apps", "worker-host", "main.js"),
+    import_node_path.default.resolve(process.cwd(), "dist", "apps", "worker-host", "main.cjs")
+  ]) ?? import_node_path.default.resolve(runtimeDir, "worker-host", "main.js");
   const allowedRepoRoots = parseCommaList(env.DROIDSWARM_ALLOWED_REPO_ROOTS);
   const gitPolicy = {
     mainBranch: env.DROIDSWARM_GIT_MAIN_BRANCH ?? import_shared_git.defaultGitPolicy.mainBranch,

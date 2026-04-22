@@ -199,11 +199,11 @@ export const loadConfig = (): OrchestratorConfig => {
   const developBranch = env.DROIDSWARM_DEVELOP_BRANCH ?? env.DROIDSWARM_GIT_DEVELOP_BRANCH ?? 'develop';
   const workerHostEntry = resolveFirstExistingPath([
     env.DROIDSWARM_WORKER_HOST_ENTRY,
-    path.resolve(runtimeDir, 'worker-host', 'main.cjs'),
     path.resolve(runtimeDir, 'worker-host', 'main.js'),
-    path.resolve(process.cwd(), 'dist', 'apps', 'worker-host', 'main.cjs'),
+    path.resolve(runtimeDir, 'worker-host', 'main.cjs'),
     path.resolve(process.cwd(), 'dist', 'apps', 'worker-host', 'main.js'),
-  ]) ?? path.resolve(runtimeDir, 'worker-host', 'main.cjs');
+    path.resolve(process.cwd(), 'dist', 'apps', 'worker-host', 'main.cjs'),
+  ]) ?? path.resolve(runtimeDir, 'worker-host', 'main.js');
   const allowedRepoRoots = parseCommaList(env.DROIDSWARM_ALLOWED_REPO_ROOTS);
   const gitPolicy = {
     mainBranch: env.DROIDSWARM_GIT_MAIN_BRANCH ?? defaultGitPolicy.mainBranch,

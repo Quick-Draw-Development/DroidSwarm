@@ -672,6 +672,21 @@ export const listRuns = (): RunSummary[] => {
   }
 };
 
+export const getPreferredBoardRunId = (): string | undefined => {
+  const runs = listRuns();
+  if (runs.length === 0) {
+    return undefined;
+  }
+
+  const activeRun = runs.find((run) => run.status === 'running');
+  if (activeRun) {
+    return activeRun.runId;
+  }
+
+  const resumableRun = runs.find((run) => run.status === 'starting' || run.status === 'degraded');
+  return resumableRun?.runId ?? runs[0]?.runId;
+};
+
 export const listBoardTasksForRun = (runId?: string): TaskRecord[] => {
   if (!runId) {
     return [];

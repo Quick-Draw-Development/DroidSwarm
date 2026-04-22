@@ -9,6 +9,7 @@
       "outputs": [
         "{options.outputPath}"
       ],
+      "defaultConfiguration": "production",
       "options": {
         "platform": "node",
         "outputPath": "dist/apps/worker-host",
@@ -17,7 +18,25 @@
         ],
         "bundle": false,
         "main": "apps/worker-host/src/main.ts",
-        "tsConfig": "apps/worker-host/tsconfig.app.json"
+        "tsConfig": "apps/worker-host/tsconfig.app.json",
+        "generatePackageJson": true,
+        "esbuildOptions": {
+          "sourcemap": true,
+          "outExtension": {
+            ".js": ".js"
+          }
+        }
+      },
+      "configurations": {
+        "development": {},
+        "production": {
+          "esbuildOptions": {
+            "sourcemap": false,
+            "outExtension": {
+              ".js": ".js"
+            }
+          }
+        }
       }
     },
     "typecheck": {

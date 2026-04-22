@@ -51,7 +51,7 @@ const nowIso = () => (/* @__PURE__ */ new Date()).toISOString();
     database.close();
     (0, import_node_fs.rmSync)(workspace, { recursive: true, force: true });
   });
-  (0, import_node_test.it)("recovers an interrupted run and fails pending tasks/attempts", () => {
+  (0, import_node_test.it)("requeues interrupted running tasks even without checkpoints", () => {
     const workspace = (0, import_node_fs.mkdtempSync)(import_node_path.default.join((0, import_node_os.tmpdir)(), "droidswarm-runlifecycles-"));
     const dbPath = import_node_path.default.join(workspace, "state.db");
     const database = (0, import_database.openPersistenceDatabase)(dbPath);
@@ -68,18 +68,17 @@ const nowIso = () => (/* @__PURE__ */ new Date()).toISOString();
     const attempt = service.createAttempt("attempt-1", task, "Agent", "worker");
     const summaries = lifecycle.recoverInterruptedRuns();
     const runRow = persistence.runs.get(run.runId);
-    import_strict.default.equal(runRow?.status, "failed");
+    import_strict.default.equal(runRow?.status, "running");
     const updatedTask = persistence.tasks.get(task.taskId);
-    import_strict.default.equal(updatedTask?.status, "failed");
-    import_strict.default.equal(
-      updatedTask?.metadata?.recovery_reason,
-      `Task ${task.taskId} in status running cannot resume after restart`
-    );
+    import_strict.default.equal(updatedTask?.status, "queued");
+    import_strict.default.equal(updatedTask?.metadata?.recovery_reason, "requeued_after_restart");
+    import_strict.default.equal(updatedTask?.metadata?.recovery_previous_status, "running");
     const attemptRow = service.getAttempt(attempt.attemptId);
     import_strict.default.equal(attemptRow?.status, "failed");
+    import_strict.default.equal(attemptRow?.metadata?.recovery_interrupted_status, "running");
     import_strict.default.equal(summaries.length, 1);
-    import_strict.default.equal(summaries[0].resumedTasks.length, 0);
-    import_strict.default.equal(summaries[0].failedTasks[0]?.taskId, task.taskId);
+    import_strict.default.deepEqual(summaries[0].resumedTasks, [task.taskId]);
+    import_strict.default.equal(summaries[0].failedTasks.length, 0);
     const events = database.prepare("SELECT event_type FROM execution_events WHERE run_id = ?").all(run.runId);
     import_strict.default.ok(events.some((row) => row.event_type === "run_recovered"));
     database.close();
@@ -107,11 +106,39 @@ const nowIso = () => (/* @__PURE__ */ new Date()).toISOString();
     const updatedTask = persistence.tasks.get(task.taskId);
     import_strict.default.equal(updatedTask?.status, "queued");
     import_strict.default.equal(updatedTask?.metadata?.recovery_reason, "requeued_after_restart");
+    import_strict.default.equal(updatedTask?.metadata?.recovery_previous_status, "running");
     const runRow = persistence.runs.get(run.runId);
     import_strict.default.equal(runRow?.status, "running");
     import_strict.default.equal(summaries.length, 1);
     import_strict.default.deepEqual(summaries[0].resumedTasks, [task.taskId]);
     import_strict.default.equal(summaries[0].failedTasks.length, 0);
+    database.close();
+    (0, import_node_fs.rmSync)(workspace, { recursive: true, force: true });
+  });
+  (0, import_node_test.it)("requeues blocked attempts after restart", () => {
+    const workspace = (0, import_node_fs.mkdtempSync)(import_node_path.default.join((0, import_node_os.tmpdir)(), "droidswarm-runlifecycles-"));
+    const dbPath = import_node_path.default.join(workspace, "state.db");
+    const database = (0, import_database.openPersistenceDatabase)(dbPath);
+    const persistence = import_repositories.PersistenceClient.fromDatabase(database);
+    const lifecycle = new import_run_lifecycle.RunLifecycleService(persistence);
+    const run = persistence.createRun("droidswarm");
+    const service = new import_service.OrchestratorPersistenceService(persistence, run);
+    const task = service.createTask({
+      taskId: "task-blocked",
+      name: "blocked task",
+      priority: "medium",
+      status: "waiting_on_human"
+    });
+    const attempt = service.createAttempt("attempt-blocked", task, "Agent", "worker");
+    service.updateAttemptStatus(attempt.attemptId, "blocked", { reason: "waiting for review" });
+    const summaries = lifecycle.recoverInterruptedRuns();
+    const updatedTask = persistence.tasks.get(task.taskId);
+    import_strict.default.equal(updatedTask?.status, "queued");
+    import_strict.default.equal(updatedTask?.metadata?.recovery_previous_status, "waiting_on_human");
+    const attemptRow = service.getAttempt(attempt.attemptId);
+    import_strict.default.equal(attemptRow?.status, "failed");
+    import_strict.default.equal(attemptRow?.metadata?.recovery_interrupted_status, "blocked");
+    import_strict.default.deepEqual(summaries[0].resumedTasks, [task.taskId]);
     database.close();
     (0, import_node_fs.rmSync)(workspace, { recursive: true, force: true });
   });

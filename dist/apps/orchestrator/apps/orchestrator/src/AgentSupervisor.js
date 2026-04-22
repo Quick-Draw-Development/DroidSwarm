@@ -23,17 +23,20 @@ __export(AgentSupervisor_exports, {
 module.exports = __toCommonJS(AgentSupervisor_exports);
 var import_node_crypto = require("node:crypto");
 var import_node_child_process = require("node:child_process");
+var import_shared_routing = require("@shared-routing");
 const defaultRoleInstructions = (task) => {
   const normalizedType = task.taskType.toLowerCase();
   if (normalizedType === "bug") {
+    const role2 = (0, import_shared_routing.getSwarmRoleDefinition)("bugfix-helper").id;
     return [{
-      role: "coder-backend",
+      role: role2,
       reason: "bug-triage",
       instructions: `Investigate and fix the reported bug in task ${task.taskId}.`
     }];
   }
+  const role = (0, import_shared_routing.getSwarmRoleDefinition)("planner").id;
   return [{
-    role: "planner",
+    role,
     reason: "initial-planning",
     instructions: `Plan the work for task ${task.taskId}, propose next roles, and identify blockers.`
   }];

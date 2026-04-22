@@ -18,6 +18,7 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var repositories_exports = {};
 __export(repositories_exports, {
   AgentAssignmentRepository: () => AgentAssignmentRepository,
+  ArtifactMemoryIndexRepository: () => ArtifactMemoryIndexRepository,
   ArtifactRepository: () => ArtifactRepository,
   BudgetEventRepository: () => BudgetEventRepository,
   ChatRepository: () => ChatRepository,
@@ -120,6 +121,17 @@ class RunRepository {
       updatedAt: nowIso()
     };
     this.create(updated);
+  }
+  updateMetadata(runId, metadata) {
+    const existing = this.get(runId);
+    if (!existing) {
+      return;
+    }
+    this.create({
+      ...existing,
+      metadata,
+      updatedAt: nowIso()
+    });
   }
   listActiveRuns() {
     return this.database.prepare("SELECT * FROM runs WHERE status NOT IN (?, ?, ?) ORDER BY updated_at DESC").all("completed", "failed", "cancelled").map((row) => ({
@@ -317,6 +329,23 @@ class TaskAttemptRepository {
       updatedAt: row.updated_at
     };
   }
+  listByRun(runId) {
+    return this.database.prepare("SELECT * FROM task_attempts WHERE run_id = ? ORDER BY created_at ASC").all(runId).map((row) => ({
+      attemptId: row.attempt_id,
+      taskId: row.task_id,
+      runId: row.run_id,
+      projectId: row.project_id ?? void 0,
+      repoId: row.repo_id ?? void 0,
+      rootPath: row.root_path ?? void 0,
+      branch: row.branch ?? void 0,
+      workspaceId: row.workspace_id ?? void 0,
+      agentName: row.agent_name,
+      status: row.status,
+      metadata: parseJson(row.metadata_json),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    }));
+  }
 }
 class AgentAssignmentRepository {
   constructor(database) {
@@ -335,6 +364,18 @@ class AgentAssignmentRepository {
       agentName: agent.agentName,
       assignedAt: agent.assignedAt
     });
+  }
+  listByAttemptIds(attemptIds) {
+    if (attemptIds.length === 0) {
+      return [];
+    }
+    const placeholders = attemptIds.map(() => "?").join(", ");
+    return this.database.prepare(`SELECT * FROM agent_assignments WHERE attempt_id IN (${placeholders}) ORDER BY assigned_at ASC`).all(...attemptIds).map((row) => ({
+      assignmentId: row.assignment_id,
+      attemptId: row.attempt_id,
+      agentName: row.agent_name,
+      assignedAt: row.assigned_at
+    }));
   }
 }
 class ArtifactRepository {
@@ -1051,8 +1092,59 @@ class HandoffPacketRepository {
     return parseJson(row.payload_json) ?? null;
   }
 }
+class ArtifactMemoryIndexRepository {
+  constructor(database) {
+    this.database = database;
+  }
+  record(entry) {
+    this.database.prepare(`
+      INSERT OR REPLACE INTO task_artifact_memory (
+        artifact_memory_id, task_id, run_id, project_id, artifact_id, kind, short_summary,
+        reason_relevant, trust_confidence, source_task_id, superseded_by, created_at, updated_at
+      ) VALUES (
+        @id, @taskId, @runId, @projectId, @artifactId, @kind, @shortSummary,
+        @reasonRelevant, @trustConfidence, @sourceTaskId, @supersededBy, @createdAt, @updatedAt
+      )
+    `).run({
+      id: entry.id,
+      taskId: entry.taskId,
+      runId: entry.runId,
+      projectId: entry.projectId,
+      artifactId: entry.artifactId,
+      kind: entry.kind,
+      shortSummary: entry.shortSummary,
+      reasonRelevant: entry.reasonRelevant,
+      trustConfidence: entry.trustConfidence,
+      sourceTaskId: entry.sourceTaskId,
+      supersededBy: entry.supersededBy ?? null,
+      createdAt: entry.createdAt,
+      updatedAt: entry.updatedAt
+    });
+  }
+  listByTask(taskId) {
+    return this.database.prepare(`
+      SELECT * FROM task_artifact_memory
+      WHERE task_id = ?
+      ORDER BY updated_at DESC
+    `).all(taskId).map((row) => ({
+      id: row.artifact_memory_id,
+      taskId: row.task_id,
+      runId: row.run_id,
+      projectId: row.project_id,
+      artifactId: row.artifact_id,
+      kind: row.kind,
+      shortSummary: row.short_summary,
+      reasonRelevant: row.reason_relevant,
+      trustConfidence: row.trust_confidence,
+      sourceTaskId: row.source_task_id,
+      supersededBy: row.superseded_by ?? void 0,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    }));
+  }
+}
 class PersistenceClient {
-  constructor(database, runs, tasks, attempts, assignments, artifacts, checkpoints, budgets, actions, dependencies, verifications, executionEvents, vectors, projects, projectRepos, memory, chat, workers, digests, handoffs) {
+  constructor(database, runs, tasks, attempts, assignments, artifacts, checkpoints, budgets, actions, dependencies, verifications, executionEvents, vectors, projects, projectRepos, memory, chat, workers, digests, handoffs, artifactMemory) {
     this.database = database;
     this.runs = runs;
     this.tasks = tasks;
@@ -1073,9 +1165,48 @@ class PersistenceClient {
     this.workers = workers;
     this.digests = digests;
     this.handoffs = handoffs;
+    this.artifactMemory = artifactMemory;
   }
   updateAttemptMetadata(attemptId, metadata) {
     this.attempts.updateMetadata(attemptId, metadata);
+  }
+  buildSwarmTopologySnapshot(runId) {
+    const run = this.runs.get(runId);
+    if (!run) {
+      return void 0;
+    }
+    const tasks = this.tasks.listByRun(runId);
+    const attempts = this.attempts.listByRun(runId);
+    const assignments = this.assignments.listByAttemptIds(attempts.map((attempt) => attempt.attemptId));
+    const taskById = new Map(tasks.map((task) => [task.taskId, task]));
+    const activeRoleCounts = /* @__PURE__ */ new Map();
+    const helpers = attempts.map((attempt) => {
+      const task = taskById.get(attempt.taskId);
+      const role = typeof attempt.metadata?.role === "string" ? attempt.metadata.role : "unknown";
+      activeRoleCounts.set(role, (activeRoleCounts.get(role) ?? 0) + (attempt.status === "running" ? 1 : 0));
+      const assigned = assignments.find((entry) => entry.attemptId === attempt.attemptId);
+      const routingDecision = typeof attempt.metadata?.routing_decision === "object" && attempt.metadata.routing_decision !== null ? attempt.metadata.routing_decision : void 0;
+      return {
+        attemptId: attempt.attemptId,
+        taskId: attempt.taskId,
+        taskName: task?.name ?? attempt.taskId,
+        parentTaskId: task?.parentTaskId,
+        role,
+        agentName: assigned?.agentName ?? attempt.agentName,
+        status: attempt.status,
+        taskStatus: task?.status ?? "queued",
+        modelTier: typeof attempt.metadata?.model_tier === "string" ? attempt.metadata.model_tier : void 0,
+        routeKind: typeof routingDecision?.routeKind === "string" ? routingDecision.routeKind : void 0,
+        queueDepth: typeof attempt.metadata?.queue_depth === "number" ? attempt.metadata.queue_depth : void 0,
+        fallbackCount: typeof attempt.metadata?.fallback_count === "number" ? attempt.metadata.fallback_count : void 0
+      };
+    });
+    return {
+      runId,
+      capturedAt: nowIso(),
+      activeRoles: [...activeRoleCounts.entries()].filter(([, count]) => count > 0).map(([role, count]) => ({ role, count })).sort((a, b) => b.count - a.count || a.role.localeCompare(b.role)),
+      helpers
+    };
   }
   static fromDatabase(database) {
     return new PersistenceClient(
@@ -1098,7 +1229,8 @@ class PersistenceClient {
       new ChatRepository(database),
       new WorkerRepository(database),
       new TaskStateDigestRepository(database),
-      new HandoffPacketRepository(database)
+      new HandoffPacketRepository(database),
+      new ArtifactMemoryIndexRepository(database)
     );
   }
   createRun(projectId, scope) {
@@ -1134,6 +1266,7 @@ class PersistenceClient {
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   AgentAssignmentRepository,
+  ArtifactMemoryIndexRepository,
   ArtifactRepository,
   BudgetEventRepository,
   ChatRepository,

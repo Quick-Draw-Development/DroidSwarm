@@ -326,6 +326,25 @@ describe('Orchestrator persistence repositories', () => {
     assert.equal(digest?.id, 'digest-1');
     assert.equal(service.listTaskStateDigests(task.taskId).length, 1);
 
+    service.recordArtifactMemory({
+      id: 'artifact-memory-1',
+      taskId: task.taskId,
+      runId: run.runId,
+      projectId: 'droidswarm',
+      artifactId: 'artifact-1',
+      kind: 'summary',
+      shortSummary: 'Artifact summary',
+      reasonRelevant: 'This artifact captures the latest implementation constraints.',
+      trustConfidence: 0.88,
+      sourceTaskId: task.taskId,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    });
+    const artifactMemory = service.listArtifactMemory(task.taskId);
+    assert.equal(artifactMemory.length, 1);
+    assert.equal(artifactMemory[0]?.artifactId, 'artifact-1');
+    assert.equal(artifactMemory[0]?.reasonRelevant, 'This artifact captures the latest implementation constraints.');
+
     service.recordHandoffPacket({
       id: 'handoff-1',
       taskId: task.taskId,

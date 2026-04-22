@@ -163,6 +163,10 @@ export function OrchestrationInsights({ data }: { data: OrchestrationInsightsDat
   const graphEntries = buildTaskGraphEntries(data.tasks);
   const uniqueAgents = new Set(data.assignments.map((assignment) => assignment.agentName));
   const schedulerEvents = data.timeline.filter((entry) => schedulerEventTypes.has(entry.eventType));
+  const routingTelemetry = data.routingTelemetry;
+  const allocatorPolicy = data.allocatorPolicy;
+  const topology = data.topology;
+  const serviceUsage = data.serviceUsage;
   const runSummary = (() => {
     if (!latestRun?.metadata) {
       return undefined;
@@ -243,9 +247,172 @@ export function OrchestrationInsights({ data }: { data: OrchestrationInsightsDat
               : <li className="insight-empty">No scheduler events captured yet.</li>}
           </ul>
         </article>
+        <article className="insight-card">
+          <p className="section-title">Allocator policy</p>
+          {allocatorPolicy ? (
+            <ul className="insight-list">
+              <li className="insight-item">
+                <strong>Parallel helpers</strong>
+                <span>{allocatorPolicy.maxParallelHelpers ?? 'default'} total · {allocatorPolicy.maxSameRoleHelpers ?? 'default'} same-role</span>
+              </li>
+              <li className="insight-item">
+                <strong>Local-first controls</strong>
+                <span>queue tolerance {allocatorPolicy.localQueueTolerance ?? 'default'} · cloud {allocatorPolicy.cloudEscalationAllowed ? 'allowed' : 'local-only'}</span>
+              </li>
+              <li className="insight-item">
+                <strong>Priority bias</strong>
+                <span>{allocatorPolicy.priorityBias ?? 'balanced'}</span>
+              </li>
+            </ul>
+          ) : (
+            <p className="empty-copy">No allocator policy captured yet.</p>
+          )}
+        </article>
+        <article className="insight-card">
+          <p className="section-title">Routing telemetry</p>
+          {routingTelemetry ? (
+            <ul className="insight-list">
+              <li className="insight-item">
+                <strong>Model tiers</strong>
+                <span>
+                  {routingTelemetry.modelTierCounts.map((entry) => `${entry.modelTier} ${entry.count}`).join(' · ') || 'none'}
+                </span>
+              </li>
+              <li className="insight-item">
+                <strong>Queue / fallback</strong>
+                <span>avg queue {routingTelemetry.averageQueueDepth} · avg fallback {routingTelemetry.averageFallbackCount}</span>
+              </li>
+              <li className="insight-item">
+                <strong>Cloud escalations</strong>
+                <span>
+                  {routingTelemetry.cloudEscalationCount}
+                  {routingTelemetry.escalationReasons.length > 0
+                    ? ` · ${routingTelemetry.escalationReasons.map((entry) => `${entry.reason} ${entry.count}`).join(' · ')}`
+                    : ''}
+                </span>
+              </li>
+              <li className="insight-item">
+                <strong>Latency by role / engine</strong>
+                <span>
+                  {routingTelemetry.averageLatencyByRoleAndEngine.slice(0, 3).map((entry) => `${entry.role}/${entry.engine} ${entry.averageElapsedMs}ms`).join(' · ') || 'none'}
+                </span>
+              </li>
+            </ul>
+          ) : (
+            <p className="empty-copy">No routing telemetry captured yet.</p>
+          )}
+        </article>
       </div>
 
       <div className="insights-grid insights-grid--secondary">
+        <article className="insight-card">
+          <p className="section-title">Swarm topology</p>
+          {topology && topology.helpers.length > 0 ? (
+            <ul className="insight-list">
+              <li className="insight-item">
+                <strong>Active roles</strong>
+                <span>{topology.activeRoles.map((entry) => `${entry.role} ${entry.count}`).join(' · ') || 'none'}</span>
+              </li>
+              {topology.helpers.slice(0, 5).map((helper) => (
+                <li key={helper.attemptId} className="insight-item">
+                  <strong>{helper.role}</strong>
+                  <span>
+                    {helper.taskName} · {helper.status}/{helper.taskStatus}
+                    {helper.modelTier ? ` · ${helper.modelTier}` : ''}
+                    {helper.routeKind ? ` · ${helper.routeKind}` : ''}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="empty-copy">No topology snapshot captured yet.</p>
+          )}
+        </article>
+        <article className="insight-card">
+          <p className="section-title">Service usage</p>
+          {serviceUsage ? (
+            <ul className="insight-list">
+              {serviceUsage.health ? (
+                <>
+                  <li className="insight-item">
+                    <strong>Runtime health</strong>
+                    <span>
+                      overall {serviceUsage.health.allReady ? 'ready' : 'degraded'} · exports {serviceUsage.health.exportsReady ? 'ready' : 'incomplete'}
+                      {serviceUsage.health.updatedAt ? ` · updated ${serviceUsage.health.updatedAt}` : ''}
+                    </span>
+                  </li>
+                  <li className="insight-item">
+                    <strong>Service reachability</strong>
+                    <span>
+                      blink {serviceUsage.health.blink.reachable ? 'ok' : 'down'} · mux {serviceUsage.health.mux.reachable ? 'ok' : 'down'} · llama {serviceUsage.health.llama.reachable ? 'ok' : 'down'}
+                    </span>
+                  </li>
+                  <li className="insight-item">
+                    <strong>llama inventory</strong>
+                    <span>
+                      model {serviceUsage.health.llama.model ?? 'unset'} · selected {serviceUsage.health.llama.modelPresent ? 'present' : 'missing'} · inventory {serviceUsage.health.llama.inventoryPresent ? serviceUsage.health.llama.inventoryCount : 0} models · selected in inventory {serviceUsage.health.llama.inventoryHasSelected ? 'yes' : 'no'}
+                    </span>
+                  </li>
+                </>
+              ) : null}
+              <li className="insight-item">
+                <strong>Blink / Slack</strong>
+                <span>
+                  mirrored {serviceUsage.blink.mirroredMessages} · pending {serviceUsage.blink.pendingMessages} · failures {serviceUsage.blink.failureCount} · retries {serviceUsage.blink.retryCount}
+                  {serviceUsage.blink.providerBreakdown.length > 0
+                    ? ` · ${serviceUsage.blink.providerBreakdown.map((entry) => `${entry.provider} ${entry.count}`).join(' · ')}`
+                    : ''}
+                </span>
+              </li>
+              <li className="insight-item">
+                <strong>llama.cpp</strong>
+                <span>
+                  requests {serviceUsage.llama.requestCount} · failures {serviceUsage.llama.failureCount} · avg latency {serviceUsage.llama.averageLatencyMs}ms · local coverage {serviceUsage.llama.localCoveragePercent}% · cloud bypass {serviceUsage.llama.cloudBypassRatePercent}%
+                </span>
+              </li>
+              <li className="insight-item">
+                <strong>Local role coverage</strong>
+                <span>
+                  {serviceUsage.llama.localRoleCoverage.map((entry) => `${entry.role} ${entry.count}`).join(' · ') || 'none'}
+                </span>
+              </li>
+              <li className="insight-item">
+                <strong>Coverage targets</strong>
+                <span>
+                  local 80%+ {serviceUsage.llama.meetsLocalCoverageTarget ? 'met' : 'missed'} · cloud &lt;10% {serviceUsage.llama.meetsCloudEscalationTarget ? 'met' : 'missed'}
+                  {serviceUsage.llama.bypassReasons.length > 0
+                    ? ` · ${serviceUsage.llama.bypassReasons.map((entry) => `${entry.reason} ${entry.count}`).join(' · ')}`
+                    : ''}
+                </span>
+              </li>
+              <li className="insight-item">
+                <strong>Mux</strong>
+                <span>
+                  {serviceUsage.mux.assessment} · leases {serviceUsage.mux.workspaceLeaseCount} · brokered exec {serviceUsage.mux.brokeredExecutionCount}
+                  {serviceUsage.mux.activeRoleCoverage.length > 0
+                    ? ` · ${serviceUsage.mux.activeRoleCoverage.map((entry) => `${entry.role} ${entry.count}`).join(' · ')}`
+                    : ''}
+                </span>
+              </li>
+              <li className="insight-item">
+                <strong>Mux recommendation</strong>
+                <span>{serviceUsage.mux.recommendation}</span>
+              </li>
+              <li className="insight-item">
+                <strong>Service policy</strong>
+                <span>{serviceUsage.policy.status} · {serviceUsage.policy.summary}</span>
+              </li>
+              {serviceUsage.policy.actions.length > 0 ? (
+                <li className="insight-item">
+                  <strong>Operator actions</strong>
+                  <span>{serviceUsage.policy.actions.join(' · ')}</span>
+                </li>
+              ) : null}
+            </ul>
+          ) : (
+            <p className="empty-copy">No service usage captured yet.</p>
+          )}
+        </article>
         <article className="insight-card">
           <p className="section-title">Task graph</p>
           {graphEntries.length > 0 ? (

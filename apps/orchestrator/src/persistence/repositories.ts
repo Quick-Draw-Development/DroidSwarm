@@ -4,6 +4,7 @@ import Database from 'better-sqlite3';
 
 import {
   AgentAssignmentRecord,
+  ArtifactMemoryIndexEntry,
   ArtifactRecord,
   BudgetEventRecord,
   CheckpointRecord,
@@ -18,6 +19,7 @@ import {
   OperatorControlActionRecord,
   PersistedTask,
   RunRecord,
+  SwarmTopologySnapshot,
   TaskAttemptRecord,
   TaskDependencyRecord,
   VerificationOutcomeRecord,
@@ -313,6 +315,22 @@ type HandoffPacketRow = {
   created_at: string;
 };
 
+type ArtifactMemoryIndexRow = {
+  artifact_memory_id: string;
+  task_id: string;
+  run_id: string;
+  project_id: string;
+  artifact_id: string;
+  kind: string;
+  short_summary: string;
+  reason_relevant: string;
+  trust_confidence: number;
+  source_task_id: string;
+  superseded_by?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 
 export class RunRepository {
   constructor(private readonly database: Database.Database) {}
@@ -392,6 +410,18 @@ export class RunRepository {
       updatedAt: nowIso(),
     };
     this.create(updated);
+  }
+
+  updateMetadata(runId: string, metadata: Record<string, unknown>): void {
+    const existing = this.get(runId);
+    if (!existing) {
+      return;
+    }
+    this.create({
+      ...existing,
+      metadata,
+      updatedAt: nowIso(),
+    });
   }
 
   listActiveRuns(): RunRecord[] {
@@ -625,6 +655,27 @@ export class TaskAttemptRepository {
       updatedAt: row.updated_at,
     };
   }
+
+  listByRun(runId: string): TaskAttemptRecord[] {
+    return this.database
+      .prepare('SELECT * FROM task_attempts WHERE run_id = ? ORDER BY created_at ASC')
+      .all(runId)
+      .map((row: TaskAttemptRow) => ({
+        attemptId: row.attempt_id,
+        taskId: row.task_id,
+        runId: row.run_id,
+        projectId: row.project_id ?? undefined,
+        repoId: row.repo_id ?? undefined,
+        rootPath: row.root_path ?? undefined,
+        branch: row.branch ?? undefined,
+        workspaceId: row.workspace_id ?? undefined,
+        agentName: row.agent_name,
+        status: row.status as TaskAttemptRecord['status'],
+        metadata: parseJson<Record<string, unknown>>(row.metadata_json),
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      }));
+  }
 }
 
 export class AgentAssignmentRepository {
@@ -645,6 +696,22 @@ export class AgentAssignmentRepository {
         agentName: agent.agentName,
         assignedAt: agent.assignedAt,
       });
+  }
+
+  listByAttemptIds(attemptIds: string[]): AgentAssignmentRecord[] {
+    if (attemptIds.length === 0) {
+      return [];
+    }
+    const placeholders = attemptIds.map(() => '?').join(', ');
+    return this.database
+      .prepare(`SELECT * FROM agent_assignments WHERE attempt_id IN (${placeholders}) ORDER BY assigned_at ASC`)
+      .all(...attemptIds)
+      .map((row: { assignment_id: string; attempt_id: string; agent_name: string; assigned_at: string }) => ({
+        assignmentId: row.assignment_id,
+        attemptId: row.attempt_id,
+        agentName: row.agent_name,
+        assignedAt: row.assigned_at,
+      }));
   }
 }
 
@@ -1455,6 +1522,58 @@ export class HandoffPacketRepository {
   }
 }
 
+export class ArtifactMemoryIndexRepository {
+  constructor(private readonly database: Database.Database) {}
+
+  record(entry: ArtifactMemoryIndexEntry): void {
+    this.database.prepare(`
+      INSERT OR REPLACE INTO task_artifact_memory (
+        artifact_memory_id, task_id, run_id, project_id, artifact_id, kind, short_summary,
+        reason_relevant, trust_confidence, source_task_id, superseded_by, created_at, updated_at
+      ) VALUES (
+        @id, @taskId, @runId, @projectId, @artifactId, @kind, @shortSummary,
+        @reasonRelevant, @trustConfidence, @sourceTaskId, @supersededBy, @createdAt, @updatedAt
+      )
+    `).run({
+      id: entry.id,
+      taskId: entry.taskId,
+      runId: entry.runId,
+      projectId: entry.projectId,
+      artifactId: entry.artifactId,
+      kind: entry.kind,
+      shortSummary: entry.shortSummary,
+      reasonRelevant: entry.reasonRelevant,
+      trustConfidence: entry.trustConfidence,
+      sourceTaskId: entry.sourceTaskId,
+      supersededBy: entry.supersededBy ?? null,
+      createdAt: entry.createdAt,
+      updatedAt: entry.updatedAt,
+    });
+  }
+
+  listByTask(taskId: string): ArtifactMemoryIndexEntry[] {
+    return this.database.prepare(`
+      SELECT * FROM task_artifact_memory
+      WHERE task_id = ?
+      ORDER BY updated_at DESC
+    `).all(taskId).map((row: ArtifactMemoryIndexRow) => ({
+      id: row.artifact_memory_id,
+      taskId: row.task_id,
+      runId: row.run_id,
+      projectId: row.project_id,
+      artifactId: row.artifact_id,
+      kind: row.kind,
+      shortSummary: row.short_summary,
+      reasonRelevant: row.reason_relevant,
+      trustConfidence: row.trust_confidence,
+      sourceTaskId: row.source_task_id,
+      supersededBy: row.superseded_by ?? undefined,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+  }
+}
+
 export class PersistenceClient {
   constructor(
     public readonly database: Database.Database,
@@ -1477,10 +1596,56 @@ export class PersistenceClient {
     public readonly workers: WorkerRepository,
     public readonly digests: TaskStateDigestRepository,
     public readonly handoffs: HandoffPacketRepository,
+    public readonly artifactMemory: ArtifactMemoryIndexRepository,
   ) {}
 
   updateAttemptMetadata(attemptId: string, metadata?: Record<string, unknown>): void {
     this.attempts.updateMetadata(attemptId, metadata);
+  }
+
+  buildSwarmTopologySnapshot(runId: string): SwarmTopologySnapshot | undefined {
+    const run = this.runs.get(runId);
+    if (!run) {
+      return undefined;
+    }
+    const tasks = this.tasks.listByRun(runId);
+    const attempts = this.attempts.listByRun(runId);
+    const assignments = this.assignments.listByAttemptIds(attempts.map((attempt) => attempt.attemptId));
+    const taskById = new Map(tasks.map((task) => [task.taskId, task] as const));
+    const activeRoleCounts = new Map<string, number>();
+    const helpers = attempts.map((attempt) => {
+      const task = taskById.get(attempt.taskId);
+      const role = typeof attempt.metadata?.role === 'string' ? attempt.metadata.role : 'unknown';
+      activeRoleCounts.set(role, (activeRoleCounts.get(role) ?? 0) + (attempt.status === 'running' ? 1 : 0));
+      const assigned = assignments.find((entry) => entry.attemptId === attempt.attemptId);
+      const routingDecision = typeof attempt.metadata?.routing_decision === 'object' && attempt.metadata.routing_decision !== null
+        ? attempt.metadata.routing_decision as Record<string, unknown>
+        : undefined;
+      return {
+        attemptId: attempt.attemptId,
+        taskId: attempt.taskId,
+        taskName: task?.name ?? attempt.taskId,
+        parentTaskId: task?.parentTaskId,
+        role,
+        agentName: assigned?.agentName ?? attempt.agentName,
+        status: attempt.status,
+        taskStatus: task?.status ?? 'queued',
+        modelTier: typeof attempt.metadata?.model_tier === 'string' ? attempt.metadata.model_tier : undefined,
+        routeKind: typeof routingDecision?.routeKind === 'string' ? routingDecision.routeKind : undefined,
+        queueDepth: typeof attempt.metadata?.queue_depth === 'number' ? attempt.metadata.queue_depth : undefined,
+        fallbackCount: typeof attempt.metadata?.fallback_count === 'number' ? attempt.metadata.fallback_count : undefined,
+      };
+    });
+
+    return {
+      runId,
+      capturedAt: nowIso(),
+      activeRoles: [...activeRoleCounts.entries()]
+        .filter(([, count]) => count > 0)
+        .map(([role, count]) => ({ role, count }))
+        .sort((a, b) => b.count - a.count || a.role.localeCompare(b.role)),
+      helpers,
+    };
   }
 
   static fromDatabase(database: Database.Database): PersistenceClient {
@@ -1505,6 +1670,7 @@ export class PersistenceClient {
       new WorkerRepository(database),
       new TaskStateDigestRepository(database),
       new HandoffPacketRepository(database),
+      new ArtifactMemoryIndexRepository(database),
     );
   }
 

@@ -27,11 +27,16 @@ module.exports = __toCommonJS(validate_exports);
 var import_protocol = require("@protocol");
 var import_shared_types = require("@shared-types");
 const parseAuthMessage = (input) => import_protocol.authMessageSchema.parse(JSON.parse(input));
-const parseCanonicalEnvelope = (input) => (0, import_shared_types.normalizeToEnvelopeV2)(JSON.parse(input));
+const parseCanonicalEnvelope = (input) => {
+  const canonical = (0, import_shared_types.normalizeToEnvelopeV2)(JSON.parse(input));
+  validateDroidspeakState(canonical.body);
+  return canonical;
+};
 const parseMessageEnvelope = (input) => (0, import_protocol.normalizeEnvelopeV2)(JSON.parse(input));
 const parseIncomingEnvelope = (input) => {
   const parsed = JSON.parse(input);
   const canonical = (0, import_shared_types.normalizeToEnvelopeV2)(parsed);
+  validateDroidspeakState(canonical.body);
   return {
     canonical,
     message: (0, import_shared_types.isEnvelopeV2)(parsed) ? canonicalEnvelopeToMessage(parsed, canonical) : (0, import_protocol.normalizeEnvelopeV2)(parsed)
@@ -93,6 +98,21 @@ const canonicalEnvelopeToMessage = (raw, canonical) => {
     span_id: typeof record.span_id === "string" ? record.span_id : void 0,
     session_id: typeof record.session_id === "string" ? record.session_id : void 0
   };
+};
+const validateDroidspeakState = (body) => {
+  if (typeof body.droidspeak === "object" && body.droidspeak !== null) {
+    body.droidspeak = (0, import_shared_types.normalizeDroidspeakV2State)(body.droidspeak);
+    return;
+  }
+  const payload = typeof body.payload === "object" && body.payload !== null ? body.payload : void 0;
+  if (payload && typeof payload.droidspeak === "object" && payload.droidspeak !== null) {
+    payload.droidspeak = (0, import_shared_types.normalizeDroidspeakV2State)(payload.droidspeak);
+  }
+  const envelope = typeof body.envelope_v2 === "object" && body.envelope_v2 !== null ? body.envelope_v2 : void 0;
+  const envelopeBody = envelope && typeof envelope.body === "object" && envelope.body !== null ? envelope.body : void 0;
+  if (envelopeBody && typeof envelopeBody.droidspeak === "object" && envelopeBody.droidspeak !== null) {
+    envelopeBody.droidspeak = (0, import_shared_types.normalizeDroidspeakV2State)(envelopeBody.droidspeak);
+  }
 };
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {

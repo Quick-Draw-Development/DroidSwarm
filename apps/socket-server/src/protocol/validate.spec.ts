@@ -108,3 +108,28 @@ test('parseIncomingEnvelope returns both canonical and legacy-compatible views',
   assert.equal(parsed.message.type, 'spawn_approved');
   assert.equal(parsed.message.verb, 'spawn.approved');
 });
+
+test('parseIncomingEnvelope rejects malformed droidspeak v2 payloads', () => {
+  assert.throws(() => parseIncomingEnvelope(JSON.stringify({
+    message_id: 'msg-4',
+    project_id: 'droidswarm',
+    room_id: 'task-1',
+    type: 'status_update',
+    from: {
+      actor_type: 'agent',
+      actor_id: 'planner-1',
+      actor_name: 'planner',
+    },
+    timestamp: '2026-03-12T12:00:00.000Z',
+    payload: {
+      task_id: 'task-1',
+      status_code: 'agent_blocked',
+      content: 'waiting on review',
+      droidspeak: {
+        compact: 'state:blocked',
+        expanded: 'Waiting on review.',
+        kind: 'out_of_bounds_kind',
+      },
+    },
+  })));
+});

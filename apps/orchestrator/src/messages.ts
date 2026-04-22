@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { UsageShape } from '@protocol';
 
 import type {
+  DroidspeakV2State,
   EnvelopeVerb,
   MessageEnvelope,
   OrchestratorConfig,
@@ -11,6 +12,7 @@ import type {
   ToolResponsePayload,
   WorkerArtifact,
 } from './types';
+import { buildDroidspeakV2, droidspeakForStatusCode } from './coordination';
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -34,6 +36,7 @@ const buildEnvelope = <T extends MessageEnvelope['type']>(input: {
   dependsOn?: string[];
   compression?: MessageEnvelope['compression'];
   usage?: UsageShape;
+  droidspeak?: DroidspeakV2State;
 }): MessageEnvelope<T> => {
   const id = randomUUID();
   const ts = nowIso();
@@ -50,11 +53,15 @@ const buildEnvelope = <T extends MessageEnvelope['type']>(input: {
     depends_on: input.dependsOn,
     artifact_refs: input.artifactRefs,
     memory_refs: input.memoryRefs,
-    body: input.body ?? (input.payload as Record<string, unknown>),
+    body: {
+      ...(input.body ?? (input.payload as Record<string, unknown>)),
+      ...(input.droidspeak ? { droidspeak: input.droidspeak } : {}),
+    },
     type: input.type,
     from: input.from,
     timestamp: ts,
     payload: input.payload,
+    droidspeak: input.droidspeak,
     compression: input.compression,
     usage: input.usage,
   } as MessageEnvelope<T>;
@@ -81,9 +88,11 @@ export const buildAgentStatusUpdate = (
     phase,
     status_code: statusCode,
     content,
+    droidspeak: droidspeakForStatusCode(statusCode, content),
     ...payloadExtras,
   },
   compression,
+  droidspeak: droidspeakForStatusCode(statusCode, content),
 });
 
 export const buildOrchestratorStatusUpdate = (
@@ -105,8 +114,10 @@ export const buildOrchestratorStatusUpdate = (
     phase,
     status_code: statusCode,
     content,
+    droidspeak: droidspeakForStatusCode(statusCode, content),
     ...extraPayload,
   },
+  droidspeak: droidspeakForStatusCode(statusCode, content),
 });
 
 export const buildArtifactCreatedMessage = (
@@ -178,7 +189,9 @@ export const buildTaskAssignedMessage = (
       agent_role: agent.role,
       attempt_id: agent.attemptId,
     })),
+    droidspeak: buildDroidspeakV2('handoff_ready', `Assigned ${agents.length} helper${agents.length === 1 ? '' : 's'} to ${taskId}.`),
   },
+  droidspeak: buildDroidspeakV2('handoff_ready', `Assigned ${agents.length} helper${agents.length === 1 ? '' : 's'} to ${taskId}.`),
 });
 
 export const buildClarificationRequest = (
@@ -198,7 +211,9 @@ export const buildClarificationRequest = (
     target_user_id: targetUserId,
     question,
     content: targetUserId ? `@${targetUserId} ${question}` : question,
+    droidspeak: buildDroidspeakV2('blocked', targetUserId ? `Waiting on ${targetUserId}: ${question}` : question),
   },
+  droidspeak: buildDroidspeakV2('blocked', targetUserId ? `Waiting on ${targetUserId}: ${question}` : question),
 });
 
 export const buildAgentToolResponseMessage = (
@@ -252,7 +267,9 @@ export const buildPlanProposedMessage = (
     summary,
     plan,
     dependencies,
+    droidspeak: buildDroidspeakV2('plan_status', summary),
   },
+  droidspeak: buildDroidspeakV2('plan_status', summary),
 });
 
 export const buildToolRequestMessage = (
@@ -311,7 +328,9 @@ export const buildVerificationRequestedMessage = (
     verification_type: verificationType,
     requested_by: requestedBy,
     detail,
+    droidspeak: buildDroidspeakV2('verification_needed', detail ?? `${verificationType} requested by ${requestedBy}`),
   },
+  droidspeak: buildDroidspeakV2('verification_needed', detail ?? `${verificationType} requested by ${requestedBy}`),
 });
 
 export const buildVerificationCompletedMessage = (
@@ -333,7 +352,9 @@ export const buildVerificationCompletedMessage = (
     status,
     reviewer,
     details: [`stage=${stage}`, details].filter(Boolean).join(' | '),
+    droidspeak: buildDroidspeakV2(status === 'passed' ? 'unblocked' : 'blocked', details ?? `${stage} ${status}`),
   },
+  droidspeak: buildDroidspeakV2(status === 'passed' ? 'unblocked' : 'blocked', details ?? `${stage} ${status}`),
 });
 
 export const buildCheckpointCreatedMessage = (
@@ -356,5 +377,7 @@ export const buildCheckpointCreatedMessage = (
     task_id: taskId,
     summary,
     metadata,
+    droidspeak: buildDroidspeakV2('summary_emitted', summary),
   },
+  droidspeak: buildDroidspeakV2('summary_emitted', summary),
 });

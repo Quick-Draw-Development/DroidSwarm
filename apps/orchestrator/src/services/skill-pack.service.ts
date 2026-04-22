@@ -1,5 +1,6 @@
 import path from 'node:path';
 
+import { getSwarmRoleDefinition } from '@shared-routing';
 import { loadSkillPacks } from '@shared-skills';
 import type { OrchestratorConfig } from '../types';
 
@@ -21,21 +22,24 @@ export class SkillPackService {
   }
 
   private inferRoleSkills(role: string): string[] {
-    const normalized = role.toLowerCase();
-    if (normalized.includes('plan')) {
+    const normalized = getSwarmRoleDefinition(role).id;
+    if (normalized === 'planner') {
       return ['planner'];
     }
-    if (normalized.includes('research')) {
+    if (normalized === 'researcher' || normalized === 'repo-scanner') {
       return ['researcher'];
     }
-    if (normalized.includes('review')) {
+    if (normalized === 'reviewer' || normalized === 'arbiter') {
       return ['reviewer'];
     }
-    if (normalized.includes('bug')) {
+    if (normalized === 'bugfix-helper') {
       return ['bugfix'];
     }
-    if (normalized.includes('feature') || normalized.includes('code') || normalized.includes('dev')) {
+    if (normalized === 'implementation-helper' || normalized === 'apple-specialist') {
       return ['feature'];
+    }
+    if (normalized === 'summarizer' || normalized === 'checkpoint-compressor') {
+      return ['planner'];
     }
     return ['orchestrator'];
   }

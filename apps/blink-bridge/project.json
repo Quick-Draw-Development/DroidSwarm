@@ -25,6 +25,12 @@
       "options": {
         "command": "tsc --noEmit -p apps/blink-bridge/tsconfig.app.json"
       }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node --import tsx --test apps/blink-bridge/src/**/*.spec.ts"
+      }
     }
   },
   "tags": []

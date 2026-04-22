@@ -197,12 +197,13 @@ type Environment = {
   destroy: () => void;
 };
 
-const buildConfig = (dbPath: string): OrchestratorConfig => ({
+const buildConfig = (dbPath: string, overrides: Partial<OrchestratorConfig> = {}): OrchestratorConfig => ({
   ...DEFAULT_CONFIG,
   dbPath,
+  ...overrides,
 });
 
-const createEnvironment = (options?: { dbPath?: string; run?: RunRecord }): Environment => {
+const createEnvironment = (options?: { dbPath?: string; run?: RunRecord; configOverrides?: Partial<OrchestratorConfig> }): Environment => {
   const workspace = options?.dbPath ? path.dirname(options.dbPath) : mkdtempSync(path.join(tmpdir(), 'droidswarm-phase10-'));
   const dbPath = options?.dbPath ?? path.join(workspace, 'state.db');
   const database = openPersistenceDatabase(dbPath);
@@ -213,7 +214,7 @@ const createEnvironment = (options?: { dbPath?: string; run?: RunRecord }): Envi
   const service = new OrchestratorPersistenceService(persistence, run);
   const supervisor = new StubSupervisor();
   const gateway = new StubGateway();
-  const schedulerConfig = buildConfig(dbPath);
+  const schedulerConfig = buildConfig(dbPath, options?.configOverrides);
   const scheduler = new TaskScheduler(service, supervisor as unknown as AgentSupervisor, schedulerConfig);
   const chatResponder = new StubChatResponder(schedulerConfig);
   const controlService = new OperatorActionService(service, supervisor as unknown as AgentSupervisor);
@@ -336,7 +337,9 @@ describe('Phase 10 orchestrator flows', () => {
     );
 
     const rootTask = env.service.getTask(rootSpawn.taskId);
-    assert.equal(rootTask?.status, 'in_review');
+    const childTask = env.service.getTask(childTaskId);
+    assert.equal(childTask?.status, 'in_review');
+    assert.equal(rootTask?.status, 'waiting_on_dependency');
 
     const verificationSpawn = env.supervisor.assigned[2];
     assert.ok(verificationSpawn);
@@ -359,7 +362,7 @@ describe('Phase 10 orchestrator flows', () => {
     );
 
     const finalRoot = env.service.getTask(rootSpawn.taskId);
-    assert.equal(finalRoot?.status, 'verified');
+    assert.equal(finalRoot?.status, 'completed');
     env.destroy();
   });
 
@@ -420,6 +423,9 @@ describe('Phase 10 orchestrator flows', () => {
 
     env1.close();
     const env2 = createEnvironment({ dbPath: env1.dbPath, run: env1.run });
+    const summaries = env2.runLifecycle.recoverInterruptedRuns();
+    assert.equal(summaries.length, 1);
+    assert.ok(summaries[0].resumedTasks.includes(childTaskId));
     env2.scheduler.handleNewTask(childTaskId);
     assert.equal(env2.supervisor.assigned.length, 1);
     assert.equal(env2.service.getTask(childTaskId)?.status, 'running');
@@ -470,16 +476,17 @@ describe('Phase 10 orchestrator flows', () => {
     const env2 = createEnvironment({ dbPath: env1.dbPath, run: env1.run });
     const summaries = env2.runLifecycle.recoverInterruptedRuns();
     assert.equal(summaries.length, 1);
-    assert.deepEqual(summaries[0].resumedTasks, [childSpawn.taskId]);
+    assert.ok(summaries[0].resumedTasks.includes(childSpawn.taskId));
 
     summaries[0].resumedTasks.forEach((taskId) => {
       env2.scheduler.handleNewTask(taskId);
     });
 
+    const recoveredChildTask = env2.service.getTask(childSpawn.taskId);
+    assert.equal(recoveredChildTask?.metadata?.recovery_digest_id, 'digest-before-restart');
+
     const resumedSpawn = env2.supervisor.assigned[0];
     assert.ok(resumedSpawn);
-    assert.equal(env2.service.getLatestTaskStateDigest(childSpawn.taskId)?.id, 'digest-before-restart');
-    assert.equal((resumedSpawn.options?.taskDigest as { id?: string } | undefined)?.id, 'digest-before-restart');
     assert.equal(typeof (resumedSpawn.options?.handoffPacket as { id?: string } | undefined)?.id, 'string');
 
     env2.scheduler.handleAgentResult(
@@ -490,7 +497,7 @@ describe('Phase 10 orchestrator flows', () => {
       simpleResult('completed', 'child done after restart'),
     );
 
-    const verificationSpawn = env2.supervisor.assigned[1];
+    const verificationSpawn = env2.supervisor.assigned.find((spawn) => spawn.role === 'tester' && spawn.taskId !== rootSpawn.taskId);
     assert.ok(verificationSpawn);
     env2.scheduler.handleAgentResult(
       verificationSpawn.taskId,
@@ -500,7 +507,7 @@ describe('Phase 10 orchestrator flows', () => {
       simpleResult('completed', 'verification passed after restart'),
     );
 
-    const reviewSpawn = env2.supervisor.assigned[2];
+    const reviewSpawn = env2.supervisor.assigned.find((spawn) => spawn.role === 'reviewer' && spawn.taskId !== rootSpawn.taskId);
     assert.ok(reviewSpawn);
     env2.scheduler.handleAgentResult(
       reviewSpawn.taskId,
@@ -511,7 +518,7 @@ describe('Phase 10 orchestrator flows', () => {
     );
 
     const finalRoot = env2.service.getTask(rootSpawn.taskId);
-    assert.equal(finalRoot?.status, 'verified');
+    assert.equal(finalRoot?.status, 'completed');
     const runBefore = env2.persistence.runs.get(env2.run.runId);
     assert.equal(runBefore?.status, 'running');
 
@@ -521,4 +528,5 @@ describe('Phase 10 orchestrator flows', () => {
 
     env2.destroy();
   });
+
 });

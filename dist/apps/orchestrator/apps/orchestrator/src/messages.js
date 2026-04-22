@@ -34,6 +34,7 @@ __export(messages_exports, {
 });
 module.exports = __toCommonJS(messages_exports);
 var import_node_crypto = require("node:crypto");
+var import_coordination = require("./coordination");
 const nowIso = () => (/* @__PURE__ */ new Date()).toISOString();
 const buildActor = (name, actorType) => ({
   actor_type: actorType,
@@ -56,11 +57,15 @@ const buildEnvelope = (input) => {
     depends_on: input.dependsOn,
     artifact_refs: input.artifactRefs,
     memory_refs: input.memoryRefs,
-    body: input.body ?? input.payload,
+    body: {
+      ...input.body ?? input.payload,
+      ...input.droidspeak ? { droidspeak: input.droidspeak } : {}
+    },
     type: input.type,
     from: input.from,
     timestamp: ts,
     payload: input.payload,
+    droidspeak: input.droidspeak,
     compression: input.compression,
     usage: input.usage
   };
@@ -76,9 +81,11 @@ const buildAgentStatusUpdate = (config, taskId, roomId, agentName, phase, status
     phase,
     status_code: statusCode,
     content,
+    droidspeak: (0, import_coordination.droidspeakForStatusCode)(statusCode, content),
     ...payloadExtras
   },
-  compression
+  compression,
+  droidspeak: (0, import_coordination.droidspeakForStatusCode)(statusCode, content)
 });
 const buildOrchestratorStatusUpdate = (config, roomId, phase, statusCode, content, taskId, extraPayload) => buildEnvelope({
   config,
@@ -91,8 +98,10 @@ const buildOrchestratorStatusUpdate = (config, roomId, phase, statusCode, conten
     phase,
     status_code: statusCode,
     content,
+    droidspeak: (0, import_coordination.droidspeakForStatusCode)(statusCode, content),
     ...extraPayload
-  }
+  },
+  droidspeak: (0, import_coordination.droidspeakForStatusCode)(statusCode, content)
 });
 const buildArtifactCreatedMessage = (config, taskId, roomId, agentName, artifact) => {
   const artifactId = (0, import_node_crypto.randomUUID)();
@@ -142,8 +151,10 @@ const buildTaskAssignedMessage = (config, taskId, roomId, assignmentId, agents) 
       agent_name: agent.agentName,
       agent_role: agent.role,
       attempt_id: agent.attemptId
-    }))
-  }
+    })),
+    droidspeak: (0, import_coordination.buildDroidspeakV2)("handoff_ready", `Assigned ${agents.length} helper${agents.length === 1 ? "" : "s"} to ${taskId}.`)
+  },
+  droidspeak: (0, import_coordination.buildDroidspeakV2)("handoff_ready", `Assigned ${agents.length} helper${agents.length === 1 ? "" : "s"} to ${taskId}.`)
 });
 const buildClarificationRequest = (config, taskId, roomId, targetUserId, question) => buildEnvelope({
   config,
@@ -155,8 +166,10 @@ const buildClarificationRequest = (config, taskId, roomId, targetUserId, questio
   payload: {
     target_user_id: targetUserId,
     question,
-    content: targetUserId ? `@${targetUserId} ${question}` : question
-  }
+    content: targetUserId ? `@${targetUserId} ${question}` : question,
+    droidspeak: (0, import_coordination.buildDroidspeakV2)("blocked", targetUserId ? `Waiting on ${targetUserId}: ${question}` : question)
+  },
+  droidspeak: (0, import_coordination.buildDroidspeakV2)("blocked", targetUserId ? `Waiting on ${targetUserId}: ${question}` : question)
 });
 const buildAgentToolResponseMessage = (config, taskId, roomId, agentName, payload, usage) => buildEnvelope({
   config,
@@ -189,8 +202,10 @@ const buildPlanProposedMessage = (config, taskId, planId, summary, plan, depende
     plan_id: planId,
     summary,
     plan,
-    dependencies
-  }
+    dependencies,
+    droidspeak: (0, import_coordination.buildDroidspeakV2)("plan_status", summary)
+  },
+  droidspeak: (0, import_coordination.buildDroidspeakV2)("plan_status", summary)
 });
 const buildToolRequestMessage = (config, taskId, agentName, payload) => buildEnvelope({
   config,
@@ -227,8 +242,10 @@ const buildVerificationRequestedMessage = (config, taskId, verificationType, req
     task_id: taskId,
     verification_type: verificationType,
     requested_by: requestedBy,
-    detail
-  }
+    detail,
+    droidspeak: (0, import_coordination.buildDroidspeakV2)("verification_needed", detail ?? `${verificationType} requested by ${requestedBy}`)
+  },
+  droidspeak: (0, import_coordination.buildDroidspeakV2)("verification_needed", detail ?? `${verificationType} requested by ${requestedBy}`)
 });
 const buildVerificationCompletedMessage = (config, taskId, stage, status, reviewer, details) => buildEnvelope({
   config,
@@ -241,8 +258,10 @@ const buildVerificationCompletedMessage = (config, taskId, stage, status, review
     task_id: taskId,
     status,
     reviewer,
-    details: [`stage=${stage}`, details].filter(Boolean).join(" | ")
-  }
+    details: [`stage=${stage}`, details].filter(Boolean).join(" | "),
+    droidspeak: (0, import_coordination.buildDroidspeakV2)(status === "passed" ? "unblocked" : "blocked", details ?? `${stage} ${status}`)
+  },
+  droidspeak: (0, import_coordination.buildDroidspeakV2)(status === "passed" ? "unblocked" : "blocked", details ?? `${stage} ${status}`)
 });
 const buildCheckpointCreatedMessage = (config, taskId, roomId, checkpointId, summary, metadata) => buildEnvelope({
   config,
@@ -256,8 +275,10 @@ const buildCheckpointCreatedMessage = (config, taskId, roomId, checkpointId, sum
     checkpoint_id: checkpointId,
     task_id: taskId,
     summary,
-    metadata
-  }
+    metadata,
+    droidspeak: (0, import_coordination.buildDroidspeakV2)("summary_emitted", summary)
+  },
+  droidspeak: (0, import_coordination.buildDroidspeakV2)("summary_emitted", summary)
 });
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {

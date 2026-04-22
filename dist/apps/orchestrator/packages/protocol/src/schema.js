@@ -73,6 +73,11 @@ const shorthandSchema = import_zod.z.object({
   compact: import_zod.z.string().min(1).optional(),
   expanded: import_zod.z.string().min(1).optional()
 }).optional();
+const droidspeakV2StateSchema = import_zod.z.object({
+  kind: import_zod.z.enum(["plan_status", "blocked", "unblocked", "handoff_ready", "verification_needed", "summary_emitted", "memory_pinned"]),
+  compact: import_zod.z.string().min(1),
+  expanded: import_zod.z.string().min(1)
+});
 const baseEnvelopeSchema = import_zod.z.object({
   id: import_zod.z.string().min(1).optional(),
   message_id: import_zod.z.string().min(1),
@@ -98,13 +103,15 @@ const baseEnvelopeSchema = import_zod.z.object({
   session_id: import_zod.z.string().min(1).optional(),
   usage: usageSchema.optional(),
   compression: compressionSchema.optional(),
-  shorthand: shorthandSchema
+  shorthand: shorthandSchema,
+  droidspeak: droidspeakV2StateSchema.optional()
 }).passthrough();
 const statusUpdatePayloadSchema = import_zod.z.object({
   phase: import_zod.z.string().min(1),
   status_code: import_zod.z.string().min(1),
   content: import_zod.z.string().min(1),
-  metadata: import_zod.z.record(import_zod.z.string(), import_zod.z.unknown()).optional()
+  metadata: import_zod.z.record(import_zod.z.string(), import_zod.z.unknown()).optional(),
+  droidspeak: droidspeakV2StateSchema.optional()
 }).passthrough();
 const taskCreatedPayloadSchema = import_zod.z.object({
   task_id: import_zod.z.string().min(1),
@@ -151,7 +158,8 @@ const clarificationRequestPayloadSchema = import_zod.z.object({
   question: import_zod.z.string().min(1),
   content: import_zod.z.string().min(1),
   question_id: import_zod.z.string().min(1).optional(),
-  reason_code: import_zod.z.string().min(1).optional()
+  reason_code: import_zod.z.string().min(1).optional(),
+  droidspeak: droidspeakV2StateSchema.optional()
 });
 const planProposedPayloadSchema = import_zod.z.object({
   task_id: import_zod.z.string().min(1),
@@ -159,7 +167,8 @@ const planProposedPayloadSchema = import_zod.z.object({
   summary: import_zod.z.string().min(1),
   plan: import_zod.z.string().optional(),
   confidence: import_zod.z.number().min(0).max(1).optional(),
-  dependencies: import_zod.z.array(import_zod.z.string().min(1)).optional()
+  dependencies: import_zod.z.array(import_zod.z.string().min(1)).optional(),
+  droidspeak: droidspeakV2StateSchema.optional()
 });
 const taskDecomposedPayloadSchema = import_zod.z.object({
   parent_task_id: import_zod.z.string().min(1),
@@ -175,7 +184,8 @@ const assignedAgentSchema = import_zod.z.object({
 const taskAssignedPayloadSchema = import_zod.z.object({
   task_id: import_zod.z.string().min(1),
   assignment_id: import_zod.z.string().min(1),
-  assigned_agents: import_zod.z.array(assignedAgentSchema)
+  assigned_agents: import_zod.z.array(assignedAgentSchema),
+  droidspeak: droidspeakV2StateSchema.optional()
 });
 const spawnRequestedPayloadSchema = import_zod.z.object({
   task_id: import_zod.z.string().min(1),
@@ -198,19 +208,22 @@ const verificationRequestedPayloadSchema = import_zod.z.object({
   task_id: import_zod.z.string().min(1),
   verification_type: import_zod.z.string().min(1),
   requested_by: import_zod.z.string().min(1),
-  detail: import_zod.z.string().optional()
+  detail: import_zod.z.string().optional(),
+  droidspeak: droidspeakV2StateSchema.optional()
 });
 const verificationCompletedPayloadSchema = import_zod.z.object({
   task_id: import_zod.z.string().min(1),
   status: import_zod.z.enum(["passed", "failed", "blocked"]),
   reviewer: import_zod.z.string().min(1),
-  details: import_zod.z.string().optional()
+  details: import_zod.z.string().optional(),
+  droidspeak: droidspeakV2StateSchema.optional()
 });
 const checkpointCreatedPayloadSchema = import_zod.z.object({
   checkpoint_id: import_zod.z.string().min(1),
   task_id: import_zod.z.string().min(1),
   summary: import_zod.z.string().optional(),
-  metadata: import_zod.z.record(import_zod.z.string(), import_zod.z.unknown()).optional()
+  metadata: import_zod.z.record(import_zod.z.string(), import_zod.z.unknown()).optional(),
+  droidspeak: droidspeakV2StateSchema.optional()
 });
 const handoffEventPayloadSchema = import_zod.z.object({
   handoff_id: import_zod.z.string().min(1).optional(),

@@ -51,6 +51,13 @@ const parseApprovalPolicy = (value: string | undefined): TaskPolicy['approvalPol
   return undefined;
 };
 
+const parsePriorityBias = (value: string | undefined): TaskPolicy['priorityBias'] | undefined => {
+  if (value === 'time' || value === 'cost' || value === 'balanced') {
+    return value;
+  }
+  return undefined;
+};
+
 const parseBooleanFlag = (value: string | undefined, fallback = false): boolean => {
   if (!value) {
     return fallback;
@@ -117,6 +124,11 @@ const envSchema = z.object({
   DROIDSWARM_POLICY_MAX_TOOL_CALLS: z.string().optional(),
   DROIDSWARM_POLICY_TIMEOUT_MS: z.string().optional(),
   DROIDSWARM_POLICY_APPROVAL_POLICY: z.enum(['auto', 'manual']).optional(),
+  DROIDSWARM_POLICY_MAX_PARALLEL_HELPERS: z.string().optional(),
+  DROIDSWARM_POLICY_MAX_SAME_ROLE_HELPERS: z.string().optional(),
+  DROIDSWARM_POLICY_LOCAL_QUEUE_TOLERANCE: z.string().optional(),
+  DROIDSWARM_POLICY_CLOUD_ESCALATION_ALLOWED: z.string().optional(),
+  DROIDSWARM_POLICY_PRIORITY_BIAS: z.enum(['time', 'cost', 'balanced']).optional(),
   DROIDSWARM_MODEL_PLANNING: z.string().optional(),
   DROIDSWARM_MODEL_VERIFICATION: z.string().optional(),
   DROIDSWARM_MODEL_CODE: z.string().optional(),
@@ -300,6 +312,13 @@ export const loadConfig = (): OrchestratorConfig => {
       timeoutMs: toPositiveIntOrUndefined(env.DROIDSWARM_POLICY_TIMEOUT_MS),
       allowedTools: policyAllowedTools,
       approvalPolicy: parseApprovalPolicy(env.DROIDSWARM_POLICY_APPROVAL_POLICY),
+      maxParallelHelpers: toPositiveIntOrUndefined(env.DROIDSWARM_POLICY_MAX_PARALLEL_HELPERS),
+      maxSameRoleHelpers: toPositiveIntOrUndefined(env.DROIDSWARM_POLICY_MAX_SAME_ROLE_HELPERS),
+      localQueueTolerance: toPositiveIntOrUndefined(env.DROIDSWARM_POLICY_LOCAL_QUEUE_TOLERANCE),
+      cloudEscalationAllowed: env.DROIDSWARM_POLICY_CLOUD_ESCALATION_ALLOWED == null
+        ? undefined
+        : parseBooleanFlag(env.DROIDSWARM_POLICY_CLOUD_ESCALATION_ALLOWED, false),
+      priorityBias: parsePriorityBias(env.DROIDSWARM_POLICY_PRIORITY_BIAS),
     },
   };
 };

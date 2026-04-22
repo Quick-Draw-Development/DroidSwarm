@@ -28,7 +28,18 @@ export const COMPACT_VERBS = [
   'heartbeat',
 ] as const;
 export type CompactVerb = (typeof COMPACT_VERBS)[number];
-export const ROUTE_KINDS = ['default-local', 'planner-local', 'apple-local', 'coder-local', 'cloud-escalated'] as const;
+export const ROUTE_KINDS = [
+  'default-local',
+  'default-local-saturated',
+  'planner-local',
+  'planner-local-saturated',
+  'apple-local',
+  'apple-local-saturated',
+  'coder-local',
+  'coder-local-queued',
+  'cloud-escalated',
+  'cloud-escalated-from-local-saturation',
+] as const;
 export type RouteKind = (typeof ROUTE_KINDS)[number];
 
 export interface EnvelopeRisk {
@@ -119,6 +130,10 @@ export const droidspeakV2StateSchema = z.object({
     'memory_pinned',
   ] as const),
 });
+export const normalizeDroidspeakV2State = (input: unknown): DroidspeakV2State =>
+  droidspeakV2StateSchema.parse(input);
+export const isDroidspeakV2State = (input: unknown): boolean =>
+  droidspeakV2StateSchema.safeParse(input).success;
 export const taskStateDigestSchema = z.object({
   id: z.string().min(1),
   taskId: z.string().min(1),
@@ -133,6 +148,10 @@ export const taskStateDigestSchema = z.object({
     artifactId: z.string().min(1),
     kind: z.string().min(1),
     summary: z.string().min(1),
+    reasonRelevant: z.string().min(1).optional(),
+    trustConfidence: z.number().min(0).max(1).optional(),
+    sourceTaskId: z.string().min(1).optional(),
+    supersededBy: z.string().min(1).optional(),
   })),
   verificationState: z.string().min(1),
   lastUpdatedBy: z.string().min(1),
@@ -289,6 +308,9 @@ export const normalizeToEnvelopeV2 = (input: unknown): EnvelopeV2 => {
   const from = asRecord(record.from);
   const body = asRecord(record.body);
   const normalizedBody = Object.keys(body).length > 0 ? body : payload;
+  if (typeof normalizedBody.droidspeak === 'object' && normalizedBody.droidspeak !== null) {
+    normalizedBody.droidspeak = normalizeDroidspeakV2State(normalizedBody.droidspeak);
+  }
   const taskId = asString(record.task_id) ?? asString(payload.task_id);
 
   return envelopeV2Schema.parse({
@@ -433,11 +455,31 @@ export interface TaskStateDigest {
     artifactId: string;
     kind: string;
     summary: string;
+    reasonRelevant?: string;
+    trustConfidence?: number;
+    sourceTaskId?: string;
+    supersededBy?: string;
   }>;
   verificationState: string;
   lastUpdatedBy: string;
   ts: string;
   droidspeak?: DroidspeakV2State;
+}
+
+export interface ArtifactMemoryIndexEntry {
+  id: string;
+  taskId: string;
+  runId: string;
+  projectId: string;
+  artifactId: string;
+  kind: string;
+  shortSummary: string;
+  reasonRelevant: string;
+  trustConfidence: number;
+  sourceTaskId: string;
+  supersededBy?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface HandoffPacket {

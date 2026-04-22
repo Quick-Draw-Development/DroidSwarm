@@ -68,6 +68,12 @@ const parseApprovalPolicy = (value) => {
   }
   return void 0;
 };
+const parsePriorityBias = (value) => {
+  if (value === "time" || value === "cost" || value === "balanced") {
+    return value;
+  }
+  return void 0;
+};
 const parseBooleanFlag = (value, fallback = false) => {
   if (!value) {
     return fallback;
@@ -132,6 +138,11 @@ const envSchema = import_zod.z.object({
   DROIDSWARM_POLICY_MAX_TOOL_CALLS: import_zod.z.string().optional(),
   DROIDSWARM_POLICY_TIMEOUT_MS: import_zod.z.string().optional(),
   DROIDSWARM_POLICY_APPROVAL_POLICY: import_zod.z.enum(["auto", "manual"]).optional(),
+  DROIDSWARM_POLICY_MAX_PARALLEL_HELPERS: import_zod.z.string().optional(),
+  DROIDSWARM_POLICY_MAX_SAME_ROLE_HELPERS: import_zod.z.string().optional(),
+  DROIDSWARM_POLICY_LOCAL_QUEUE_TOLERANCE: import_zod.z.string().optional(),
+  DROIDSWARM_POLICY_CLOUD_ESCALATION_ALLOWED: import_zod.z.string().optional(),
+  DROIDSWARM_POLICY_PRIORITY_BIAS: import_zod.z.enum(["time", "cost", "balanced"]).optional(),
   DROIDSWARM_MODEL_PLANNING: import_zod.z.string().optional(),
   DROIDSWARM_MODEL_VERIFICATION: import_zod.z.string().optional(),
   DROIDSWARM_MODEL_CODE: import_zod.z.string().optional(),
@@ -299,7 +310,12 @@ const loadConfig = () => {
       maxToolCalls: toPositiveIntOrUndefined(env.DROIDSWARM_POLICY_MAX_TOOL_CALLS),
       timeoutMs: toPositiveIntOrUndefined(env.DROIDSWARM_POLICY_TIMEOUT_MS),
       allowedTools: policyAllowedTools,
-      approvalPolicy: parseApprovalPolicy(env.DROIDSWARM_POLICY_APPROVAL_POLICY)
+      approvalPolicy: parseApprovalPolicy(env.DROIDSWARM_POLICY_APPROVAL_POLICY),
+      maxParallelHelpers: toPositiveIntOrUndefined(env.DROIDSWARM_POLICY_MAX_PARALLEL_HELPERS),
+      maxSameRoleHelpers: toPositiveIntOrUndefined(env.DROIDSWARM_POLICY_MAX_SAME_ROLE_HELPERS),
+      localQueueTolerance: toPositiveIntOrUndefined(env.DROIDSWARM_POLICY_LOCAL_QUEUE_TOLERANCE),
+      cloudEscalationAllowed: env.DROIDSWARM_POLICY_CLOUD_ESCALATION_ALLOWED == null ? void 0 : parseBooleanFlag(env.DROIDSWARM_POLICY_CLOUD_ESCALATION_ALLOWED, false),
+      priorityBias: parsePriorityBias(env.DROIDSWARM_POLICY_PRIORITY_BIAS)
     }
   };
 };

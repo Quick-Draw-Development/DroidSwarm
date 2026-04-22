@@ -1,3 +1,5 @@
+import type { DroidspeakV2State } from '@shared-types';
+
 export const BOARD_STATUSES = ['todo', 'planning', 'in_progress', 'review', 'done', 'cancelled'] as const;
 export type BoardStatus = (typeof BOARD_STATUSES)[number];
 
@@ -51,14 +53,19 @@ export interface TaskDetails {
     decisions: string[];
     openQuestions: string[];
     activeRisks: string[];
+    artifactIndex: Array<{
+      artifactId: string;
+      kind: string;
+      summary: string;
+      reasonRelevant?: string;
+      trustConfidence?: number;
+      sourceTaskId?: string;
+      supersededBy?: string;
+    }>;
     verificationState: string;
     lastUpdatedBy: string;
     updatedAt: string;
-    droidspeak?: {
-      compact: string;
-      expanded: string;
-      kind: string;
-    };
+    droidspeak?: DroidspeakV2State;
   };
   latestHandoff?: {
     id: string;
@@ -67,11 +74,7 @@ export interface TaskDetails {
     requiredReads: string[];
     digestId: string;
     createdAt: string;
-    droidspeak?: {
-      compact: string;
-      expanded: string;
-      kind: string;
-    };
+    droidspeak?: DroidspeakV2State;
   };
   latestRoutingTelemetry?: {
     modelTier?: string;
@@ -79,6 +82,19 @@ export interface TaskDetails {
     fallbackCount?: number;
     routeKind?: string;
     escalationReason?: string;
+  };
+  bestCurrentUnderstanding?: {
+    objective: string;
+    plan: string[];
+    blockers: string[];
+    keyFindings: string[];
+    artifacts: Array<{
+      artifactId: string;
+      summary: string;
+      reasonRelevant?: string;
+    }>;
+    verificationStatus: string;
+    latestHandoffSummary?: string;
   };
   guardrails: string[];
   limits: string[];
@@ -170,6 +186,10 @@ export interface OrchestrationInsightsData {
   verifications: VerificationTaskSummary[];
   dependencies: DependencySummary[];
   timeline: RunTimelineEntry[];
+  routingTelemetry?: RunRoutingTelemetrySummary;
+  allocatorPolicy?: RunAllocatorPolicySummary;
+  topology?: SwarmTopologySummary;
+  serviceUsage?: RunServiceUsageSummary;
 }
 export interface ProjectIdentity {
   projectId: string;
@@ -217,6 +237,125 @@ export interface RoutingDecisionSummary {
   readOnly?: boolean;
   complexity?: string;
   confidence?: number;
+}
+
+export interface RunRoutingTelemetrySummary {
+  modelTierCounts: Array<{
+    modelTier: string;
+    count: number;
+  }>;
+  averageQueueDepth: number;
+  averageFallbackCount: number;
+  cloudEscalationCount: number;
+  escalationReasons: Array<{
+    reason: string;
+    count: number;
+  }>;
+  averageLatencyByRoleAndEngine: Array<{
+    role: string;
+    engine: string;
+    averageElapsedMs: number;
+  }>;
+}
+
+export interface RunAllocatorPolicySummary {
+  maxParallelHelpers?: number;
+  maxSameRoleHelpers?: number;
+  localQueueTolerance?: number;
+  cloudEscalationAllowed?: boolean;
+  priorityBias?: 'time' | 'cost' | 'balanced';
+}
+
+export interface SwarmTopologySummary {
+  capturedAt?: string;
+  activeRoles: Array<{
+    role: string;
+    count: number;
+  }>;
+  helpers: Array<{
+    attemptId: string;
+    taskId: string;
+    taskName: string;
+    parentTaskId?: string;
+    role: string;
+    agentName: string;
+    status: string;
+    taskStatus: string;
+    modelTier?: string;
+    routeKind?: string;
+    queueDepth?: number;
+    fallbackCount?: number;
+  }>;
+}
+
+export interface RunServiceUsageSummary {
+  health?: {
+    updatedAt?: string;
+    allReady: boolean;
+    exportsReady: boolean;
+    blink: {
+      status: string;
+      reachable: boolean;
+      url?: string;
+    };
+    mux: {
+      status: string;
+      reachable: boolean;
+      url?: string;
+    };
+    llama: {
+      status: string;
+      reachable: boolean;
+      url?: string;
+      model?: string;
+      modelPresent: boolean;
+      inventoryPresent: boolean;
+      inventoryCount: number;
+      inventoryHasSelected: boolean;
+    };
+  };
+  blink: {
+    mirroredMessages: number;
+    pendingMessages: number;
+    failureCount: number;
+    retryCount: number;
+    providerBreakdown: Array<{
+      provider: string;
+      count: number;
+    }>;
+  };
+  llama: {
+    requestCount: number;
+    failureCount: number;
+    averageLatencyMs: number;
+    localRoleCoverage: Array<{
+      role: string;
+      count: number;
+    }>;
+    localCoveragePercent: number;
+    cloudBypassRatePercent: number;
+    bypassReasons: Array<{
+      reason: string;
+      count: number;
+    }>;
+    meetsLocalCoverageTarget: boolean;
+    meetsCloudEscalationTarget: boolean;
+  };
+  mux: {
+    workspaceLeaseCount: number;
+    brokeredExecutionCount: number;
+    activeRoleCoverage: Array<{
+      role: string;
+      count: number;
+    }>;
+    assessment: 'active-broker' | 'workspace-only' | 'idle';
+    recommendation: string;
+  };
+  policy: {
+    status: 'healthy' | 'warning' | 'action-needed';
+    summary: string;
+    actions: string[];
+  };
 }
 
 export interface ProjectMemorySummary {

@@ -24,6 +24,25 @@ export const buildDroidspeakV2 = (
   expanded,
 });
 
+export const droidspeakForStatusCode = (
+  statusCode: string,
+  expanded: string,
+): TaskStateDigest['droidspeak'] | undefined => {
+  switch (statusCode) {
+    case 'agent_started':
+      return buildDroidspeakV2('plan_status', expanded);
+    case 'agent_completed':
+      return buildDroidspeakV2('summary_emitted', expanded);
+    case 'agent_blocked':
+    case 'agent_failed':
+      return buildDroidspeakV2('blocked', expanded);
+    case 'task_cancellation_acknowledged':
+      return buildDroidspeakV2('unblocked', expanded);
+    default:
+      return undefined;
+  }
+};
+
 export const buildTaskDigest = (input: {
   task: PersistedTask;
   summary: string;

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import type { PersistenceClient } from './repositories';
 import type {
+  ArtifactMemoryIndexEntry,
   ArtifactRecord,
   CheckpointRecord,
   CheckpointVectorRecord,
@@ -13,6 +14,7 @@ import type {
   ProjectDecision,
   ProjectFact,
   RunRecord,
+  SwarmTopologySnapshot,
   TaskChatMessage,
   TaskAttemptRecord,
   TaskDependencyRecord,
@@ -71,6 +73,24 @@ export class OrchestratorPersistenceService {
 
   getRunRecord(): RunRecord {
     return this.run;
+  }
+
+  updateRunMetadata(metadata: Record<string, unknown>): void {
+    this.run.metadata = metadata;
+    this.run.updatedAt = nowIso();
+    this.persistence.runs.updateMetadata(this.run.runId, metadata);
+  }
+
+  recordSwarmTopologySnapshot(): SwarmTopologySnapshot | undefined {
+    const snapshot = this.persistence.buildSwarmTopologySnapshot(this.run.runId);
+    if (!snapshot) {
+      return undefined;
+    }
+    this.updateRunMetadata({
+      ...(this.run.metadata ?? {}),
+      topology_snapshot: snapshot,
+    });
+    return snapshot;
   }
 
   createTask(task: {
@@ -255,6 +275,20 @@ export class OrchestratorPersistenceService {
       metadata: input.metadata,
       createdAt: input.createdAt,
     });
+    this.persistence.artifactMemory.record({
+      id: randomUUID(),
+      taskId: input.taskId,
+      runId: this.run.runId,
+      projectId: this.run.projectId,
+      artifactId: input.artifactId,
+      kind: input.kind,
+      shortSummary: input.summary,
+      reasonRelevant: input.summary,
+      trustConfidence: 0.7,
+      sourceTaskId: input.taskId,
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    });
   }
 
   incrementAttemptSideEffectCount(attemptId: string): number {
@@ -311,6 +345,14 @@ export class OrchestratorPersistenceService {
 
   getArtifactsForTask(taskId: string): ArtifactRecord[] {
     return this.persistence.artifacts.listByTask(taskId);
+  }
+
+  recordArtifactMemory(entry: ArtifactMemoryIndexEntry): void {
+    this.persistence.artifactMemory.record(entry);
+  }
+
+  listArtifactMemory(taskId: string): ArtifactMemoryIndexEntry[] {
+    return this.persistence.artifactMemory.listByTask(taskId);
   }
 
   recordVerificationOutcome(params: {

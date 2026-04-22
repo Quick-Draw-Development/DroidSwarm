@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { ChildProcess, fork } from 'node:child_process';
 
+import { getSwarmRoleDefinition } from '@shared-routing';
 import { WorkerRegistry } from './worker-registry';
 import type {
   CompactVerb,
@@ -48,15 +49,17 @@ export interface AgentLaunchOptions {
 export const defaultRoleInstructions = (task: TaskRecord): RequestedAgent[] => {
   const normalizedType = task.taskType.toLowerCase();
   if (normalizedType === 'bug') {
+    const role = getSwarmRoleDefinition('bugfix-helper').id;
     return [{
-      role: 'coder-backend',
+      role,
       reason: 'bug-triage',
       instructions: `Investigate and fix the reported bug in task ${task.taskId}.`,
     }];
   }
 
+  const role = getSwarmRoleDefinition('planner').id;
   return [{
-    role: 'planner',
+    role,
     reason: 'initial-planning',
     instructions: `Plan the work for task ${task.taskId}, propose next roles, and identify blockers.`,
   }];

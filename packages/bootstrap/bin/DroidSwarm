@@ -67,6 +67,7 @@ Usage:
 Commands:
   setup       Initialize a project for DroidSwarm
   swarm       Start and register a managed DroidSwarm instance
+  blink       Inspect Blink integration state and mark Slack linking complete
   orchestrator Inspect orchestrator state and send task-channel messages
   list        List tracked swarms running on this machine
   status      Show detailed status for one managed DroidSwarm instance
@@ -80,6 +81,8 @@ Commands:
 Examples:
   DroidSwarm setup --project-root "$PWD" --project-mode greenfield
   DroidSwarm swarm --project-root "$PWD" --env OPENAI_API_KEY=example --config mode=dev
+  DroidSwarm blink status
+  DroidSwarm blink linked --project-root "$PWD"
   DroidSwarm orchestrator status
   DroidSwarm orchestrator status --task-id <task-id>
   DroidSwarm orchestrator message --task-id <task-id> --content "Need an update"
@@ -211,6 +214,28 @@ EOF
 
 print_version() {
   printf 'DroidSwarm %s\n' "${DROIDSWARM_VERSION:-0.0.0}"
+}
+
+print_blink_help() {
+  cat <<'EOF'
+Usage:
+  DroidSwarm blink status [options]
+  DroidSwarm blink linked [options]
+
+Status options:
+  --project-root PATH
+  --swarm-id ID
+
+Linked options:
+  --project-root PATH        Required
+  --workspace NAME
+
+Examples:
+  DroidSwarm blink status
+  DroidSwarm blink status --swarm-id <id>
+  DroidSwarm blink linked --project-root "$PWD"
+  DroidSwarm blink linked --project-root "$PWD" --workspace my-slack-workspace
+EOF
 }
 
 print_orchestrator_help() {
@@ -541,6 +566,9 @@ write_project_setup_state() {
   local db_path="$9"
   local version="${10:-${DROIDSWARM_VERSION:-}}"
   local spec_dir="${11:-}"
+  local blink_slack_linked="${12:-0}"
+  local blink_slack_linked_at="${13:-}"
+  local blink_slack_workspace="${14:-}"
 
   cat >"$(project_setup_file "$project_root")" <<EOF
 DROIDSWARM_PROJECT_ROOT=$(printf '%q' "$project_root")
@@ -554,6 +582,9 @@ DROIDSWARM_WS_PORT=$(printf '%q' "$ws_port")
 DROIDSWARM_DB_PATH=$(printf '%q' "$db_path")
 DROIDSWARM_VERSION=$(printf '%q' "$version")
 DROIDSWARM_SPECS_DIR=$(printf '%q' "$spec_dir")
+DROIDSWARM_BLINK_SLACK_LINKED=$(printf '%q' "$blink_slack_linked")
+DROIDSWARM_BLINK_SLACK_LINKED_AT=$(printf '%q' "$blink_slack_linked_at")
+DROIDSWARM_BLINK_SLACK_WORKSPACE=$(printf '%q' "$blink_slack_workspace")
 DROIDSWARM_SETUP_COMPLETED_AT=$(printf '%q' "$(now_utc)")
 EOF
 }
@@ -735,7 +766,7 @@ cmd_setup() {
     "$dashboard_port" \
     "$ws_port" \
     "$db_path" \
-    "$DROIDSWARM_VERSION"
+    "$DROIDSWARM_VERSION" \
     "$specs_dir"
 
   ensure_gitignore_entry "$project_root" ".droidswarm/*"
@@ -750,6 +781,9 @@ cmd_setup() {
   info "Production branch: $production_branch"
   info "Metadata: $(project_meta_file "$project_root")"
   info "Database: $db_path"
+  info "Blink to Slack: pending"
+  info "After the swarm starts, open the Blink UI and link Slack, then run:"
+  info "  DroidSwarm blink linked --project-root \"$project_root\""
 }
 
 cmd_swarm() {
@@ -1124,6 +1158,11 @@ cmd_swarm() {
   info "Dashboard port: $dashboard_port"
   info "WebSocket port: $ws_port"
   info "Blink UI port: $blink_port"
+  if [[ "${DROIDSWARM_BLINK_SLACK_LINKED:-0}" == "1" ]]; then
+    info "Blink to Slack: linked"
+  else
+    info "Blink to Slack: pending"
+  fi
   info "Debug logging: $( [[ "$debug_enabled" == "1" ]] && printf 'on' || printf 'off' )"
 
   if [[ "$dry_run" == "1" ]]; then
@@ -1197,7 +1236,10 @@ EOF
     "$ws_port" \
     "$db_path" \
     "$DROIDSWARM_VERSION" \
-    "$specs_dir"
+    "$specs_dir" \
+    "${DROIDSWARM_BLINK_SLACK_LINKED:-0}" \
+    "${DROIDSWARM_BLINK_SLACK_LINKED_AT:-}" \
+    "${DROIDSWARM_BLINK_SLACK_WORKSPACE:-}"
 
   if [[ "$foreground" == "1" ]]; then
     "$ROOT_DIR/libexec/droidswarm-daemon.sh" "$swarm_id" "$state_dir"
@@ -1208,6 +1250,12 @@ EOF
     info "Started DroidSwarm '$swarm_id' (pid $pid)"
     sleep 2
     print_swarm_runtime_status "$swarm_id"
+    if [[ "${DROIDSWARM_BLINK_SLACK_LINKED:-0}" != "1" ]]; then
+      info "Blink/Slack link is still pending for this project."
+      info "Open Blink UI: $(format_local_http_url "$blink_port")"
+      info "After linking Slack in Blink, run:"
+      info "  DroidSwarm blink linked --project-root \"$project_root\""
+    fi
   fi
 }
 
@@ -1223,7 +1271,8 @@ print_swarm_runtime_status() {
   local pid status uptime
   local socket_component_status dashboard_component_status orch_component_status bridge_component_status
   local blink_component_status mux_component_status llama_component_status
-  local dashboard_url ws_url blink_url
+  local dashboard_url ws_url blink_url blink_link_status blink_link_detail
+  local health_file blink_health mux_health llama_health inventory_health exports_health health_updated_at
 
   pid="-"
   status="stopped"
@@ -1238,6 +1287,14 @@ print_swarm_runtime_status() {
   dashboard_url="-"
   ws_url="-"
   blink_url="-"
+  blink_link_status="unknown"
+  blink_link_detail=""
+  blink_health="unknown"
+  mux_health="unknown"
+  llama_health="unknown"
+  inventory_health="unknown"
+  exports_health="unknown"
+  health_updated_at=""
 
   if [[ -f "$(swarm_status_file "$swarm_id")" ]]; then
     status="$(<"$(swarm_status_file "$swarm_id")")"
@@ -1278,6 +1335,38 @@ print_swarm_runtime_status() {
     ws_url="ws://127.0.0.1:${DROIDSWARM_WS_PORT}"
   fi
   blink_url="$(format_local_http_url "${DROIDSWARM_BLINK_SERVER_PORT:-"-"}")"
+  if load_project_setup "${DROIDSWARM_PROJECT_ROOT:-}"; then
+    if [[ "${DROIDSWARM_BLINK_SLACK_LINKED:-0}" == "1" ]]; then
+      blink_link_status="linked"
+      if [[ -n "${DROIDSWARM_BLINK_SLACK_WORKSPACE:-}" ]]; then
+        blink_link_detail="${DROIDSWARM_BLINK_SLACK_WORKSPACE}"
+      elif [[ -n "${DROIDSWARM_BLINK_SLACK_LINKED_AT:-}" ]]; then
+        blink_link_detail="${DROIDSWARM_BLINK_SLACK_LINKED_AT}"
+      fi
+    else
+      blink_link_status="pending"
+    fi
+  fi
+
+  health_file="$(swarm_service_health_file "$swarm_id")"
+  if [[ -f "$health_file" ]]; then
+    # shellcheck disable=SC1090
+    source "$health_file"
+    [[ "${DROIDSWARM_HEALTH_BLINK_REACHABLE:-0}" == "1" ]] && blink_health="ok" || blink_health="unreachable"
+    [[ "${DROIDSWARM_HEALTH_MUX_REACHABLE:-0}" == "1" ]] && mux_health="ok" || mux_health="unreachable"
+    [[ "${DROIDSWARM_HEALTH_LLAMA_REACHABLE:-0}" == "1" ]] && llama_health="ok" || llama_health="unreachable"
+    if [[ "${DROIDSWARM_HEALTH_LLAMA_MODEL_PRESENT:-0}" == "1" && "${DROIDSWARM_HEALTH_LLAMA_INVENTORY_HAS_SELECTED:-0}" == "1" ]]; then
+      inventory_health="ok"
+    else
+      inventory_health="missing"
+    fi
+    if [[ -n "${DROIDSWARM_HEALTH_BLINK_URL:-}" && -n "${DROIDSWARM_HEALTH_MUX_URL:-}" && -n "${DROIDSWARM_HEALTH_LLAMA_URL:-}" ]]; then
+      exports_health="ready"
+    else
+      exports_health="incomplete"
+    fi
+    health_updated_at="${DROIDSWARM_HEALTH_UPDATED_AT:-}"
+  fi
 
   if [[ "$include_header" == "1" ]]; then
     printf '%-28s %-18s %-10s %-8s %-8s %-8s %-8s %-12s\n' \
@@ -1305,6 +1394,20 @@ print_swarm_runtime_status() {
     "$dashboard_url" \
     "$ws_url" \
     "$blink_url"
+  printf '  health: blink=%s mux=%s llama=%s inventory=%s exports=%s\n' \
+    "$blink_health" \
+    "$mux_health" \
+    "$llama_health" \
+    "$inventory_health" \
+    "$exports_health"
+  if [[ -n "$health_updated_at" ]]; then
+    printf '  health-updated: %s\n' "$health_updated_at"
+  fi
+  if [[ -n "$blink_link_detail" ]]; then
+    printf '  blink-slack: %s (%s)\n' "$blink_link_status" "$blink_link_detail"
+  else
+    printf '  blink-slack: %s\n' "$blink_link_status"
+  fi
 }
 
 project_swarm_ids() {
@@ -1472,6 +1575,173 @@ cmd_status() {
   fi
 
   print_swarm_runtime_status "$swarm_id"
+}
+
+cmd_blink_status() {
+  ensure_runtime_dirs
+
+  local swarm_id=""
+  local project_root=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-root)
+        shift
+        require_value "--project-root" "${1:-}"
+        project_root="$1"
+        ;;
+      --swarm-id)
+        shift
+        require_value "--swarm-id" "${1:-}"
+        swarm_id="$1"
+        ;;
+      --help|-h)
+        print_blink_help
+        return 0
+        ;;
+      *)
+        err "Unknown blink status option: $1"
+        print_blink_help
+        return 1
+        ;;
+    esac
+    shift
+  done
+
+  if [[ -n "$swarm_id" ]]; then
+    if ! swarm_id="$(resolve_swarm_id "$swarm_id")"; then
+      return 1
+    fi
+    load_swarm_env "$swarm_id" || return 1
+    project_root="${DROIDSWARM_PROJECT_ROOT:-$project_root}"
+    info "Swarm: $swarm_id"
+    info "Blink UI: $(format_local_http_url "${DROIDSWARM_BLINK_SERVER_PORT:-"-"}")"
+  fi
+
+  if [[ -z "$project_root" ]]; then
+    project_root="$(pwd)"
+  fi
+  project_root="$(cd "$project_root" 2>/dev/null && pwd || printf '%s\n' "$project_root")"
+
+  if ! project_is_setup "$project_root"; then
+    err "Project is not set up: $project_root"
+    return 1
+  fi
+
+  load_project_setup "$project_root" || return 1
+
+  info "Project root: $project_root"
+  info "Project: ${DROIDSWARM_PROJECT_NAME:-unknown} (${DROIDSWARM_PROJECT_ID:-unknown})"
+  if [[ "${DROIDSWARM_BLINK_SLACK_LINKED:-0}" == "1" ]]; then
+    info "Blink to Slack: linked"
+    if [[ -n "${DROIDSWARM_BLINK_SLACK_WORKSPACE:-}" ]]; then
+      info "Slack workspace: ${DROIDSWARM_BLINK_SLACK_WORKSPACE}"
+    fi
+    if [[ -n "${DROIDSWARM_BLINK_SLACK_LINKED_AT:-}" ]]; then
+      info "Linked at: ${DROIDSWARM_BLINK_SLACK_LINKED_AT}"
+    fi
+  else
+    info "Blink to Slack: pending"
+    if [[ -n "$swarm_id" ]]; then
+      info "Open the Blink UI above, link Slack there, then run:"
+    else
+      info "Start a swarm, open the Blink UI, link Slack there, then run:"
+    fi
+    info "  DroidSwarm blink linked --project-root \"$project_root\""
+  fi
+}
+
+cmd_blink_linked() {
+  ensure_runtime_dirs
+
+  local project_root=""
+  local workspace_name=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-root)
+        shift
+        require_value "--project-root" "${1:-}"
+        project_root="$1"
+        ;;
+      --workspace)
+        shift
+        require_value "--workspace" "${1:-}"
+        workspace_name="$1"
+        ;;
+      --help|-h)
+        print_blink_help
+        return 0
+        ;;
+      *)
+        err "Unknown blink linked option: $1"
+        print_blink_help
+        return 1
+        ;;
+    esac
+    shift
+  done
+
+  if [[ -z "$project_root" ]]; then
+    err "Missing required option: --project-root"
+    print_blink_help
+    return 1
+  fi
+
+  mkdir -p "$project_root"
+  project_root="$(cd "$project_root" && pwd)"
+
+  if ! project_is_setup "$project_root"; then
+    err "Project is not set up: $project_root"
+    return 1
+  fi
+
+  load_project_setup "$project_root" || return 1
+
+  write_project_setup_state \
+    "$project_root" \
+    "${DROIDSWARM_PROJECT_NAME:-}" \
+    "${DROIDSWARM_PROJECT_ID:-}" \
+    "${DROIDSWARM_PROJECT_MODE:-}" \
+    "${DROIDSWARM_MAIN_BRANCH:-main}" \
+    "${DROIDSWARM_PRODUCTION_BRANCH:-production}" \
+    "${DROIDSWARM_DASHBOARD_PORT:-3000}" \
+    "${DROIDSWARM_WS_PORT:-8765}" \
+    "${DROIDSWARM_DB_PATH:-$(project_db_file "$project_root")}" \
+    "${DROIDSWARM_VERSION:-$DROIDSWARM_VERSION}" \
+    "${DROIDSWARM_SPECS_DIR:-}" \
+    "1" \
+    "$(now_utc)" \
+    "$workspace_name"
+
+  info "Marked Blink to Slack as linked for project '$project_root'."
+  if [[ -n "$workspace_name" ]]; then
+    info "Slack workspace: $workspace_name"
+  fi
+}
+
+cmd_blink() {
+  local subcommand="${1:-status}"
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
+
+  case "$subcommand" in
+    status)
+      cmd_blink_status "$@"
+      ;;
+    linked)
+      cmd_blink_linked "$@"
+      ;;
+    help|--help|-h)
+      print_blink_help
+      ;;
+    *)
+      err "Unknown blink command: $subcommand"
+      print_blink_help
+      return 1
+      ;;
+  esac
 }
 
 cmd_orchestrator_status() {
@@ -2052,6 +2322,9 @@ case "$COMMAND" in
     ;;
   swarm)
     cmd_swarm "$@"
+    ;;
+  blink)
+    cmd_blink "$@"
     ;;
   orchestrator)
     cmd_orchestrator "$@"

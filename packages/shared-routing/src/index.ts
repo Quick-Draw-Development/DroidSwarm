@@ -1,4 +1,8 @@
 import type { RoutingDecision } from '@shared-types';
+import { getSwarmRoleDefinition } from './role-catalog';
+
+export type { SwarmRole, SwarmRoleDefinition } from './role-catalog';
+export { getSwarmRoleDefinition, listSwarmRoleDefinitions, normalizeSwarmRole } from './role-catalog';
 
 export interface RoutingContext {
   role: string;
@@ -9,6 +13,8 @@ export interface RoutingContext {
   allowCloud?: boolean;
   queueDepth?: number;
   fallbackCount?: number;
+  localQueueTolerance?: number;
+  priorityBias?: 'time' | 'cost' | 'balanced';
   planningHints?: string[];
   appleHints?: string[];
   appleRoles?: string[];
@@ -25,6 +31,7 @@ const defaultCloudEscalationHints = ['refactor', 'debug', 'multi-file', 'migrati
 export class RoutingService {
   decide(context: RoutingContext): RoutingDecision {
     const role = context.role.toLowerCase();
+    const roleDefinition = getSwarmRoleDefinition(context.role);
     const taskType = context.taskType?.toLowerCase() ?? '';
     const stage = context.stage?.toLowerCase() ?? '';
     const planningHints = context.planningHints ?? defaultPlanningHints;
@@ -36,16 +43,21 @@ export class RoutingService {
     const readOnly = context.readOnly ?? (stage === 'review' || stage === 'verification');
     const queueDepth = context.queueDepth ?? 0;
     const fallbackCount = context.fallbackCount ?? 0;
+    const localQueueTolerance = Math.max(1, context.localQueueTolerance ?? 4);
+    const priorityBias = context.priorityBias ?? 'balanced';
     const localFirst = true;
+    const localSaturated = queueDepth >= localQueueTolerance || fallbackCount >= 2;
     const combined = `${role} ${taskType} ${context.summary ?? ''}`.toLowerCase();
 
-    if (appleRoles.some((hint) => role.includes(hint)) || appleHints.some((hint) => combined.includes(hint))) {
+    if (roleDefinition.id === 'apple-specialist' || appleRoles.some((hint) => role.includes(hint)) || appleHints.some((hint) => combined.includes(hint))) {
       return {
         engine: 'apple-intelligence',
         model: 'apple-intelligence/local',
-        modelTier: 'local-capable',
-        routeKind: 'apple-local',
-        reason: 'First-class local Apple Intelligence rule matched Apple ecosystem task scope',
+        modelTier: roleDefinition.defaultModelTier,
+        routeKind: localSaturated ? 'apple-local-saturated' : 'apple-local',
+        reason: localSaturated
+          ? 'Apple-local route retained despite local saturation because Apple-specialist work stays local-first'
+          : 'First-class local Apple Intelligence rule matched Apple ecosystem task scope',
         role: context.role,
         readOnly,
         complexity,
@@ -58,13 +70,26 @@ export class RoutingService {
       };
     }
 
-    if (stage === 'verification' || stage === 'review' || planningHints.some((hint) => role.includes(hint))) {
+    if (
+      roleDefinition.id === 'planner'
+      || roleDefinition.id === 'researcher'
+      || roleDefinition.id === 'reviewer'
+      || roleDefinition.id === 'verifier'
+      || roleDefinition.id === 'summarizer'
+      || roleDefinition.id === 'checkpoint-compressor'
+      || roleDefinition.id === 'arbiter'
+      || stage === 'verification'
+      || stage === 'review'
+      || planningHints.some((hint) => role.includes(hint))
+    ) {
       return {
         engine: 'local-llama',
         model: 'llama.cpp/planner',
-        modelTier: 'local-cheap',
-        routeKind: 'planner-local',
-        reason: 'Local-first planning, review, and orchestration policy',
+        modelTier: roleDefinition.defaultModelTier,
+        routeKind: localSaturated ? 'planner-local-saturated' : 'planner-local',
+        reason: localSaturated
+          ? 'Local-first planning, review, and compression roles stay local even when llama capacity is saturated'
+          : 'Local-first planning, review, and orchestration policy',
         role: context.role,
         readOnly,
         complexity,
@@ -77,17 +102,33 @@ export class RoutingService {
       };
     }
 
-    if (codeHints.some((hint) => role.includes(hint) || taskType.includes(hint))) {
-      const shouldEscalate = complexity === 'high' && context.allowCloud === true;
+    if (
+      roleDefinition.id === 'implementation-helper'
+      || roleDefinition.id === 'bugfix-helper'
+      || codeHints.some((hint) => role.includes(hint) || taskType.includes(hint))
+    ) {
+      const shouldEscalate = context.allowCloud === true && (
+        complexity === 'high'
+        || (localSaturated && priorityBias !== 'cost')
+        || (priorityBias === 'time' && complexity === 'medium')
+      );
       return {
         engine: shouldEscalate ? 'codex-cloud' : 'codex-cli',
         model: shouldEscalate ? 'codex-cloud/coder' : 'codex-cli/coder',
-        modelTier: shouldEscalate ? 'cloud' : 'local-capable',
-        routeKind: shouldEscalate ? 'cloud-escalated' : 'coder-local',
-        escalationReason: shouldEscalate ? 'explicit_cloud_policy_with_high_complexity' : undefined,
+        modelTier: shouldEscalate ? 'cloud' : roleDefinition.defaultModelTier,
+        routeKind: shouldEscalate
+          ? (localSaturated ? 'cloud-escalated-from-local-saturation' : 'cloud-escalated')
+          : (localSaturated ? 'coder-local-queued' : 'coder-local'),
+        escalationReason: shouldEscalate
+          ? (localSaturated ? 'local_saturated_and_cloud_allowed' : 'explicit_cloud_policy_with_high_complexity')
+          : (localSaturated ? 'local_queue_retained_due_to_local_first' : undefined),
         reason: shouldEscalate
-          ? 'Explicit cloud escalation approved after local-first complexity check'
-          : 'Local-first coding helper selected by default',
+          ? (localSaturated
+            ? 'Cloud escalation allowed because local-first coding capacity is saturated'
+            : 'Explicit cloud escalation approved after local-first complexity check')
+          : (localSaturated
+            ? 'Local-first coding helper retained locally and should queue until capacity clears'
+            : 'Local-first coding helper selected by default'),
         role: context.role,
         readOnly,
         complexity,
@@ -103,9 +144,11 @@ export class RoutingService {
     return {
       engine: 'local-llama',
       model: 'llama.cpp/default',
-      modelTier: 'local-cheap',
-      routeKind: 'default-local',
-      reason: 'Default local-first execution policy',
+      modelTier: roleDefinition.defaultModelTier,
+      routeKind: localSaturated ? 'default-local-saturated' : 'default-local',
+      reason: localSaturated
+        ? 'Default local-first execution retained locally while the local tier is saturated'
+        : 'Default local-first execution policy',
       role: context.role,
       readOnly,
       complexity,
@@ -136,21 +179,24 @@ export class RoutingService {
   }
 
   private defaultSkillPacks(role: string): string[] {
-    const normalized = role.toLowerCase();
-    if (normalized.includes('plan')) {
+    const normalized = getSwarmRoleDefinition(role).id;
+    if (normalized === 'planner') {
       return ['planner'];
     }
-    if (normalized.includes('review')) {
+    if (normalized === 'reviewer' || normalized === 'arbiter') {
       return ['reviewer'];
     }
-    if (normalized.includes('research')) {
+    if (normalized === 'researcher' || normalized === 'repo-scanner') {
       return ['researcher'];
     }
-    if (normalized.includes('bug')) {
+    if (normalized === 'bugfix-helper') {
       return ['bugfix'];
     }
-    if (normalized.includes('feature') || normalized.includes('code')) {
+    if (normalized === 'implementation-helper' || normalized === 'apple-specialist') {
       return ['feature'];
+    }
+    if (normalized === 'summarizer' || normalized === 'checkpoint-compressor') {
+      return ['planner'];
     }
     return ['orchestrator'];
   }

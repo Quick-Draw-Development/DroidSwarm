@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 
 import WebSocket from 'ws';
 import type Database from 'better-sqlite3';
+import type { DroidspeakV2State } from '@shared-types';
 
 import type {
   ArtifactSummary,
@@ -19,7 +20,11 @@ import type {
   ProjectSummary,
   RepoSummary,
   RoutingDecisionSummary,
+  RunAllocatorPolicySummary,
+  RunRoutingTelemetrySummary,
+  RunServiceUsageSummary,
   RunSummary,
+  SwarmTopologySummary,
   TaskChatSummary,
   RunTimelineEntry,
   TaskDetails,
@@ -253,6 +258,60 @@ const parsePayload = (value?: string | null): Record<string, unknown> | undefine
   try {
     const parsed = JSON.parse(value);
     return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const getSwarmHealthSnapshotPath = (): string | undefined => {
+  const swarmId = process.env.DROIDSWARM_SWARM_ID;
+  const droidswarmHome = process.env.DROIDSWARM_HOME ?? path.join(process.env.HOME ?? '', '.droidswarm');
+  if (!swarmId || !droidswarmHome) {
+    return undefined;
+  }
+
+  return path.join(droidswarmHome, 'swarms', swarmId, 'service-health.json');
+};
+
+const getRunServiceHealth = (): RunServiceUsageSummary['health'] | undefined => {
+  const snapshotPath = getSwarmHealthSnapshotPath();
+  if (!snapshotPath || !fs.existsSync(snapshotPath)) {
+    return undefined;
+  }
+
+  try {
+    const raw = JSON.parse(fs.readFileSync(snapshotPath, 'utf8')) as Record<string, unknown>;
+    const blink = typeof raw.blink === 'object' && raw.blink !== null ? raw.blink as Record<string, unknown> : {};
+    const mux = typeof raw.mux === 'object' && raw.mux !== null ? raw.mux as Record<string, unknown> : {};
+    const llama = typeof raw.llama === 'object' && raw.llama !== null ? raw.llama as Record<string, unknown> : {};
+
+    const health = {
+      updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : undefined,
+      allReady: raw.allReady === true,
+      exportsReady: [blink.url, mux.url, llama.url].every((value) => typeof value === 'string' && value.length > 0),
+      blink: {
+        status: typeof blink.status === 'string' ? blink.status : 'unknown',
+        reachable: blink.reachable === true,
+        url: typeof blink.url === 'string' ? blink.url : undefined,
+      },
+      mux: {
+        status: typeof mux.status === 'string' ? mux.status : 'unknown',
+        reachable: mux.reachable === true,
+        url: typeof mux.url === 'string' ? mux.url : undefined,
+      },
+      llama: {
+        status: typeof llama.status === 'string' ? llama.status : 'unknown',
+        reachable: llama.reachable === true,
+        url: typeof llama.url === 'string' ? llama.url : undefined,
+        model: typeof llama.model === 'string' ? llama.model : undefined,
+        modelPresent: llama.modelPresent === true,
+        inventoryPresent: llama.inventoryPresent === true,
+        inventoryCount: typeof llama.inventoryCount === 'number' ? llama.inventoryCount : 0,
+        inventoryHasSelected: llama.inventoryHasSelected === true,
+      },
+    } satisfies NonNullable<RunServiceUsageSummary['health']>;
+
+    return health;
   } catch {
     return undefined;
   }
@@ -538,6 +597,536 @@ export const listRoutingDecisionsForTask = (taskId: string): RoutingDecisionSumm
   });
 };
 
+export const getRunRoutingTelemetry = (runId?: string): RunRoutingTelemetrySummary | undefined => {
+  if (!runId) {
+    return undefined;
+  }
+
+  try {
+    const database = getDatabase();
+    const attemptRows = database.prepare(`
+      SELECT attempt_id, metadata_json
+      FROM task_attempts
+      WHERE run_id = ?
+    `).all(runId) as Array<{ attempt_id: string; metadata_json?: string | null }>;
+    const resultRows = database.prepare(`
+      SELECT attempt_id, engine, model_tier, queue_depth, fallback_count, created_at
+      FROM worker_results
+      WHERE run_id = ?
+      ORDER BY created_at DESC
+    `).all(runId) as Array<{
+      attempt_id: string;
+      engine?: string | null;
+      model_tier?: string | null;
+      queue_depth?: number | null;
+      fallback_count?: number | null;
+      created_at: string;
+    }>;
+    const heartbeatRows = database.prepare(`
+      SELECT attempt_id, engine, elapsed_ms, created_at
+      FROM worker_heartbeats
+      WHERE run_id = ?
+      ORDER BY created_at DESC
+    `).all(runId) as Array<{
+      attempt_id: string;
+      engine?: string | null;
+      elapsed_ms: number;
+      created_at: string;
+    }>;
+
+    const attemptMetadata = new Map<string, Record<string, unknown>>();
+    for (const row of attemptRows) {
+      attemptMetadata.set(row.attempt_id, parseMetadata(row.metadata_json) ?? {});
+    }
+
+    const latestResults = new Map<string, {
+      engine?: string;
+      modelTier?: string;
+      queueDepth?: number;
+      fallbackCount?: number;
+    }>();
+    for (const row of resultRows) {
+      if (latestResults.has(row.attempt_id)) {
+        continue;
+      }
+      latestResults.set(row.attempt_id, {
+        engine: typeof row.engine === 'string' ? row.engine : undefined,
+        modelTier: typeof row.model_tier === 'string' ? row.model_tier : undefined,
+        queueDepth: typeof row.queue_depth === 'number' ? row.queue_depth : undefined,
+        fallbackCount: typeof row.fallback_count === 'number' ? row.fallback_count : undefined,
+      });
+    }
+
+    const maxElapsedByAttempt = new Map<string, { engine: string; elapsedMs: number }>();
+    for (const row of heartbeatRows) {
+      const elapsedMs = Number(row.elapsed_ms);
+      if (Number.isNaN(elapsedMs)) {
+        continue;
+      }
+      const existing = maxElapsedByAttempt.get(row.attempt_id);
+      const engine = typeof row.engine === 'string' ? row.engine : 'unknown';
+      if (!existing || elapsedMs > existing.elapsedMs) {
+        maxElapsedByAttempt.set(row.attempt_id, { engine, elapsedMs });
+      }
+    }
+
+    const modelTierCounts = new Map<string, number>();
+    const escalationReasons = new Map<string, number>();
+    const latencyByRoleEngine = new Map<string, { role: string; engine: string; total: number; count: number }>();
+    let queueDepthTotal = 0;
+    let queueDepthCount = 0;
+    let fallbackTotal = 0;
+    let fallbackTotalCount = 0;
+    let cloudEscalationCount = 0;
+
+    for (const [attemptId, metadata] of attemptMetadata.entries()) {
+      const result = latestResults.get(attemptId);
+      const routingDecision = typeof metadata.routing_decision === 'object' && metadata.routing_decision !== null
+        ? metadata.routing_decision as Record<string, unknown>
+        : {};
+      const modelTier = result?.modelTier
+        ?? (typeof metadata.model_tier === 'string' ? metadata.model_tier : undefined)
+        ?? (typeof routingDecision.modelTier === 'string' ? routingDecision.modelTier : undefined)
+        ?? 'unassigned';
+      modelTierCounts.set(modelTier, (modelTierCounts.get(modelTier) ?? 0) + 1);
+
+      if (typeof result?.queueDepth === 'number') {
+        queueDepthTotal += result.queueDepth;
+        queueDepthCount += 1;
+      }
+      if (typeof result?.fallbackCount === 'number') {
+        fallbackTotal += result.fallbackCount;
+        fallbackTotalCount += 1;
+      }
+
+      const escalationReason = typeof routingDecision.escalationReason === 'string'
+        ? routingDecision.escalationReason
+        : undefined;
+      const routeKind = typeof routingDecision.routeKind === 'string'
+        ? routingDecision.routeKind
+        : undefined;
+      if (escalationReason || (typeof routeKind === 'string' && routeKind.includes('cloud'))) {
+        cloudEscalationCount += 1;
+      }
+      if (escalationReason) {
+        escalationReasons.set(escalationReason, (escalationReasons.get(escalationReason) ?? 0) + 1);
+      }
+
+      const role = typeof metadata.role === 'string' ? metadata.role : 'worker';
+      const latency = maxElapsedByAttempt.get(attemptId);
+      if (latency) {
+        const key = `${role}::${latency.engine}`;
+        const existing = latencyByRoleEngine.get(key) ?? {
+          role,
+          engine: latency.engine,
+          total: 0,
+          count: 0,
+        };
+        existing.total += latency.elapsedMs;
+        existing.count += 1;
+        latencyByRoleEngine.set(key, existing);
+      }
+    }
+
+    return {
+      modelTierCounts: Array.from(modelTierCounts.entries())
+        .map(([modelTier, count]) => ({ modelTier, count }))
+        .sort((left, right) => right.count - left.count),
+      averageQueueDepth: queueDepthCount > 0 ? Number((queueDepthTotal / queueDepthCount).toFixed(2)) : 0,
+      averageFallbackCount: fallbackTotalCount > 0 ? Number((fallbackTotal / fallbackTotalCount).toFixed(2)) : 0,
+      cloudEscalationCount,
+      escalationReasons: Array.from(escalationReasons.entries())
+        .map(([reason, count]) => ({ reason, count }))
+        .sort((left, right) => right.count - left.count),
+      averageLatencyByRoleAndEngine: Array.from(latencyByRoleEngine.values())
+        .map((entry) => ({
+          role: entry.role,
+          engine: entry.engine,
+          averageElapsedMs: Number((entry.total / entry.count).toFixed(0)),
+        }))
+        .sort((left, right) => right.averageElapsedMs - left.averageElapsedMs),
+    };
+  } catch {
+    return undefined;
+  }
+};
+
+export const getRunAllocatorPolicy = (runId?: string): RunAllocatorPolicySummary | undefined => {
+  if (!runId) {
+    return undefined;
+  }
+
+  try {
+    const database = getDatabase();
+    const row = database
+      .prepare('SELECT metadata_json FROM runs WHERE run_id = ?')
+      .get(runId) as { metadata_json?: string | null } | undefined;
+    const metadata = parseMetadata(row?.metadata_json);
+    const policy = typeof metadata?.allocator_policy === 'object' && metadata.allocator_policy !== null
+      ? metadata.allocator_policy as Record<string, unknown>
+      : undefined;
+    if (!policy) {
+      return undefined;
+    }
+    return {
+      maxParallelHelpers: typeof policy.maxParallelHelpers === 'number' ? policy.maxParallelHelpers : undefined,
+      maxSameRoleHelpers: typeof policy.maxSameRoleHelpers === 'number' ? policy.maxSameRoleHelpers : undefined,
+      localQueueTolerance: typeof policy.localQueueTolerance === 'number' ? policy.localQueueTolerance : undefined,
+      cloudEscalationAllowed: typeof policy.cloudEscalationAllowed === 'boolean' ? policy.cloudEscalationAllowed : undefined,
+      priorityBias: typeof policy.priorityBias === 'string' ? policy.priorityBias as RunAllocatorPolicySummary['priorityBias'] : undefined,
+    };
+  } catch {
+    return undefined;
+  }
+};
+
+export const getRunTopology = (runId?: string): SwarmTopologySummary | undefined => {
+  if (!runId) {
+    return undefined;
+  }
+
+  try {
+    const database = getDatabase();
+    const runRow = database
+      .prepare('SELECT metadata_json FROM runs WHERE run_id = ?')
+      .get(runId) as { metadata_json?: string | null } | undefined;
+    const runMetadata = parseMetadata(runRow?.metadata_json);
+    const persistedSnapshot = typeof runMetadata?.topology_snapshot === 'object' && runMetadata.topology_snapshot !== null
+      ? runMetadata.topology_snapshot as Record<string, unknown>
+      : undefined;
+    const taskNameMap = buildTaskNameMap(database, runId);
+    const taskRows = fetchRawTaskRows(database, runId);
+    const taskById = new Map(taskRows.map((task) => [task.task_id, task] as const));
+    const attemptRows = database.prepare(`
+      SELECT attempt_id, task_id, agent_name, status, metadata_json
+      FROM task_attempts
+      WHERE run_id = ?
+      ORDER BY created_at ASC
+    `).all(runId) as Array<{
+      attempt_id: string;
+      task_id: string;
+      agent_name: string;
+      status: string;
+      metadata_json?: string | null;
+    }>;
+    const activeRoleCounts = new Map<string, number>();
+    const helpers = attemptRows.map((row) => {
+      const metadata = parseMetadata(row.metadata_json);
+      const routingDecision = typeof metadata?.routing_decision === 'object' && metadata.routing_decision !== null
+        ? metadata.routing_decision as Record<string, unknown>
+        : undefined;
+      const role = typeof metadata?.role === 'string' ? metadata.role : 'unknown';
+      if (row.status === 'running') {
+        activeRoleCounts.set(role, (activeRoleCounts.get(role) ?? 0) + 1);
+      }
+      const task = taskById.get(row.task_id);
+      return {
+        attemptId: row.attempt_id,
+        taskId: row.task_id,
+        taskName: taskNameMap.get(row.task_id) ?? row.task_id,
+        parentTaskId: task?.parent_task_id ?? undefined,
+        role,
+        agentName: row.agent_name,
+        status: row.status,
+        taskStatus: task?.status ?? 'queued',
+        modelTier: typeof metadata?.model_tier === 'string' ? metadata.model_tier : undefined,
+        routeKind: typeof routingDecision?.routeKind === 'string' ? routingDecision.routeKind : undefined,
+        queueDepth: typeof metadata?.queue_depth === 'number' ? metadata.queue_depth : undefined,
+        fallbackCount: typeof metadata?.fallback_count === 'number' ? metadata.fallback_count : undefined,
+      };
+    });
+
+    return {
+      capturedAt: typeof persistedSnapshot?.capturedAt === 'string' ? persistedSnapshot.capturedAt : undefined,
+      activeRoles: [...activeRoleCounts.entries()]
+        .map(([role, count]) => ({ role, count }))
+        .sort((left, right) => right.count - left.count || left.role.localeCompare(right.role)),
+      helpers,
+    };
+  } catch {
+    return undefined;
+  }
+};
+
+export const getRunServiceUsage = (runId?: string): RunServiceUsageSummary | undefined => {
+  if (!runId) {
+    return undefined;
+  }
+
+  try {
+    const database = getDatabase();
+
+    const blinkRows = database.prepare(`
+      SELECT m.metadata_json
+      FROM task_chat_messages m
+      JOIN tasks t ON t.task_id = m.task_id
+      WHERE t.run_id = ?
+    `).all(runId) as Array<{ metadata_json?: string | null }>;
+    const bindingsRow = database.prepare(`
+      SELECT COUNT(*) AS binding_count
+      FROM project_chat_bindings pcb
+      JOIN tasks t ON t.task_id = pcb.task_id
+      WHERE t.run_id = ?
+    `).get(runId) as { binding_count?: number } | undefined;
+
+    let mirroredMessages = 0;
+    let pendingMessages = 0;
+    let failureCount = 0;
+    let retryCount = 0;
+    const providerBreakdown = new Map<string, number>();
+
+    for (const row of blinkRows) {
+      const metadata = parseMetadata(row.metadata_json);
+      const provider = typeof metadata?.provider === 'string' ? metadata.provider : 'unknown';
+      if (typeof metadata?.provider === 'string') {
+        providerBreakdown.set(provider, (providerBreakdown.get(provider) ?? 0) + 1);
+      }
+      if (metadata?.mirrored === true) {
+        mirroredMessages += 1;
+      } else if (bindingsRow?.binding_count && bindingsRow.binding_count > 0) {
+        pendingMessages += 1;
+      }
+      if (typeof metadata?.mirror_last_error === 'string' && metadata.mirror_last_error.length > 0) {
+        failureCount += 1;
+      }
+      if (typeof metadata?.mirror_attempts === 'number' && metadata.mirror_attempts > 1) {
+        retryCount += metadata.mirror_attempts - 1;
+      }
+    }
+
+    const attemptRows = database.prepare(`
+      SELECT attempt_id, metadata_json
+      FROM task_attempts
+      WHERE run_id = ?
+    `).all(runId) as Array<{ attempt_id: string; metadata_json?: string | null }>;
+    const resultRows = database.prepare(`
+      SELECT attempt_id, engine, success, payload_json
+      FROM worker_results
+      WHERE run_id = ?
+      ORDER BY created_at DESC
+    `).all(runId) as Array<{
+      attempt_id: string;
+      engine?: string | null;
+      success: number;
+      payload_json?: string | null;
+    }>;
+    const heartbeatRows = database.prepare(`
+      SELECT attempt_id, engine, elapsed_ms
+      FROM worker_heartbeats
+      WHERE run_id = ?
+      ORDER BY created_at DESC
+    `).all(runId) as Array<{
+      attempt_id: string;
+      engine?: string | null;
+      elapsed_ms: number;
+    }>;
+
+    const attemptMetadata = new Map<string, Record<string, unknown>>();
+    for (const row of attemptRows) {
+      attemptMetadata.set(row.attempt_id, parseMetadata(row.metadata_json) ?? {});
+    }
+
+    const latestResultByAttempt = new Map<string, {
+      engine?: string;
+      success: boolean;
+      payload?: Record<string, unknown>;
+    }>();
+    for (const row of resultRows) {
+      if (latestResultByAttempt.has(row.attempt_id)) {
+        continue;
+      }
+      latestResultByAttempt.set(row.attempt_id, {
+        engine: typeof row.engine === 'string' ? row.engine : undefined,
+        success: row.success === 1,
+        payload: parsePayload(row.payload_json),
+      });
+    }
+
+    const maxHeartbeatElapsed = new Map<string, number>();
+    for (const row of heartbeatRows) {
+      if (typeof row.elapsed_ms !== 'number' || Number.isNaN(row.elapsed_ms)) {
+        continue;
+      }
+      const current = maxHeartbeatElapsed.get(row.attempt_id) ?? 0;
+      if (row.elapsed_ms > current) {
+        maxHeartbeatElapsed.set(row.attempt_id, row.elapsed_ms);
+      }
+    }
+
+    const llamaRoleCounts = new Map<string, number>();
+    const bypassReasons = new Map<string, number>();
+    const muxRoleCounts = new Map<string, number>();
+    let llamaRequestCount = 0;
+    let llamaFailureCount = 0;
+    let totalLlamaLatency = 0;
+    let totalLlamaLatencyCount = 0;
+    let localCapableAttempts = 0;
+    let localCapableLocalAttempts = 0;
+    let localCapableCloudAttempts = 0;
+    let workspaceLeaseCount = 0;
+    let brokeredExecutionCount = 0;
+
+    for (const [attemptId, metadata] of attemptMetadata.entries()) {
+      const role = typeof metadata.role === 'string' ? metadata.role : 'worker';
+      const routingDecision = typeof metadata.routing_decision === 'object' && metadata.routing_decision !== null
+        ? metadata.routing_decision as Record<string, unknown>
+        : undefined;
+      const engine = typeof routingDecision?.engine === 'string'
+        ? routingDecision.engine
+        : latestResultByAttempt.get(attemptId)?.engine;
+
+      if (typeof metadata.mux_session_id === 'string' && metadata.mux_session_id.length > 0) {
+        workspaceLeaseCount += 1;
+      }
+      if (engine === 'mux-local') {
+        brokeredExecutionCount += 1;
+        muxRoleCounts.set(role, (muxRoleCounts.get(role) ?? 0) + 1);
+      }
+
+      const isLocalCapableRole = ['planner', 'researcher', 'reviewer', 'verifier', 'checkpoint-compressor', 'arbiter', 'summarizer'].includes(role);
+      if (isLocalCapableRole) {
+        localCapableAttempts += 1;
+        if (engine === 'local-llama') {
+          localCapableLocalAttempts += 1;
+        }
+        if (typeof engine === 'string' && engine !== 'local-llama') {
+          localCapableCloudAttempts += 1;
+        }
+      }
+
+      if (engine === 'local-llama') {
+        llamaRequestCount += 1;
+        llamaRoleCounts.set(role, (llamaRoleCounts.get(role) ?? 0) + 1);
+        const result = latestResultByAttempt.get(attemptId);
+        if (result && !result.success) {
+          llamaFailureCount += 1;
+        }
+        const payload = result?.payload;
+        const payloadDuration = typeof payload?.durationMs === 'number' ? payload.durationMs : undefined;
+        const heartbeatDuration = maxHeartbeatElapsed.get(attemptId);
+        const durationMs = payloadDuration ?? heartbeatDuration;
+        if (typeof durationMs === 'number' && durationMs >= 0) {
+          totalLlamaLatency += durationMs;
+          totalLlamaLatencyCount += 1;
+        }
+      }
+
+      const escalationReason = typeof routingDecision?.escalationReason === 'string'
+        ? routingDecision.escalationReason
+        : undefined;
+      if (isLocalCapableRole && escalationReason) {
+        bypassReasons.set(escalationReason, (bypassReasons.get(escalationReason) ?? 0) + 1);
+      }
+    }
+
+    const localCoveragePercent = localCapableAttempts > 0
+      ? Number(((localCapableLocalAttempts / localCapableAttempts) * 100).toFixed(1))
+      : 0;
+    const cloudBypassRatePercent = localCapableAttempts > 0
+      ? Number(((localCapableCloudAttempts / localCapableAttempts) * 100).toFixed(1))
+      : 0;
+    const muxAssessment: RunServiceUsageSummary['mux']['assessment'] = brokeredExecutionCount > 0
+      ? 'active-broker'
+      : workspaceLeaseCount > 0
+        ? 'workspace-only'
+        : 'idle';
+
+    const health = getRunServiceHealth();
+    const policyActions: string[] = [];
+    if (health && !health.allReady) {
+      if (!health.blink.reachable) {
+        policyActions.push('Blink is not reachable from the swarm runtime.');
+      }
+      if (!health.mux.reachable) {
+        policyActions.push('Mux is not reachable from the swarm runtime.');
+      }
+      if (!health.llama.reachable) {
+        policyActions.push('llama.cpp is not reachable from the swarm runtime.');
+      }
+      if (!health.llama.inventoryHasSelected) {
+        policyActions.push('The selected llama model is missing from the exported inventory.');
+      }
+      if (!health.exportsReady) {
+        policyActions.push('One or more local service URLs were not exported to the runtime.');
+      }
+    }
+    if (localCapableAttempts > 0 && localCoveragePercent < 80) {
+      policyActions.push('Local-capable roles are missing the 80% local coverage target.');
+    }
+    if (localCapableAttempts > 0 && cloudBypassRatePercent >= 10) {
+      policyActions.push('Cloud bypass rate is above the 10% target for standard local-first runs.');
+    }
+    if (muxAssessment !== 'active-broker') {
+      policyActions.push(
+        muxAssessment === 'workspace-only'
+          ? 'Mux is only providing workspace/session leases; reduce its operator prominence unless brokered execution increases.'
+          : 'Mux is idle in persisted run data; de-emphasize or remove it from the operator surface until it carries brokered work.',
+      );
+    }
+    const policyStatus: RunServiceUsageSummary['policy']['status'] = policyActions.length === 0
+      ? 'healthy'
+      : (
+        health && (!health.allReady || !health.llama.reachable || !health.exportsReady)
+          ? 'action-needed'
+          : 'warning'
+      );
+
+    return {
+      health,
+      blink: {
+        mirroredMessages,
+        pendingMessages,
+        failureCount,
+        retryCount,
+        providerBreakdown: Array.from(providerBreakdown.entries())
+          .map(([provider, count]) => ({ provider, count }))
+          .sort((left, right) => right.count - left.count || left.provider.localeCompare(right.provider)),
+      },
+      llama: {
+        requestCount: llamaRequestCount,
+        failureCount: llamaFailureCount,
+        averageLatencyMs: totalLlamaLatencyCount > 0
+          ? Number((totalLlamaLatency / totalLlamaLatencyCount).toFixed(0))
+          : 0,
+        localRoleCoverage: Array.from(llamaRoleCounts.entries())
+          .map(([role, count]) => ({ role, count }))
+          .sort((left, right) => right.count - left.count || left.role.localeCompare(right.role)),
+        localCoveragePercent,
+        cloudBypassRatePercent,
+        bypassReasons: Array.from(bypassReasons.entries())
+          .map(([reason, count]) => ({ reason, count }))
+          .sort((left, right) => right.count - left.count || left.reason.localeCompare(right.reason)),
+        meetsLocalCoverageTarget: localCoveragePercent >= 80,
+        meetsCloudEscalationTarget: cloudBypassRatePercent < 10,
+      },
+      mux: {
+        workspaceLeaseCount,
+        brokeredExecutionCount,
+        activeRoleCoverage: Array.from(muxRoleCounts.entries())
+          .map(([role, count]) => ({ role, count }))
+          .sort((left, right) => right.count - left.count || left.role.localeCompare(right.role)),
+        assessment: muxAssessment,
+        recommendation: muxAssessment === 'active-broker'
+          ? 'Mux is carrying live brokered execution and remains a first-class service.'
+          : muxAssessment === 'workspace-only'
+            ? 'Mux is currently acting as a workspace/session helper; simplify its operator surface unless brokered execution grows.'
+            : 'Mux is provisioned but idle in persisted run data; reduce its prominence unless future brokered execution justifies it.',
+      },
+      policy: {
+        status: policyStatus,
+        summary: policyStatus === 'healthy'
+          ? 'Service availability, local coverage, and brokered execution signals are all within target.'
+          : policyStatus === 'action-needed'
+            ? 'Runtime health or local-first coverage is below the expected operating target.'
+            : 'Service usage is visible, but at least one target or service-value signal needs operator attention.',
+        actions: policyActions,
+      },
+    };
+  } catch {
+    return undefined;
+  }
+};
+
 const getLatestTaskDigest = (database: Database.Database, taskId: string): TaskDetails['latestDigest'] => {
   const row = database.prepare(`
     SELECT payload_json
@@ -558,11 +1147,31 @@ const getLatestTaskDigest = (database: Database.Database, taskId: string): TaskD
     decisions: Array.isArray(payload.decisions) ? payload.decisions.filter((entry): entry is string => typeof entry === 'string') : [],
     openQuestions: Array.isArray(payload.openQuestions) ? payload.openQuestions.filter((entry): entry is string => typeof entry === 'string') : [],
     activeRisks: Array.isArray(payload.activeRisks) ? payload.activeRisks.filter((entry): entry is string => typeof entry === 'string') : [],
+    artifactIndex: Array.isArray(payload.artifactIndex)
+      ? payload.artifactIndex.flatMap((entry): NonNullable<TaskDetails['latestDigest']>['artifactIndex'] => {
+        if (typeof entry !== 'object' || entry === null) {
+          return [];
+        }
+        const record = entry as Record<string, unknown>;
+        if (typeof record.artifactId !== 'string' || typeof record.kind !== 'string' || typeof record.summary !== 'string') {
+          return [];
+        }
+        return [{
+          artifactId: record.artifactId,
+          kind: record.kind,
+          summary: record.summary,
+          reasonRelevant: typeof record.reasonRelevant === 'string' ? record.reasonRelevant : undefined,
+          trustConfidence: typeof record.trustConfidence === 'number' ? record.trustConfidence : undefined,
+          sourceTaskId: typeof record.sourceTaskId === 'string' ? record.sourceTaskId : undefined,
+          supersededBy: typeof record.supersededBy === 'string' ? record.supersededBy : undefined,
+        }];
+      })
+      : [],
     verificationState: typeof payload.verificationState === 'string' ? payload.verificationState : 'unknown',
     lastUpdatedBy: typeof payload.lastUpdatedBy === 'string' ? payload.lastUpdatedBy : 'unknown',
     updatedAt: typeof payload.ts === 'string' ? payload.ts : new Date(0).toISOString(),
     droidspeak: typeof payload.droidspeak === 'object' && payload.droidspeak !== null
-      ? payload.droidspeak as { compact: string; expanded: string; kind: string }
+      ? payload.droidspeak as DroidspeakV2State
       : undefined,
   };
 };
@@ -589,7 +1198,7 @@ const getLatestHandoffPacket = (database: Database.Database, taskId: string, run
     digestId: typeof payload.digestId === 'string' ? payload.digestId : 'unknown',
     createdAt: typeof payload.ts === 'string' ? payload.ts : new Date(0).toISOString(),
     droidspeak: typeof payload.droidspeak === 'object' && payload.droidspeak !== null
-      ? payload.droidspeak as { compact: string; expanded: string; kind: string }
+      ? payload.droidspeak as DroidspeakV2State
       : undefined,
   };
 };
@@ -1097,6 +1706,26 @@ export const getTaskDetails = (taskId: string): TaskDetails | null => {
     const handoffs = canonicalHandoffs.length > 0
       ? canonicalHandoffs
       : (inferredHandoffs.length > 0 ? inferredHandoffs : ['No handoffs recorded for this task yet.']);
+    const bestCurrentUnderstanding = latestDigest
+      ? {
+        objective: latestDigest.objective,
+        plan: latestDigest.currentPlan,
+        blockers: latestDigest.activeRisks,
+        keyFindings: latestDigest.decisions.length > 0
+          ? latestDigest.decisions
+          : latestDigest.artifactIndex
+            .map((artifact) => artifact.reasonRelevant ?? artifact.summary)
+            .filter((entry, index, items) => items.indexOf(entry) === index)
+            .slice(0, 5),
+        artifacts: latestDigest.artifactIndex.map((artifact) => ({
+          artifactId: artifact.artifactId,
+          summary: artifact.summary,
+          reasonRelevant: artifact.reasonRelevant,
+        })),
+        verificationStatus: latestDigest.verificationState,
+        latestHandoffSummary: latestHandoff?.summary,
+      }
+      : undefined;
 
     return {
       task,
@@ -1107,6 +1736,7 @@ export const getTaskDetails = (taskId: string): TaskDetails | null => {
       latestDigest,
       latestHandoff,
       latestRoutingTelemetry: routingTelemetry,
+      bestCurrentUnderstanding,
       guardrails: buildTaskGuardrails(
         task.needsClarification,
         budgetEvents,

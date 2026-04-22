@@ -73,6 +73,18 @@ export class DroidSwarmOrchestratorClient {
     }
     this.runLifecycle.startRun(this.currentRun);
     this.persistenceService = new OrchestratorPersistenceService(this.persistence, this.currentRun);
+    this.persistenceService.updateRunMetadata({
+      ...(this.currentRun.metadata ?? {}),
+      project_id: this.config.projectId,
+      repo_id: this.config.repoId,
+      allocator_policy: {
+        maxParallelHelpers: this.config.policyDefaults?.maxParallelHelpers,
+        maxSameRoleHelpers: this.config.policyDefaults?.maxSameRoleHelpers,
+        localQueueTolerance: this.config.policyDefaults?.localQueueTolerance,
+        cloudEscalationAllowed: this.config.policyDefaults?.cloudEscalationAllowed,
+        priorityBias: this.config.policyDefaults?.priorityBias,
+      },
+    });
     new ProjectRegistryService(this.persistenceService).registerProject({
       projectId: this.config.projectId,
       name: this.config.projectName,
@@ -118,6 +130,7 @@ export class DroidSwarmOrchestratorClient {
     this.gateway.start();
 
     this.hydrateExistingTasks();
+    this.persistenceService.recordSwarmTopologySnapshot();
 
     const recoveredSummaries = this.runLifecycle.getRecoverySummaries();
     for (const summary of recoveredSummaries) {

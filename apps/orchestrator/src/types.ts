@@ -11,8 +11,10 @@ export type {
   ToolResponsePayload,
 } from '@protocol';
 export type {
+  ArtifactMemoryIndexEntry,
   CheckpointDelta,
   CompactVerb,
+  DroidspeakV2State,
   EnvelopeV2,
   HandoffPacket,
   GitPolicy,
@@ -140,6 +142,34 @@ export interface TaskPolicy {
   timeoutMs?: number;
   allowedTools?: string[];
   approvalPolicy?: 'auto' | 'manual';
+  maxParallelHelpers?: number;
+  maxSameRoleHelpers?: number;
+  localQueueTolerance?: number;
+  cloudEscalationAllowed?: boolean;
+  priorityBias?: 'time' | 'cost' | 'balanced';
+}
+
+export interface SwarmTopologySnapshot {
+  runId: string;
+  capturedAt: string;
+  activeRoles: Array<{
+    role: string;
+    count: number;
+  }>;
+  helpers: Array<{
+    attemptId: string;
+    taskId: string;
+    taskName: string;
+    parentTaskId?: string;
+    role: string;
+    agentName: string;
+    status: TaskAttemptRecord['status'];
+    taskStatus: PersistedTask['status'];
+    modelTier?: string;
+    routeKind?: string;
+    queueDepth?: number;
+    fallbackCount?: number;
+  }>;
 }
 
 export interface WorkerState {

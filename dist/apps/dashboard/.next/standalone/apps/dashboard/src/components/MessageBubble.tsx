@@ -28,13 +28,21 @@ export function MessageBubble({ message, username }: { message: MessageRecord; u
       <p className={message.mentionTarget === username ? 'mention-highlight' : undefined}>{message.content}</p>
       {translation && translation.translation ? (
         <div className="translation-box">
+          {translation.badgeLabel ? (
+            <div className="droidspeak-chip-row">
+              <span className="droidspeak-chip">{translation.badgeLabel}</span>
+              <code className="droidspeak-compact">{translation.compact ?? structuredState?.compact ?? compression?.compressed_content}</code>
+            </div>
+          ) : null}
           <p className="translation-copy">{translation.translation}</p>
           {translation.unknownTokens.length > 0 ? (
             <p className="translation-warning">
               Untranslated: {translation.unknownTokens.join(', ')}
             </p>
           ) : null}
-          <pre>{structuredState?.compact ?? compression?.compressed_content}</pre>
+          {!translation.badgeLabel ? (
+            <pre>{structuredState?.compact ?? compression?.compressed_content}</pre>
+          ) : null}
         </div>
       ) : null}
     </article>

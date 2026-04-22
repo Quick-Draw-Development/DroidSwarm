@@ -120,3 +120,27 @@ var import_validate = require("./validate");
   import_strict.default.equal(parsed.message.type, "spawn_approved");
   import_strict.default.equal(parsed.message.verb, "spawn.approved");
 });
+(0, import_node_test.default)("parseIncomingEnvelope rejects malformed droidspeak v2 payloads", () => {
+  import_strict.default.throws(() => (0, import_validate.parseIncomingEnvelope)(JSON.stringify({
+    message_id: "msg-4",
+    project_id: "droidswarm",
+    room_id: "task-1",
+    type: "status_update",
+    from: {
+      actor_type: "agent",
+      actor_id: "planner-1",
+      actor_name: "planner"
+    },
+    timestamp: "2026-03-12T12:00:00.000Z",
+    payload: {
+      task_id: "task-1",
+      status_code: "agent_blocked",
+      content: "waiting on review",
+      droidspeak: {
+        compact: "state:blocked",
+        expanded: "Waiting on review.",
+        kind: "out_of_bounds_kind"
+      }
+    }
+  })));
+});

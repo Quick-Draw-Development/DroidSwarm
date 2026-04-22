@@ -497,4 +497,33 @@ export const migrations: SchemaMigration[] = [
       `);
     },
   },
+  {
+    version: 7,
+    description: 'Artifact memory indexing for digest-first context reuse',
+    apply: (database) => {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS task_artifact_memory (
+          artifact_memory_id TEXT PRIMARY KEY,
+          task_id TEXT NOT NULL,
+          run_id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          artifact_id TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          short_summary TEXT NOT NULL,
+          reason_relevant TEXT NOT NULL,
+          trust_confidence REAL NOT NULL,
+          source_task_id TEXT NOT NULL,
+          superseded_by TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY(task_id) REFERENCES tasks(task_id),
+          FOREIGN KEY(run_id) REFERENCES runs(run_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_task_artifact_memory_task ON task_artifact_memory(task_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_task_artifact_memory_artifact ON task_artifact_memory(artifact_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_task_artifact_memory_source ON task_artifact_memory(source_task_id, updated_at DESC);
+      `);
+    },
+  },
 ];

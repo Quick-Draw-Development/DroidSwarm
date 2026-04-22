@@ -32,6 +32,7 @@ export const buildAgentPrompt = (input: {
   };
 }): string => {
   const { task, role, agentName, projectName, projectId, parentSummary } = input;
+  const normalizedRole = role.toLowerCase();
   const specSection = input.specRules
     ? ['Operating instructions from the spec card:', input.specRules, '']
     : [];
@@ -67,6 +68,15 @@ export const buildAgentPrompt = (input: {
       '',
     ].filter(Boolean)
     : [];
+  const roleSpecificSection = normalizedRole.includes('arbiter')
+    ? [
+      'Arbiter contract:',
+      '- Compare the sibling specialist outputs before proposing new work.',
+      '- Return an agreement summary, a disagreement summary, a winner or merge recommendation, a confidence statement, and a follow-up action.',
+      '- If the disagreement cannot be resolved from the available evidence, request human review instead of guessing.',
+      '',
+    ]
+    : [];
 
   return [
     `You are ${agentName}, a DroidSwarm Codex worker for project ${projectName} (${projectId}).`,
@@ -74,6 +84,7 @@ export const buildAgentPrompt = (input: {
     ...droidspeakSection,
     `Role: ${role}.`,
     '',
+    ...roleSpecificSection,
     'Follow these operating rules:',
     '- Respect the task scope and the assigned role only.',
     '- Use the project codebase and existing documentation as primary context.',

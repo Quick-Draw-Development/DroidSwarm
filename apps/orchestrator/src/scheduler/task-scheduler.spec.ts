@@ -384,6 +384,11 @@ describe('TaskScheduler', () => {
       policyDefaults: {
         maxTokens: 50,
         approvalPolicy: 'auto',
+        maxParallelHelpers: 3,
+        maxSameRoleHelpers: 2,
+        localQueueTolerance: 5,
+        cloudEscalationAllowed: true,
+        priorityBias: 'time',
       },
     });
     const scheduler = new TaskScheduler(service, supervisorStub, config);
@@ -403,6 +408,90 @@ describe('TaskScheduler', () => {
     const recordedPolicy = recordedAttempt?.metadata?.effective_policy as TaskPolicy | undefined;
     assert.equal(recordedPolicy?.maxTokens, 50);
     assert.equal(recordedPolicy?.approvalPolicy, 'auto');
+    assert.equal(recordedPolicy?.maxParallelHelpers, 3);
+    assert.equal(recordedPolicy?.maxSameRoleHelpers, 2);
+    assert.equal(recordedPolicy?.localQueueTolerance, 5);
+    assert.equal(recordedPolicy?.cloudEscalationAllowed, true);
+    assert.equal(recordedPolicy?.priorityBias, 'time');
+
+    database.close();
+    rmSync(workspace, { recursive: true, force: true });
+  });
+
+  it('fans out bottleneck helpers before direct execution and records topology snapshots', () => {
+    const workspace = mkdtempSync(path.join(tmpdir(), 'droidswarm-scheduler-bottleneck-'));
+    const dbPath = path.join(workspace, 'state.db');
+    const database = openPersistenceDatabase(dbPath);
+    const persistence = PersistenceClient.fromDatabase(database);
+    const run = persistence.createRun('droidswarm');
+    const service = new OrchestratorPersistenceService(persistence, run);
+
+    const spawnLog: Array<{ taskId: string; role: string; attemptId: string; agentName: string }> = [];
+    const supervisorStub = {
+      startAgentForTask(task, role, attemptId) {
+        spawnLog.push({ taskId: task.taskId, role, attemptId, agentName: `test-${attemptId}` });
+        return {
+          agentName: `test-${attemptId}`,
+          taskId: task.taskId,
+          role,
+          attemptId,
+        };
+      },
+      setCallbacks() {
+        return;
+      },
+      getActiveAgentCount() {
+        return 0;
+      },
+      countActiveAgents(_predicate?: (agent: unknown) => boolean) {
+        return 0;
+      },
+    } as unknown as AgentSupervisor;
+
+    const scheduler = new TaskScheduler(service, supervisorStub, createTestConfig({
+      policyDefaults: {
+        maxParallelHelpers: 3,
+        maxSameRoleHelpers: 2,
+      },
+    }));
+
+    const rootTask = service.createTask({
+      taskId: 'allocator-root',
+      name: 'Allocator root',
+      priority: 'high',
+      metadata: {
+        description: 'Scan the repo and resolve open architectural questions across the codebase.',
+        task_type: 'plan',
+      },
+    });
+    service.recordTaskStateDigest({
+      id: 'digest-allocator-root',
+      taskId: rootTask.taskId,
+      runId: run.runId,
+      projectId: 'droidswarm',
+      objective: 'Resolve bottlenecks before direct implementation.',
+      currentPlan: ['Understand repo', 'Resolve questions'],
+      decisions: [],
+      openQuestions: ['Q1', 'Q2', 'Q3'],
+      activeRisks: ['R1', 'R2'],
+      artifactIndex: [],
+      verificationState: 'planning',
+      lastUpdatedBy: 'planner',
+      ts: nowIso(),
+    });
+
+    scheduler.handleNewTask(rootTask.taskId);
+
+    const tasks = service.getTasks().filter((task) => task.parentTaskId === rootTask.taskId);
+    assert.ok(tasks.length >= 2);
+    assert.ok(tasks.some((task) => task.metadata?.canonical_role === 'researcher'));
+    assert.ok(tasks.some((task) => task.metadata?.canonical_role === 'repo-scanner'));
+    assert.equal(service.getTask(rootTask.taskId)?.status, 'waiting_on_dependency');
+    assert.equal(spawnLog.length, tasks.length);
+
+    const topology = service.getRunRecord().metadata?.topology_snapshot as { helpers?: Array<{ role?: string }> } | undefined;
+    assert.ok(topology);
+    assert.ok((topology?.helpers?.length ?? 0) >= tasks.length);
 
     database.close();
     rmSync(workspace, { recursive: true, force: true });
@@ -488,6 +577,437 @@ describe('TaskScheduler', () => {
       .get(task.taskId) as { detail: string } | undefined;
     assert.ok(budgetEvent);
     assert.ok(budgetEvent.detail.includes('Side-effect limit'));
+
+    database.close();
+    rmSync(workspace, { recursive: true, force: true });
+  });
+
+  it('expands repo-scanner fanout in parallel for large repository tasks', () => {
+    const workspace = mkdtempSync(path.join(tmpdir(), 'droidswarm-scheduler-parallel-scan-'));
+    const dbPath = path.join(workspace, 'state.db');
+    const database = openPersistenceDatabase(dbPath);
+    const persistence = PersistenceClient.fromDatabase(database);
+    const service = new OrchestratorPersistenceService(persistence, persistence.createRun('droidswarm'));
+
+    const spawnLog: Array<{
+      taskId: string;
+      role: string;
+      attemptId: string;
+      agentName: string;
+      options?: Record<string, unknown>;
+    }> = [];
+    const supervisorStub = {
+      startAgentForTask(task, role, attemptId, _parentSummary?: string, _parentDroidspeak?: string, model?: string, options?: Record<string, unknown>) {
+        spawnLog.push({ taskId: task.taskId, role, attemptId, agentName: `test-${attemptId}`, options });
+        return {
+          agentName: `test-${attemptId}`,
+          taskId: task.taskId,
+          role,
+          attemptId,
+        };
+      },
+      setCallbacks() {
+        return;
+      },
+      getActiveAgentCount() {
+        return 0;
+      },
+      countActiveAgents(_predicate?: (agent: unknown) => boolean) {
+        return 0;
+      },
+      cancelTask() {
+        return [];
+      },
+    } as unknown as AgentSupervisor;
+
+    const scheduler = new TaskScheduler(service, supervisorStub, createTestConfig({
+      schedulerMaxFanOut: 5,
+      maxAgentsPerTask: 5,
+    }));
+    const rootTask = service.createTask({
+      taskId: 'parallel-root',
+      name: 'Scan the monorepo',
+      priority: 'high',
+      metadata: {
+        description: 'Large monorepo workspace with many packages to scan before planning.',
+        task_type: 'plan',
+      },
+    });
+    scheduler.handleNewTask(rootTask.taskId);
+
+    const planResult: CodexAgentResult = {
+      status: 'completed',
+      summary: 'Need repo scanners',
+      requested_agents: [{
+        role: 'repo-scanner',
+        reason: 'map the relevant packages',
+        instructions: 'Scan the repository and map relevant code paths.',
+      }],
+      artifacts: [],
+      doc_updates: [],
+      branch_actions: [],
+    };
+    scheduler.handleAgentResult(rootTask.taskId, spawnLog[0].attemptId, spawnLog[0].agentName, spawnLog[0].role, planResult);
+
+    const childTasks = service.getTasks().filter((task) => task.parentTaskId === rootTask.taskId);
+    assert.equal(childTasks.length, 3);
+    const parallelGroups = new Set(childTasks.map((task) => task.metadata?.parallel_group));
+    assert.equal(parallelGroups.size, 1);
+    assert.ok(childTasks.every((task) => task.metadata?.canonical_role === 'repo-scanner'));
+    assert.ok(childTasks.every((task) => task.metadata?.parallel_total === 3));
+
+    database.close();
+    rmSync(workspace, { recursive: true, force: true });
+  });
+
+  it('creates an arbiter task when parallel reviewer outputs conflict', () => {
+    const workspace = mkdtempSync(path.join(tmpdir(), 'droidswarm-scheduler-arbiter-'));
+    const dbPath = path.join(workspace, 'state.db');
+    const database = openPersistenceDatabase(dbPath);
+    const persistence = PersistenceClient.fromDatabase(database);
+    const service = new OrchestratorPersistenceService(persistence, persistence.createRun('droidswarm'));
+
+    const spawnLog: Array<{ taskId: string; role: string; attemptId: string; agentName: string }> = [];
+    const supervisorStub = {
+      startAgentForTask(task, role, attemptId) {
+        spawnLog.push({ taskId: task.taskId, role, attemptId, agentName: `test-${attemptId}` });
+        return {
+          agentName: `test-${attemptId}`,
+          taskId: task.taskId,
+          role,
+          attemptId,
+        };
+      },
+      setCallbacks() {
+        return;
+      },
+      getActiveAgentCount() {
+        return 0;
+      },
+      countActiveAgents(_predicate?: (agent: unknown) => boolean) {
+        return 0;
+      },
+      cancelTask() {
+        return [];
+      },
+    } as unknown as AgentSupervisor;
+
+    const scheduler = new TaskScheduler(service, supervisorStub, createTestConfig({
+      schedulerMaxFanOut: 5,
+      maxAgentsPerTask: 5,
+    }));
+    const rootTask = service.createTask({
+      taskId: 'arbiter-root',
+      name: 'Review risky change',
+      priority: 'urgent',
+      metadata: {
+        description: 'High risk change that needs parallel review.',
+        task_type: 'plan',
+        blocked_reason: 'high risk',
+      },
+    });
+    scheduler.handleNewTask(rootTask.taskId);
+
+    const planResult: CodexAgentResult = {
+      status: 'completed',
+      summary: 'Need multiple reviewers',
+      requested_agents: [{
+        role: 'reviewer',
+        reason: 'review the risky diff',
+        instructions: 'Review the proposed change and flag risks.',
+      }],
+      artifacts: [],
+      doc_updates: [],
+      branch_actions: [],
+    };
+    scheduler.handleAgentResult(rootTask.taskId, spawnLog[0].attemptId, spawnLog[0].agentName, spawnLog[0].role, planResult);
+
+    const reviewerChildren = service.getTasks().filter((task) => task.parentTaskId === rootTask.taskId);
+    assert.equal(reviewerChildren.length, 2);
+
+    scheduler.handleAgentResult(
+      reviewerChildren[0].taskId,
+      spawnLog[1].attemptId,
+      spawnLog[1].agentName,
+      spawnLog[1].role,
+      {
+        success: true,
+        engine: 'local-llama',
+        model: 'llama',
+        summary: 'Approve the change',
+        timedOut: false,
+        durationMs: 1000,
+        activity: {
+          filesRead: [],
+          filesChanged: [],
+          commandsRun: [],
+          toolCalls: [],
+        },
+        checkpointDelta: {
+          factsAdded: [],
+          decisionsAdded: [],
+          openQuestions: [],
+          risksFound: [],
+          nextBestActions: [],
+          evidenceRefs: [],
+        },
+        artifacts: [],
+        spawnRequests: [],
+        budget: {},
+        metadata: {
+          reasonCode: 'approved',
+        },
+      },
+    );
+    scheduler.handleAgentResult(
+      reviewerChildren[1].taskId,
+      spawnLog[2].attemptId,
+      spawnLog[2].agentName,
+      spawnLog[2].role,
+      {
+        success: true,
+        engine: 'local-llama',
+        model: 'llama',
+        summary: 'Reject the change because the migration is unsafe',
+        timedOut: false,
+        durationMs: 1000,
+        activity: {
+          filesRead: [],
+          filesChanged: [],
+          commandsRun: [],
+          toolCalls: [],
+        },
+        checkpointDelta: {
+          factsAdded: [],
+          decisionsAdded: [],
+          openQuestions: [],
+          risksFound: ['unsafe_migration'],
+          nextBestActions: [],
+          evidenceRefs: [],
+        },
+        artifacts: [],
+        spawnRequests: [],
+        budget: {},
+        metadata: {
+          reasonCode: 'unsafe_migration',
+        },
+      },
+    );
+
+    const arbitrationTask = service
+      .getTasks()
+      .find((task) => task.parentTaskId === rootTask.taskId && task.metadata?.stage === 'arbitration');
+    assert.ok(arbitrationTask);
+    assert.equal(arbitrationTask?.metadata?.agent_role, 'arbiter');
+
+    database.close();
+    rmSync(workspace, { recursive: true, force: true });
+  });
+
+  it('queues checkpoint compression for digest-heavy tasks and resumes parent work after compression', () => {
+    const workspace = mkdtempSync(path.join(tmpdir(), 'droidswarm-scheduler-compression-'));
+    const dbPath = path.join(workspace, 'state.db');
+    const database = openPersistenceDatabase(dbPath);
+    const persistence = PersistenceClient.fromDatabase(database);
+    const service = new OrchestratorPersistenceService(persistence, persistence.createRun('droidswarm'));
+
+    const spawnLog: Array<{ taskId: string; role: string; attemptId: string; agentName: string; options?: Record<string, unknown> }> = [];
+    const supervisorStub = {
+      startAgentForTask(task, role, attemptId, _parentSummary?: string, _parentDroidspeak?: string, _model?: string, options?: Record<string, unknown>) {
+        spawnLog.push({ taskId: task.taskId, role, attemptId, agentName: `test-${attemptId}`, options });
+        return {
+          agentName: `test-${attemptId}`,
+          taskId: task.taskId,
+          role,
+          attemptId,
+        };
+      },
+      setCallbacks() {
+        return;
+      },
+      getActiveAgentCount() {
+        return 0;
+      },
+      countActiveAgents(_predicate?: (agent: unknown) => boolean) {
+        return 0;
+      },
+      cancelTask() {
+        return [];
+      },
+    } as unknown as AgentSupervisor;
+
+    const scheduler = new TaskScheduler(service, supervisorStub, createTestConfig({
+      schedulerMaxFanOut: 5,
+      maxAgentsPerTask: 5,
+    }));
+    const rootTask = service.createTask({
+      taskId: 'compression-root',
+      name: 'Long-running root task',
+      priority: 'medium',
+      metadata: {
+        description: 'Large task with growing context.',
+        task_type: 'plan',
+      },
+    });
+    service.recordTaskStateDigest({
+      id: 'digest-heavy',
+      taskId: rootTask.taskId,
+      runId: service.getRunRecord().runId,
+      projectId: 'droidswarm',
+      objective: 'Keep the task moving with compressed state.',
+      currentPlan: ['step 1', 'step 2', 'step 3', 'step 4', 'step 5'],
+      decisions: [],
+      openQuestions: ['q1', 'q2', 'q3', 'q4'],
+      activeRisks: ['risk-1'],
+      artifactIndex: [
+        { artifactId: 'a1', kind: 'summary', summary: 'artifact 1' },
+        { artifactId: 'a2', kind: 'summary', summary: 'artifact 2' },
+        { artifactId: 'a3', kind: 'summary', summary: 'artifact 3' },
+        { artifactId: 'a4', kind: 'summary', summary: 'artifact 4' },
+        { artifactId: 'a5', kind: 'summary', summary: 'artifact 5' },
+        { artifactId: 'a6', kind: 'summary', summary: 'artifact 6' },
+      ],
+      verificationState: 'queued',
+      lastUpdatedBy: 'planner-1',
+      ts: nowIso(),
+    });
+
+    scheduler.handleNewTask(rootTask.taskId);
+
+    assert.equal(spawnLog.length, 1);
+    assert.equal(spawnLog[0].role, 'checkpoint-compressor');
+    assert.equal(service.getTask(rootTask.taskId)?.status, 'waiting_on_dependency');
+
+    const compressionTask = service.getTasks().find((task) => task.parentTaskId === rootTask.taskId && task.metadata?.stage === 'checkpoint_compression');
+    assert.ok(compressionTask);
+    scheduler.handleAgentResult(
+      compressionTask!.taskId,
+      spawnLog[0].attemptId,
+      spawnLog[0].agentName,
+      spawnLog[0].role,
+      {
+        success: true,
+        engine: 'local-llama',
+        model: 'llama',
+        summary: 'Compressed the checkpoint state for resumed work',
+        timedOut: false,
+        durationMs: 1000,
+        activity: {
+          filesRead: [],
+          filesChanged: [],
+          commandsRun: [],
+          toolCalls: [],
+        },
+        checkpointDelta: {
+          factsAdded: ['fact-1'],
+          decisionsAdded: ['decision-1'],
+          openQuestions: [],
+          risksFound: [],
+          nextBestActions: ['continue'],
+          evidenceRefs: ['a1'],
+        },
+        artifacts: [],
+        spawnRequests: [],
+        budget: {},
+        metadata: {
+          compression: {
+            scheme: 'droidspeak-v2',
+            compressed_content: 'summary:emitted',
+          },
+        },
+      },
+    );
+
+    assert.equal(service.getTask(compressionTask!.taskId)?.status, 'completed');
+    assert.equal(service.getTask(rootTask.taskId)?.status, 'running');
+    assert.equal(spawnLog[1]?.taskId, rootTask.taskId);
+    assert.equal(spawnLog[1]?.role, 'planner');
+    assert.deepEqual(service.getTask(rootTask.taskId)?.metadata?.last_compression_metrics, {
+      artifactCount: 6,
+      planSize: 5,
+      openQuestions: 4,
+      activeRisks: 1,
+    });
+    assert.equal(service.getLatestCheckpoint(rootTask.taskId)?.attemptId, spawnLog[0].attemptId);
+    assert.equal(service.getLatestTaskStateDigest(rootTask.taskId)?.droidspeak?.kind, 'summary_emitted');
+
+    database.close();
+    rmSync(workspace, { recursive: true, force: true });
+  });
+
+  it('forces a local checkpoint-compression pass before large cloud escalations', () => {
+    const workspace = mkdtempSync(path.join(tmpdir(), 'droidswarm-scheduler-pre-cloud-'));
+    const dbPath = path.join(workspace, 'state.db');
+    const database = openPersistenceDatabase(dbPath);
+    const persistence = PersistenceClient.fromDatabase(database);
+    const service = new OrchestratorPersistenceService(persistence, persistence.createRun('droidswarm'));
+
+    const spawnLog: Array<{ taskId: string; role: string; attemptId: string; agentName: string }> = [];
+    const supervisorStub = {
+      startAgentForTask(task, role, attemptId) {
+        spawnLog.push({ taskId: task.taskId, role, attemptId, agentName: `test-${attemptId}` });
+        return {
+          agentName: `test-${attemptId}`,
+          taskId: task.taskId,
+          role,
+          attemptId,
+        };
+      },
+      setCallbacks() {
+        return;
+      },
+      getActiveAgentCount() {
+        return 0;
+      },
+      countActiveAgents(_predicate?: (agent: unknown) => boolean) {
+        return 0;
+      },
+      cancelTask() {
+        return [];
+      },
+    } as unknown as AgentSupervisor;
+
+    const scheduler = new TaskScheduler(service, supervisorStub, createTestConfig());
+    const rootTask = service.createTask({
+      taskId: 'cloud-root',
+      name: 'Large refactor task',
+      priority: 'high',
+      metadata: {
+        description: 'Large-scale multi-file refactor across the codebase.',
+        task_type: 'implementation',
+        agent_role: 'coder-backend',
+        allow_cloud: true,
+        queue_depth: 6,
+        fallback_count: 2,
+      },
+    });
+    service.recordTaskStateDigest({
+      id: 'digest-cloud',
+      taskId: rootTask.taskId,
+      runId: service.getRunRecord().runId,
+      projectId: 'droidswarm',
+      objective: 'Prepare the large task for cloud execution.',
+      currentPlan: ['scan files', 'compress context', 'apply refactor'],
+      decisions: [],
+      openQuestions: ['which packages are coupled?', 'what can be isolated?', 'which migrations are needed?'],
+      activeRisks: [],
+      artifactIndex: [
+        { artifactId: 'ra1', kind: 'summary', summary: 'repo slice 1' },
+        { artifactId: 'ra2', kind: 'summary', summary: 'repo slice 2' },
+        { artifactId: 'ra3', kind: 'summary', summary: 'repo slice 3' },
+      ],
+      verificationState: 'queued',
+      lastUpdatedBy: 'planner-1',
+      ts: nowIso(),
+    });
+
+    scheduler.handleNewTask(rootTask.taskId);
+
+    const compressionTask = service.getTasks().find((task) => task.parentTaskId === rootTask.taskId && task.metadata?.stage === 'checkpoint_compression');
+    assert.ok(compressionTask);
+    assert.equal(spawnLog[0]?.role, 'checkpoint-compressor');
+    assert.equal(compressionTask?.metadata?.pre_cloud_compression, true);
+    assert.equal(service.getTask(rootTask.taskId)?.status, 'waiting_on_dependency');
 
     database.close();
     rmSync(workspace, { recursive: true, force: true });

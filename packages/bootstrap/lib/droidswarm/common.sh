@@ -171,6 +171,14 @@ swarm_status_file() {
   printf '%s/status\n' "$(swarm_dir "$1")"
 }
 
+swarm_service_health_file() {
+  printf '%s/service-health.env\n' "$(swarm_dir "$1")"
+}
+
+swarm_service_health_json_file() {
+  printf '%s/service-health.json\n' "$(swarm_dir "$1")"
+}
+
 swarm_log_file() {
   printf '%s/%s.log\n' "$DROIDSWARM_LOG_DIR" "$1"
 }

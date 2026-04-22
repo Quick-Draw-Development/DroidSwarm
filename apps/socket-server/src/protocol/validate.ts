@@ -1,15 +1,20 @@
 import { authMessageSchema, normalizeEnvelopeV2, type AuthMessage, type MessageEnvelope, type MessageType } from '@protocol';
-import { isEnvelopeV2, normalizeToEnvelopeV2, type EnvelopeV2 } from '@shared-types';
+import { isEnvelopeV2, normalizeDroidspeakV2State, normalizeToEnvelopeV2, type EnvelopeV2 } from '@shared-types';
 
 export const parseAuthMessage = (input: string): AuthMessage => authMessageSchema.parse(JSON.parse(input));
 
-export const parseCanonicalEnvelope = (input: string): EnvelopeV2 => normalizeToEnvelopeV2(JSON.parse(input));
+export const parseCanonicalEnvelope = (input: string): EnvelopeV2 => {
+  const canonical = normalizeToEnvelopeV2(JSON.parse(input));
+  validateDroidspeakState(canonical.body);
+  return canonical;
+};
 
 export const parseMessageEnvelope = (input: string): MessageEnvelope => normalizeEnvelopeV2(JSON.parse(input));
 
 export const parseIncomingEnvelope = (input: string): { canonical: EnvelopeV2; message: MessageEnvelope } => {
   const parsed = JSON.parse(input);
   const canonical = normalizeToEnvelopeV2(parsed);
+  validateDroidspeakState(canonical.body);
   return {
     canonical,
     message: isEnvelopeV2(parsed) ? canonicalEnvelopeToMessage(parsed, canonical) : normalizeEnvelopeV2(parsed),
@@ -75,4 +80,28 @@ const canonicalEnvelopeToMessage = (raw: unknown, canonical: EnvelopeV2): Messag
     span_id: typeof record.span_id === 'string' ? record.span_id : undefined,
     session_id: typeof record.session_id === 'string' ? record.session_id : undefined,
   } as MessageEnvelope;
+};
+
+const validateDroidspeakState = (body: Record<string, unknown>): void => {
+  if (typeof body.droidspeak === 'object' && body.droidspeak !== null) {
+    body.droidspeak = normalizeDroidspeakV2State(body.droidspeak);
+    return;
+  }
+
+  const payload = typeof body.payload === 'object' && body.payload !== null
+    ? body.payload as Record<string, unknown>
+    : undefined;
+  if (payload && typeof payload.droidspeak === 'object' && payload.droidspeak !== null) {
+    payload.droidspeak = normalizeDroidspeakV2State(payload.droidspeak);
+  }
+
+  const envelope = typeof body.envelope_v2 === 'object' && body.envelope_v2 !== null
+    ? body.envelope_v2 as Record<string, unknown>
+    : undefined;
+  const envelopeBody = envelope && typeof envelope.body === 'object' && envelope.body !== null
+    ? envelope.body as Record<string, unknown>
+    : undefined;
+  if (envelopeBody && typeof envelopeBody.droidspeak === 'object' && envelopeBody.droidspeak !== null) {
+    envelopeBody.droidspeak = normalizeDroidspeakV2State(envelopeBody.droidspeak);
+  }
 };

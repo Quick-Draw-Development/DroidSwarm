@@ -30,4 +30,28 @@ describe('buildAgentPrompt', () => {
     assert.match(prompt, /blk api-spec/);
     assert.match(prompt, /droidspeak-v2/);
   });
+
+  it('includes the dedicated arbiter output contract', () => {
+    const prompt = buildAgentPrompt({
+      agentName: 'Arbiter-01',
+      role: 'arbiter',
+      projectId: 'proj-1',
+      projectName: 'Project 1',
+      task: {
+        taskId: 'task-compare',
+        title: 'Resolve reviewer disagreement',
+        description: 'Two reviewers disagree on the migration safety.',
+        taskType: 'review',
+        priority: 'high',
+        createdAt: '2026-03-12T12:00:00.000Z',
+      },
+    });
+
+    assert.match(prompt, /Arbiter contract:/);
+    assert.match(prompt, /agreement summary/i);
+    assert.match(prompt, /disagreement summary/i);
+    assert.match(prompt, /winner or merge recommendation/i);
+    assert.match(prompt, /confidence statement/i);
+    assert.match(prompt, /follow-up action/i);
+  });
 });

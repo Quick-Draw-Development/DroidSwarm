@@ -48,6 +48,16 @@ export interface DroidspeakV2Renderable {
   kind: 'plan_status' | 'blocked' | 'unblocked' | 'handoff_ready' | 'verification_needed' | 'summary_emitted' | 'memory_pinned';
 }
 
+const droidspeakKindLabels: Record<DroidspeakV2Renderable['kind'], string> = {
+  plan_status: 'Plan',
+  blocked: 'Blocked',
+  unblocked: 'Unblocked',
+  handoff_ready: 'Handoff',
+  verification_needed: 'Verification',
+  summary_emitted: 'Summary',
+  memory_pinned: 'Memory',
+};
+
 const capitalize = (value: string): string => (value ? `${value.charAt(0).toUpperCase()}${value.slice(1)}` : '');
 
 const translateSegment = (segment: string): { text: string; unknownTokens: string[] } => {
@@ -133,12 +143,16 @@ export interface DroidspeakTranslation {
   translation: string;
   clauseCount: number;
   unknownTokens: string[];
+  badgeLabel?: string;
+  compact?: string;
 }
 
 export const translateDroidspeakV2 = (state: DroidspeakV2Renderable): DroidspeakTranslation => ({
   translation: state.expanded,
   clauseCount: 1,
   unknownTokens: [],
+  badgeLabel: droidspeakKindLabels[state.kind],
+  compact: state.compact,
 });
 
 export const translateDroidspeak = (input: string): DroidspeakTranslation => {

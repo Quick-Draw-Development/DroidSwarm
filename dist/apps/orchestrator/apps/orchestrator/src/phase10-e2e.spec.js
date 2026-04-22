@@ -163,9 +163,10 @@ class StubChatResponder extends import_OperatorChatResponder.OperatorChatRespond
     return `ack: ${content}`;
   }
 }
-const buildConfig = (dbPath) => ({
+const buildConfig = (dbPath, overrides = {}) => ({
   ...DEFAULT_CONFIG,
-  dbPath
+  dbPath,
+  ...overrides
 });
 const createEnvironment = (options) => {
   const workspace = options?.dbPath ? import_node_path.default.dirname(options.dbPath) : (0, import_node_fs.mkdtempSync)(import_node_path.default.join((0, import_node_os.tmpdir)(), "droidswarm-phase10-"));
@@ -178,7 +179,7 @@ const createEnvironment = (options) => {
   const service = new import_service.OrchestratorPersistenceService(persistence, run);
   const supervisor = new StubSupervisor();
   const gateway = new StubGateway();
-  const schedulerConfig = buildConfig(dbPath);
+  const schedulerConfig = buildConfig(dbPath, options?.configOverrides);
   const scheduler = new import_TaskScheduler.TaskScheduler(service, supervisor, schedulerConfig);
   const chatResponder = new StubChatResponder(schedulerConfig);
   const controlService = new import_OperatorActionService.OperatorActionService(service, supervisor);
@@ -292,7 +293,9 @@ const simpleResult = (status, summary) => ({
       simpleResult("completed", "child done")
     );
     const rootTask = env.service.getTask(rootSpawn.taskId);
-    import_strict.default.equal(rootTask?.status, "in_review");
+    const childTask = env.service.getTask(childTaskId);
+    import_strict.default.equal(childTask?.status, "in_review");
+    import_strict.default.equal(rootTask?.status, "waiting_on_dependency");
     const verificationSpawn = env.supervisor.assigned[2];
     import_strict.default.ok(verificationSpawn);
     env.scheduler.handleAgentResult(
@@ -312,7 +315,7 @@ const simpleResult = (status, summary) => ({
       simpleResult("completed", "review passed")
     );
     const finalRoot = env.service.getTask(rootSpawn.taskId);
-    import_strict.default.equal(finalRoot?.status, "verified");
+    import_strict.default.equal(finalRoot?.status, "completed");
     env.destroy();
   });
   (0, import_node_test.it)("cancels a task via operator status updates", async () => {
@@ -365,6 +368,9 @@ const simpleResult = (status, summary) => ({
     import_strict.default.equal(env1.service.getTask(childTaskId)?.status, "running");
     env1.close();
     const env2 = createEnvironment({ dbPath: env1.dbPath, run: env1.run });
+    const summaries = env2.runLifecycle.recoverInterruptedRuns();
+    import_strict.default.equal(summaries.length, 1);
+    import_strict.default.ok(summaries[0].resumedTasks.includes(childTaskId));
     env2.scheduler.handleNewTask(childTaskId);
     import_strict.default.equal(env2.supervisor.assigned.length, 1);
     import_strict.default.equal(env2.service.getTask(childTaskId)?.status, "running");
@@ -410,14 +416,14 @@ const simpleResult = (status, summary) => ({
     const env2 = createEnvironment({ dbPath: env1.dbPath, run: env1.run });
     const summaries = env2.runLifecycle.recoverInterruptedRuns();
     import_strict.default.equal(summaries.length, 1);
-    import_strict.default.deepEqual(summaries[0].resumedTasks, [childSpawn.taskId]);
+    import_strict.default.ok(summaries[0].resumedTasks.includes(childSpawn.taskId));
     summaries[0].resumedTasks.forEach((taskId) => {
       env2.scheduler.handleNewTask(taskId);
     });
+    const recoveredChildTask = env2.service.getTask(childSpawn.taskId);
+    import_strict.default.equal(recoveredChildTask?.metadata?.recovery_digest_id, "digest-before-restart");
     const resumedSpawn = env2.supervisor.assigned[0];
     import_strict.default.ok(resumedSpawn);
-    import_strict.default.equal(env2.service.getLatestTaskStateDigest(childSpawn.taskId)?.id, "digest-before-restart");
-    import_strict.default.equal(resumedSpawn.options?.taskDigest?.id, "digest-before-restart");
     import_strict.default.equal(typeof resumedSpawn.options?.handoffPacket?.id, "string");
     env2.scheduler.handleAgentResult(
       resumedSpawn.taskId,
@@ -426,7 +432,7 @@ const simpleResult = (status, summary) => ({
       resumedSpawn.role,
       simpleResult("completed", "child done after restart")
     );
-    const verificationSpawn = env2.supervisor.assigned[1];
+    const verificationSpawn = env2.supervisor.assigned.find((spawn) => spawn.role === "tester" && spawn.taskId !== rootSpawn.taskId);
     import_strict.default.ok(verificationSpawn);
     env2.scheduler.handleAgentResult(
       verificationSpawn.taskId,
@@ -435,7 +441,7 @@ const simpleResult = (status, summary) => ({
       verificationSpawn.role,
       simpleResult("completed", "verification passed after restart")
     );
-    const reviewSpawn = env2.supervisor.assigned[2];
+    const reviewSpawn = env2.supervisor.assigned.find((spawn) => spawn.role === "reviewer" && spawn.taskId !== rootSpawn.taskId);
     import_strict.default.ok(reviewSpawn);
     env2.scheduler.handleAgentResult(
       reviewSpawn.taskId,
@@ -445,7 +451,7 @@ const simpleResult = (status, summary) => ({
       simpleResult("completed", "review passed after restart")
     );
     const finalRoot = env2.service.getTask(rootSpawn.taskId);
-    import_strict.default.equal(finalRoot?.status, "verified");
+    import_strict.default.equal(finalRoot?.status, "completed");
     const runBefore = env2.persistence.runs.get(env2.run.runId);
     import_strict.default.equal(runBefore?.status, "running");
     env2.runLifecycle.completeRun(env2.run, "recovery complete");

@@ -7,10 +7,14 @@ import { getAppVersion } from '../../lib/version';
 import {
   getProjectIdentity,
   getPreferredBoardRunId,
+  getRunAllocatorPolicy,
+  getRunServiceUsage,
   listAgentAssignmentsForRun,
   listArtifactsForRun,
   listBudgetEventsForRun,
   listCheckpointsForRun,
+  getRunTopology,
+  getRunRoutingTelemetry,
   listOperatorMessages,
   listRuns,
   listTaskDependenciesForRun,
@@ -44,6 +48,10 @@ export default async function BoardPage() {
     dependencies: listTaskDependenciesForRun(latestRunId),
     verifications: listVerificationOutcomesForRun(latestRunId),
     timeline: listRunTimelineEvents(latestRunId),
+    routingTelemetry: getRunRoutingTelemetry(latestRunId),
+    allocatorPolicy: getRunAllocatorPolicy(latestRunId),
+    topology: getRunTopology(latestRunId),
+    serviceUsage: getRunServiceUsage(latestRunId),
   };
   const operatorMessages = listOperatorMessages();
   const appVersion = getAppVersion();

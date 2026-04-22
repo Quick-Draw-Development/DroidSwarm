@@ -65,6 +65,12 @@ const shorthandSchema = z.object({
   expanded: z.string().min(1).optional(),
 }).optional();
 
+const droidspeakV2StateSchema = z.object({
+  kind: z.enum(['plan_status', 'blocked', 'unblocked', 'handoff_ready', 'verification_needed', 'summary_emitted', 'memory_pinned'] as const),
+  compact: z.string().min(1),
+  expanded: z.string().min(1),
+});
+
 const baseEnvelopeSchema = z.object({
   id: z.string().min(1).optional(),
   message_id: z.string().min(1),
@@ -91,6 +97,7 @@ const baseEnvelopeSchema = z.object({
   usage: usageSchema.optional(),
   compression: compressionSchema.optional(),
   shorthand: shorthandSchema,
+  droidspeak: droidspeakV2StateSchema.optional(),
 }).passthrough();
 
 const statusUpdatePayloadSchema = z.object({
@@ -98,6 +105,7 @@ const statusUpdatePayloadSchema = z.object({
   status_code: z.string().min(1),
   content: z.string().min(1),
   metadata: z.record(z.string(), z.unknown()).optional(),
+  droidspeak: droidspeakV2StateSchema.optional(),
 }).passthrough();
 
 const taskCreatedPayloadSchema = z.object({
@@ -153,6 +161,7 @@ const clarificationRequestPayloadSchema = z.object({
   content: z.string().min(1),
   question_id: z.string().min(1).optional(),
   reason_code: z.string().min(1).optional(),
+  droidspeak: droidspeakV2StateSchema.optional(),
 });
 
 const planProposedPayloadSchema = z.object({
@@ -162,6 +171,7 @@ const planProposedPayloadSchema = z.object({
   plan: z.string().optional(),
   confidence: z.number().min(0).max(1).optional(),
   dependencies: z.array(z.string().min(1)).optional(),
+  droidspeak: droidspeakV2StateSchema.optional(),
 });
 
 const taskDecomposedPayloadSchema = z.object({
@@ -181,6 +191,7 @@ const taskAssignedPayloadSchema = z.object({
   task_id: z.string().min(1),
   assignment_id: z.string().min(1),
   assigned_agents: z.array(assignedAgentSchema),
+  droidspeak: droidspeakV2StateSchema.optional(),
 });
 
 const spawnRequestedPayloadSchema = z.object({
@@ -208,6 +219,7 @@ const verificationRequestedPayloadSchema = z.object({
   verification_type: z.string().min(1),
   requested_by: z.string().min(1),
   detail: z.string().optional(),
+  droidspeak: droidspeakV2StateSchema.optional(),
 });
 
 const verificationCompletedPayloadSchema = z.object({
@@ -215,6 +227,7 @@ const verificationCompletedPayloadSchema = z.object({
   status: z.enum(['passed', 'failed', 'blocked']),
   reviewer: z.string().min(1),
   details: z.string().optional(),
+  droidspeak: droidspeakV2StateSchema.optional(),
 });
 
 const checkpointCreatedPayloadSchema = z.object({
@@ -222,6 +235,7 @@ const checkpointCreatedPayloadSchema = z.object({
   task_id: z.string().min(1),
   summary: z.string().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
+  droidspeak: droidspeakV2StateSchema.optional(),
 });
 
 const handoffEventPayloadSchema = z.object({

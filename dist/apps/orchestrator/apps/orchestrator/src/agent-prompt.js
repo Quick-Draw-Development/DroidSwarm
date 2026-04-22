@@ -23,6 +23,7 @@ module.exports = __toCommonJS(agent_prompt_exports);
 const formatRequestedAgents = (requestedAgents) => requestedAgents.length > 0 ? requestedAgents.map((agent, index) => `${index + 1}. ${agent.role}: ${agent.reason}`).join("\n") : "None yet.";
 const buildAgentPrompt = (input) => {
   const { task, role, agentName, projectName, projectId, parentSummary } = input;
+  const normalizedRole = role.toLowerCase();
   const specSection = input.specRules ? ["Operating instructions from the spec card:", input.specRules, ""] : [];
   const droidspeakSection = input.specDroidspeak ? ["Droidspeak reference (droidspeak-v1):", input.specDroidspeak, ""] : [];
   const parentDroidspeakSection = input.parentDroidspeak ? ["Parent Droidspeak summary (droidspeak-v1):", input.parentDroidspeak, ""] : [];
@@ -44,12 +45,20 @@ const buildAgentPrompt = (input) => {
     input.handoffPacket.droidspeak ? `- handoff_droidspeak_v2: ${input.handoffPacket.droidspeak.compact} (${input.handoffPacket.droidspeak.expanded})` : "",
     ""
   ].filter(Boolean) : [];
+  const roleSpecificSection = normalizedRole.includes("arbiter") ? [
+    "Arbiter contract:",
+    "- Compare the sibling specialist outputs before proposing new work.",
+    "- Return an agreement summary, a disagreement summary, a winner or merge recommendation, a confidence statement, and a follow-up action.",
+    "- If the disagreement cannot be resolved from the available evidence, request human review instead of guessing.",
+    ""
+  ] : [];
   return [
     `You are ${agentName}, a DroidSwarm Codex worker for project ${projectName} (${projectId}).`,
     ...specSection,
     ...droidspeakSection,
     `Role: ${role}.`,
     "",
+    ...roleSpecificSection,
     "Follow these operating rules:",
     "- Respect the task scope and the assigned role only.",
     "- Use the project codebase and existing documentation as primary context.",

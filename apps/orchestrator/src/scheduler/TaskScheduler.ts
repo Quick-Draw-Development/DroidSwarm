@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { COMPACT_VERB_DICTIONARY } from '@shared-types';
+import { getSwarmRoleDefinition, normalizeSwarmRole } from '@shared-routing';
 
 import { AgentSupervisor, defaultRoleInstructions } from '../AgentSupervisor';
 import type { OrchestratorPersistenceService } from '../persistence/service';
@@ -41,6 +42,7 @@ const buildTaskRecord = (task: PersistedTask): TaskRecord => ({
 
 const dependencySuccessStatuses: PersistedTask['status'][] = ['completed', 'verified'];
 const dependencyFailureStatuses: PersistedTask['status'][] = ['failed', 'cancelled'];
+const terminalTaskStatuses: PersistedTask['status'][] = [...dependencySuccessStatuses, ...dependencyFailureStatuses];
 
 type CheckpointPayload = {
   summary?: string;
@@ -53,6 +55,13 @@ type PendingCheckpoint = {
   attemptId: string;
   summary?: string;
   payload: Record<string, unknown>;
+};
+
+type ScheduledSpawnRequest = SpawnRequest & {
+  canonicalRole: string;
+  parallelGroupId?: string;
+  parallelIndex?: number;
+  parallelTotal?: number;
 };
 
 export interface TaskSchedulerEvents {
@@ -146,6 +155,12 @@ export class TaskScheduler {
       summary: result.summary,
     });
     this.persistenceService.recordWorkerResult(taskId, attemptId, result);
+    this.persistenceService.updateTaskMetadata(task.taskId, {
+      ...(task.metadata ?? {}),
+      last_outcome_success: result.success,
+      last_outcome_summary: result.summary,
+      last_outcome_reason: this.getReasonCode(result),
+    });
     this.buildAndPersistDigest(
       task,
       result.summary,
@@ -167,6 +182,16 @@ export class TaskScheduler {
 
     if (stage === 'review') {
       this.handleReviewResult(task, attemptId, agentName, result);
+      return;
+    }
+
+    if (stage === 'arbitration') {
+      this.handleArbitrationResult(task, attemptId, agentName, result);
+      return;
+    }
+
+    if (stage === 'checkpoint_compression') {
+      this.handleCheckpointCompressionResult(task, attemptId, agentName, result);
       return;
     }
 
@@ -194,7 +219,20 @@ export class TaskScheduler {
       this.scheduleRetry(task.taskId);
     }
 
+    const refreshedTask = this.persistenceService.getTask(taskId);
+    if (refreshedTask) {
+      this.buildAndPersistDigest(
+        refreshedTask,
+        result.summary,
+        agentName,
+        typeof result.metadata?.compression === 'object' && result.metadata.compression !== null && typeof (result.metadata.compression as { compressed_content?: unknown }).compressed_content === 'string'
+          ? (result.metadata.compression as { compressed_content: string }).compressed_content
+          : undefined,
+      );
+    }
+
     this.enqueueCheckpoint(task, attemptId, result);
+    this.maybeCollapseParallelGroup(task, result);
 
     this.resolveParentIfReady(task);
     this.schedule();
@@ -358,10 +396,19 @@ export class TaskScheduler {
       blocked_reason: reason,
     });
     this.persistenceService.setTaskStatus(task.taskId, 'failed');
+    const refreshedTask = this.persistenceService.getTask(task.taskId);
+    if (refreshedTask) {
+      this.buildAndPersistDigest(refreshedTask, reason, this.config.agentName);
+    }
     this.recordBudgetLimit(task.taskId, reason, 0);
   }
 
   private launch(task: PersistedTask): void {
+    if (this.maybeScheduleCheckpointCompression(task)) {
+      this.schedule();
+      return;
+    }
+
     const record = buildTaskRecord(task);
     const metadata = task.metadata ?? {};
     const checkpoint = this.persistenceService.getLatestCheckpoint(task.taskId);
@@ -387,8 +434,9 @@ export class TaskScheduler {
       return;
     }
 
+    const effectivePolicy = this.resolveTaskPolicy(task);
     const attemptId = randomUUID();
-    const routingDecision = this.routingService.decide(task, role);
+    const routingDecision = this.routingService.decide(task, role, effectivePolicy);
     const routingTelemetry = {
       modelTier: routingDecision.modelTier ?? 'local-cheap',
       routeKind: routingDecision.routeKind ?? 'default-local',
@@ -398,6 +446,15 @@ export class TaskScheduler {
       cloudEscalated: routingDecision.cloudEscalated ?? false,
       escalationReason: routingDecision.escalationReason,
     } as const;
+    if (this.maybeSchedulePreCloudCompression(task, routingDecision)) {
+      this.schedule();
+      return;
+    }
+
+    if (this.maybeScheduleBottleneckFanout(task)) {
+      this.schedule();
+      return;
+    }
     const model = routingDecision.model ?? this.selectModelForTask(task, role);
     const branch = this.resolveBranch(task, routingDecision.readOnly, record.branchName);
     const repoId = task.repoId ?? this.config.repoId;
@@ -456,7 +513,6 @@ export class TaskScheduler {
       return;
     }
 
-    const effectivePolicy = this.resolveTaskPolicy(task);
     this.persistenceService.createAttempt(
       attemptId,
       task,
@@ -499,6 +555,7 @@ export class TaskScheduler {
       fallback_count: routingDecision.fallbackCount ?? 0,
     });
     this.persistenceService.setTaskStatus(task.taskId, 'running');
+    this.recordTopologySnapshot();
   }
 
   private resolveBranch(task: PersistedTask, readOnly: boolean, branchName?: string): string {
@@ -519,6 +576,7 @@ export class TaskScheduler {
     parentSummary: string,
     parentDroidspeak?: string,
   ): boolean {
+    const expandedRequests = this.expandParallelRequests(task, requests);
     const taskDepth = this.getTaskDepth(task.taskId);
     const childIds: string[] = [];
     if (taskDepth + 1 > this.config.schedulerMaxTaskDepth) {
@@ -528,11 +586,11 @@ export class TaskScheduler {
       return false;
     }
 
-    if (!this.enforceTaskPolicy(task, requests)) {
+    if (!this.enforceTaskPolicy(task, expandedRequests)) {
       return false;
     }
 
-    for (const request of requests) {
+    for (const request of expandedRequests) {
       const childId = randomUUID();
       const childRecord = this.persistenceService.createTask({
         taskId: childId,
@@ -546,8 +604,12 @@ export class TaskScheduler {
           agent_role: request.role,
           agent_instructions: request.instructions,
           agent_reason: request.reason,
+          canonical_role: request.canonicalRole,
           parent_summary: parentSummary,
           parent_droidspeak: parentDroidspeak,
+          parallel_group: request.parallelGroupId,
+          parallel_index: request.parallelIndex,
+          parallel_total: request.parallelTotal,
           project_id: task.projectId ?? this.config.projectId,
           repo_id: task.repoId ?? this.config.repoId,
           root_path: task.rootPath ?? this.config.projectRoot,
@@ -584,8 +646,9 @@ export class TaskScheduler {
       this.readyQueue.add(childId);
       childIds.push(childId);
     }
-    const planSummary = requests.map((request) => `${request.role}: ${request.reason}`).join(' | ') || task.name;
+    const planSummary = expandedRequests.map((request) => `${request.role}: ${request.reason}`).join(' | ') || task.name;
     if (childIds.length > 0) {
+      this.recordTopologySnapshot();
       this.events?.onPlanProposed?.(
         task.taskId,
         randomUUID(),
@@ -613,11 +676,22 @@ export class TaskScheduler {
       this.handleDependencyFailure(parent, evaluation.blockingDependency);
       return;
     }
+    const dependencyTasks = dependencies
+      .map((dependency) => this.persistenceService.getTask(dependency.dependsOnTaskId))
+      .filter((child): child is PersistedTask => Boolean(child));
+    if (this.maybeStartArbitration(parent, dependencyTasks)) {
+      return;
+    }
     if (!evaluation.satisfied) {
       return;
     }
 
     this.persistenceService.setTaskStatus(parent.taskId, 'completed');
+    this.recordTopologySnapshot();
+    const refreshedParent = this.persistenceService.getTask(parent.taskId);
+    if (refreshedParent) {
+      this.buildAndPersistDigest(refreshedParent, `${parent.name} completed`, this.config.agentName);
+    }
   }
 
   private queueArtifactVerification(task: PersistedTask, artifactId: string, summary?: string): void {
@@ -638,6 +712,7 @@ export class TaskScheduler {
     );
     this.readyQueue.add(child.taskId);
     this.persistenceService.setTaskStatus(task.taskId, 'waiting_on_dependency');
+    this.recordTopologySnapshot();
   }
 
   private queueVerificationFixTask(
@@ -664,6 +739,7 @@ export class TaskScheduler {
       },
     });
     this.readyQueue.add(fixTask.taskId);
+    this.recordTopologySnapshot();
     this.persistenceService.recordExecutionEvent(
       'verification_fix_task_created',
       `Queued verification fix task ${fixTask.taskId}`,
@@ -756,6 +832,7 @@ export class TaskScheduler {
       this.readyQueue.add(taskId);
       this.schedule();
     }, this.config.schedulerRetryIntervalMs);
+    timer.unref?.();
     this.retryTimers.set(taskId, timer);
   }
 
@@ -819,6 +896,7 @@ export class TaskScheduler {
     }
 
     this.resolveParentIfReady(task);
+    this.recordTopologySnapshot();
     this.schedule();
   }
 
@@ -864,6 +942,7 @@ export class TaskScheduler {
       if (parent.rootPath) {
         this.prAutomationService.finalizeTask(parent, parent.rootPath);
       }
+      this.resolveParentIfReady(parent);
     } else {
       this.persistenceService.setTaskStatus(task.taskId, 'failed');
       this.persistenceService.setTaskStatus(parent.taskId, 'waiting_on_human');
@@ -871,6 +950,7 @@ export class TaskScheduler {
     }
 
     this.resolveParentIfReady(task);
+    this.recordTopologySnapshot();
   }
 
   private handleArtifactVerificationResult(
@@ -928,6 +1008,7 @@ export class TaskScheduler {
 
     this.resolveParentIfReady(task);
     this.readyQueue.add(parent.taskId);
+    this.recordTopologySnapshot();
     this.schedule();
   }
 
@@ -939,6 +1020,11 @@ export class TaskScheduler {
     const child = this.createStageTask(parent, 'verification', 'tester', 'Verification pass for implementation', summary);
     this.readyQueue.add(child.taskId);
     this.persistenceService.setTaskStatus(parent.taskId, 'in_review');
+    this.recordTopologySnapshot();
+    const refreshedParent = this.persistenceService.getTask(parent.taskId);
+    if (refreshedParent) {
+      this.buildAndPersistDigest(refreshedParent, summary ?? 'verification requested', this.config.agentName);
+    }
     this.events?.onVerificationRequested?.(
       parent.taskId,
       'verification',
@@ -955,11 +1041,121 @@ export class TaskScheduler {
     const child = this.createStageTask(parent, 'review', 'reviewer', 'Human review pass', summary);
     this.readyQueue.add(child.taskId);
     this.persistenceService.setTaskStatus(parent.taskId, 'waiting_on_dependency');
+    this.recordTopologySnapshot();
+    const refreshedParent = this.persistenceService.getTask(parent.taskId);
+    if (refreshedParent) {
+      this.buildAndPersistDigest(refreshedParent, summary ?? 'review requested', this.config.agentName);
+    }
+  }
+
+  private handleArbitrationResult(
+    task: PersistedTask,
+    attemptId: string,
+    agentName: string,
+    result: WorkerResult,
+  ): void {
+    const parentId = task.parentTaskId;
+    if (!parentId) {
+      return;
+    }
+
+    const parent = this.persistenceService.getTask(parentId);
+    if (!parent) {
+      return;
+    }
+
+    const normalizedStatus = this.mapResultToOutcomeStatus(result);
+    this.persistenceService.recordVerificationOutcome({
+      taskId: parent.taskId,
+      attemptId,
+      stage: 'review',
+      status: normalizedStatus,
+      summary: result.summary,
+      details: this.buildOutcomeDetails(result),
+      reviewer: agentName,
+    });
+
+    if (result.success) {
+      this.persistenceService.setTaskStatus(task.taskId, 'completed');
+      this.buildAndPersistDigest(parent, result.summary ?? 'arbitration complete', agentName);
+    } else {
+      this.persistenceService.setTaskStatus(task.taskId, 'waiting_on_human');
+      this.persistenceService.setTaskStatus(parent.taskId, 'waiting_on_human');
+    }
+
+    this.resolveParentIfReady(task);
+    this.recordTopologySnapshot();
+    this.schedule();
+  }
+
+  private handleCheckpointCompressionResult(
+    task: PersistedTask,
+    attemptId: string,
+    agentName: string,
+    result: WorkerResult,
+  ): void {
+    const parentId = task.parentTaskId;
+    if (!parentId) {
+      return;
+    }
+
+    const parent = this.persistenceService.getTask(parentId);
+    if (!parent) {
+      return;
+    }
+
+    const latestDigest = this.persistenceService.getLatestTaskStateDigest(parent.taskId);
+    const payload = this.buildCheckpointPayload(result);
+    if (payload) {
+      this.persistCheckpoint(parent.taskId, attemptId, result.summary, payload);
+    }
+
+    const compressionMetrics = {
+      artifactCount: latestDigest?.artifactIndex.length ?? 0,
+      planSize: latestDigest?.currentPlan.length ?? 0,
+      openQuestions: latestDigest?.openQuestions.length ?? 0,
+      activeRisks: latestDigest?.activeRisks.length ?? 0,
+    };
+    const sourceDigestId = typeof task.metadata?.compression_source_digest_id === 'string'
+      ? task.metadata.compression_source_digest_id
+      : latestDigest?.id;
+
+    this.persistenceService.updateTaskMetadata(parent.taskId, {
+      ...(parent.metadata ?? {}),
+      last_compression_digest_id: sourceDigestId,
+      last_compression_completed_at: new Date().toISOString(),
+      last_compression_metrics: compressionMetrics,
+      last_compression_summary: result.summary,
+      last_compression_success: result.success,
+      ...(task.metadata?.pre_cloud_compression === true
+        ? { last_pre_cloud_compression_completed_at: new Date().toISOString() }
+        : {}),
+    });
+
+    if (result.success) {
+      this.persistenceService.setTaskStatus(task.taskId, 'completed');
+      this.persistenceService.setTaskStatus(parent.taskId, 'queued');
+      this.buildAndPersistDigest(
+        parent,
+        result.summary ?? 'checkpoint compression completed',
+        agentName,
+        typeof result.metadata?.compression === 'object' && result.metadata.compression !== null && typeof (result.metadata.compression as { compressed_content?: unknown }).compressed_content === 'string'
+          ? (result.metadata.compression as { compressed_content: string }).compressed_content
+          : undefined,
+      );
+    } else {
+      this.persistenceService.setTaskStatus(task.taskId, 'failed');
+      this.persistenceService.setTaskStatus(parent.taskId, 'queued');
+    }
+
+    this.readyQueue.add(parent.taskId);
+    this.recordTopologySnapshot();
+    this.schedule();
   }
 
   private createStageTask(
     parent: PersistedTask,
-    stage: 'verification' | 'review' | 'artifact_verification',
+    stage: 'verification' | 'review' | 'artifact_verification' | 'arbitration' | 'checkpoint_compression',
     role: string,
     description: string,
     parentSummary?: string,
@@ -1002,6 +1198,399 @@ export class TaskScheduler {
 
   private isSideEffectReviewTriggered(task: PersistedTask): boolean {
     return Boolean(task.metadata?.side_effect_review);
+  }
+
+  private maybeScheduleCheckpointCompression(task: PersistedTask): boolean {
+    if (typeof task.metadata?.stage === 'string' && task.metadata.stage === 'checkpoint_compression') {
+      return false;
+    }
+    if (this.hasStageDependency(task, 'checkpoint_compression')) {
+      return false;
+    }
+
+    const digest = this.persistenceService.getLatestTaskStateDigest(task.taskId);
+    if (!digest || !this.needsCheckpointCompression(task, digest)) {
+      return false;
+    }
+
+    const child = this.createStageTask(
+      task,
+      'checkpoint_compression',
+      'checkpoint-compressor',
+      `Compress checkpoint state for ${task.name}`,
+      digest.objective,
+      {
+        canonical_role: 'checkpoint-compressor',
+        compression_source_digest_id: digest.id,
+      },
+    );
+    this.persistenceService.updateTaskMetadata(task.taskId, {
+      ...(task.metadata ?? {}),
+      last_compression_requested_at: new Date().toISOString(),
+      last_compression_requested_digest_id: digest.id,
+    });
+    this.persistenceService.setTaskStatus(task.taskId, 'waiting_on_dependency');
+    this.readyQueue.add(child.taskId);
+    return true;
+  }
+
+  private maybeSchedulePreCloudCompression(task: PersistedTask, routingDecision: ReturnType<RoutingService['decide']>): boolean {
+    if (!routingDecision.cloudEscalated) {
+      return false;
+    }
+    if (typeof task.metadata?.stage === 'string' && task.metadata.stage === 'checkpoint_compression') {
+      return false;
+    }
+    if (this.hasStageDependency(task, 'checkpoint_compression')) {
+      return false;
+    }
+
+    const digest = this.persistenceService.getLatestTaskStateDigest(task.taskId);
+    const description = typeof task.metadata?.description === 'string' ? task.metadata.description.toLowerCase() : '';
+    const digestSignals = (digest?.artifactIndex.length ?? 0) + (digest?.currentPlan.length ?? 0) + (digest?.openQuestions.length ?? 0);
+    if (digestSignals < 6 && !/(large|multi-file|migration|refactor|codebase)/.test(description)) {
+      return false;
+    }
+
+    const signature = [
+      routingDecision.routeKind ?? 'cloud-escalated',
+      routingDecision.escalationReason ?? 'cloud',
+      digest?.id ?? 'no-digest',
+    ].join(':');
+    if (task.metadata?.last_pre_cloud_compression_signature === signature) {
+      return false;
+    }
+
+    const child = this.createStageTask(
+      task,
+      'checkpoint_compression',
+      'checkpoint-compressor',
+      `Compress local context before cloud escalation for ${task.name}`,
+      digest?.objective,
+      {
+        canonical_role: 'checkpoint-compressor',
+        compression_source_digest_id: digest?.id,
+        pre_cloud_compression: true,
+        pre_cloud_route_kind: routingDecision.routeKind,
+        pre_cloud_escalation_reason: routingDecision.escalationReason,
+      },
+    );
+    this.persistenceService.updateTaskMetadata(task.taskId, {
+      ...(task.metadata ?? {}),
+      last_pre_cloud_compression_signature: signature,
+      last_pre_cloud_compression_requested_at: new Date().toISOString(),
+    });
+    this.persistenceService.setTaskStatus(task.taskId, 'waiting_on_dependency');
+    this.readyQueue.add(child.taskId);
+    return true;
+  }
+
+  private expandParallelRequests(task: PersistedTask, requests: SpawnRequest[]): ScheduledSpawnRequest[] {
+    const digest = this.persistenceService.getLatestTaskStateDigest(task.taskId);
+    const policy = this.resolveTaskPolicy(task);
+    const grouped = new Map<string, SpawnRequest[]>();
+    for (const request of requests) {
+      const canonicalRole = normalizeSwarmRole(request.role);
+      const existing = grouped.get(canonicalRole) ?? [];
+      existing.push(request);
+      grouped.set(canonicalRole, existing);
+    }
+
+    const expanded: ScheduledSpawnRequest[] = [];
+    for (const [canonicalRole, group] of grouped.entries()) {
+      const definition = getSwarmRoleDefinition(canonicalRole);
+      const desiredCount = definition.allowParallelInstances
+        ? this.desiredParallelCount(task, canonicalRole, digest)
+        : 1;
+      const cappedBySameRole = policy.maxSameRoleHelpers != null
+        ? Math.min(desiredCount, policy.maxSameRoleHelpers)
+        : desiredCount;
+      const effectiveCount = Math.max(1, Math.min(group.length > 0 ? group.length : 1, cappedBySameRole));
+      const totalCount = group.length === 1 ? desiredCount : effectiveCount;
+      const cappedTotalCount = policy.maxSameRoleHelpers != null
+        ? Math.min(totalCount, policy.maxSameRoleHelpers)
+        : totalCount;
+      const parallelGroupId = cappedTotalCount > 1 ? randomUUID() : undefined;
+
+      for (let index = 0; index < cappedTotalCount; index += 1) {
+        const template = group[Math.min(index, group.length - 1)];
+        expanded.push({
+          role: template.role,
+          reason: cappedTotalCount > 1 ? `${template.reason} [parallel ${index + 1}/${cappedTotalCount}]` : template.reason,
+          instructions: cappedTotalCount > 1
+            ? `${template.instructions}\n\nParallel focus ${index + 1}/${cappedTotalCount}: produce an independent ${canonicalRole} output and avoid copying sibling reasoning.`
+            : template.instructions,
+          canonicalRole,
+          parallelGroupId,
+          parallelIndex: parallelGroupId ? index + 1 : undefined,
+          parallelTotal: parallelGroupId ? cappedTotalCount : undefined,
+        });
+      }
+    }
+    const maxParallelHelpers = policy.maxParallelHelpers ?? this.config.schedulerMaxFanOut;
+    return expanded.slice(0, Math.max(1, Math.min(this.config.schedulerMaxFanOut, maxParallelHelpers)));
+  }
+
+  private maybeScheduleBottleneckFanout(task: PersistedTask): boolean {
+    const digest = this.persistenceService.getLatestTaskStateDigest(task.taskId);
+    if (!digest) {
+      return false;
+    }
+    if (typeof task.metadata?.stage === 'string') {
+      return false;
+    }
+    const lastCompressionCompletedAt = typeof task.metadata?.last_compression_completed_at === 'string'
+      ? Date.parse(task.metadata.last_compression_completed_at)
+      : Number.NaN;
+    const digestTimestamp = Date.parse(digest.ts);
+    if (Number.isFinite(lastCompressionCompletedAt) && (!Number.isFinite(digestTimestamp) || digestTimestamp <= lastCompressionCompletedAt)) {
+      return false;
+    }
+
+    const requests: SpawnRequest[] = [];
+    const signatures: string[] = [];
+    const policy = this.resolveTaskPolicy(task);
+    const maxParallel = policy.maxParallelHelpers ?? this.config.schedulerMaxFanOut;
+    const activeRisks = digest.activeRisks.length;
+    const openQuestions = digest.openQuestions.length;
+    const artifactCount = digest.artifactIndex.length;
+    const description = typeof task.metadata?.description === 'string' ? task.metadata.description.toLowerCase() : '';
+
+    if (openQuestions >= 3 && !this.hasPendingChildRole(task, 'researcher')) {
+      requests.push({
+        role: 'researcher',
+        reason: 'open questions bottleneck',
+        instructions: `Resolve the highest-value unanswered questions blocking ${task.name}.`,
+      });
+      signatures.push(`researcher:${openQuestions}`);
+    }
+
+    if ((artifactCount <= 1 || /(repo|codebase|workspace|monorepo|scan)/.test(description)) && !this.hasPendingChildRole(task, 'repo-scanner')) {
+      requests.push({
+        role: 'repo-scanner',
+        reason: 'repo uncertainty bottleneck',
+        instructions: `Scan the repository and summarize the most relevant code areas for ${task.name}.`,
+      });
+      signatures.push(`repo-scanner:${artifactCount}`);
+    }
+
+    if (activeRisks >= 2 && !this.hasPendingChildRole(task, 'reviewer')) {
+      requests.push({
+        role: 'reviewer',
+        reason: 'risk bottleneck',
+        instructions: `Review the current plan and identify the highest-risk paths, tradeoffs, and required mitigations for ${task.name}.`,
+      });
+      signatures.push(`reviewer:${activeRisks}`);
+    }
+
+    if (requests.length === 0) {
+      return false;
+    }
+
+    const signature = signatures.sort().join('|');
+    if (task.metadata?.last_allocator_signature === signature) {
+      return false;
+    }
+
+    const created = this.createChildTasks(
+      task,
+      requests.slice(0, maxParallel),
+      digest.objective,
+      digest.droidspeak?.compact,
+    );
+    if (!created) {
+      return false;
+    }
+    this.persistenceService.updateTaskMetadata(task.taskId, {
+      ...(task.metadata ?? {}),
+      last_allocator_signature: signature,
+      last_allocator_triggered_at: new Date().toISOString(),
+    });
+    this.persistenceService.setTaskStatus(task.taskId, 'waiting_on_dependency');
+    this.buildAndPersistDigest(task, `Allocator fanout created for ${requests.map((request) => request.role).join(', ')}`, this.config.agentName);
+    return true;
+  }
+
+  private desiredParallelCount(
+    task: PersistedTask,
+    canonicalRole: string,
+    digest: ReturnType<OrchestratorPersistenceService['getLatestTaskStateDigest']>,
+  ): number {
+    const openQuestions = digest?.openQuestions.length ?? 0;
+    const activeRisks = digest?.activeRisks.length ?? 0;
+    const artifactCount = digest?.artifactIndex.length ?? 0;
+    const planSize = digest?.currentPlan.length ?? 0;
+    const description = typeof task.metadata?.description === 'string' ? task.metadata.description.toLowerCase() : '';
+
+    switch (canonicalRole) {
+      case 'researcher':
+        return openQuestions >= 6 ? 3 : openQuestions >= 3 ? 2 : 1;
+      case 'repo-scanner':
+        if (artifactCount >= 8 || /(monorepo|workspace|packages|large repo)/.test(description)) {
+          return 3;
+        }
+        return artifactCount >= 4 || /(repo|scan|codebase)/.test(description) ? 2 : 1;
+      case 'reviewer':
+        return activeRisks >= 2 || task.priority === 'high' || task.priority === 'urgent' ? 2 : 1;
+      case 'summarizer':
+      case 'checkpoint-compressor':
+        return artifactCount >= 6 || planSize >= 5 || openQuestions >= 4 ? 2 : 1;
+      default:
+        return 1;
+    }
+  }
+
+  private needsCheckpointCompression(
+    task: PersistedTask,
+    digest: NonNullable<ReturnType<OrchestratorPersistenceService['getLatestTaskStateDigest']>>,
+  ): boolean {
+    const artifactCount = digest.artifactIndex.length;
+    const planSize = digest.currentPlan.length;
+    const openQuestions = digest.openQuestions.length;
+    const activeRisks = digest.activeRisks.length;
+    const thresholdReached =
+      artifactCount >= 6
+      || planSize >= 5
+      || openQuestions >= 4
+      || artifactCount + planSize + openQuestions + activeRisks >= 12;
+    if (!thresholdReached) {
+      return false;
+    }
+
+    const lastCompressionMetrics = typeof task.metadata?.last_compression_metrics === 'object' && task.metadata.last_compression_metrics !== null
+      ? task.metadata.last_compression_metrics as Record<string, unknown>
+      : undefined;
+    if (!lastCompressionMetrics) {
+      return true;
+    }
+
+    const lastArtifactCount = typeof lastCompressionMetrics.artifactCount === 'number' ? lastCompressionMetrics.artifactCount : 0;
+    const lastPlanSize = typeof lastCompressionMetrics.planSize === 'number' ? lastCompressionMetrics.planSize : 0;
+    const lastOpenQuestions = typeof lastCompressionMetrics.openQuestions === 'number' ? lastCompressionMetrics.openQuestions : 0;
+    const lastActiveRisks = typeof lastCompressionMetrics.activeRisks === 'number' ? lastCompressionMetrics.activeRisks : 0;
+
+    return artifactCount >= lastArtifactCount + 2
+      || planSize >= lastPlanSize + 2
+      || openQuestions >= lastOpenQuestions + 1
+      || activeRisks >= lastActiveRisks + 1;
+  }
+
+  private maybeCollapseParallelGroup(task: PersistedTask, result: WorkerResult): void {
+    const parallelGroup = typeof task.metadata?.parallel_group === 'string' ? task.metadata.parallel_group : undefined;
+    if (!parallelGroup || !result.success) {
+      return;
+    }
+
+    const canonicalRole = typeof task.metadata?.canonical_role === 'string'
+      ? task.metadata.canonical_role
+      : normalizeSwarmRole(typeof task.metadata?.agent_role === 'string' ? task.metadata.agent_role : 'implementation-helper');
+    if (!getSwarmRoleDefinition(canonicalRole).allowParallelInstances) {
+      return;
+    }
+    if (canonicalRole === 'reviewer' || canonicalRole === 'verifier') {
+      return;
+    }
+
+    const siblings = this.getParallelGroupTasks(task.parentTaskId, parallelGroup)
+      .filter((sibling) => sibling.taskId !== task.taskId);
+    const hasRecordedFailure = siblings.some((sibling) => sibling.metadata?.last_outcome_success === false);
+    if (hasRecordedFailure) {
+      return;
+    }
+
+    for (const sibling of siblings) {
+      if (sibling.status !== 'queued' && sibling.status !== 'planning' && sibling.status !== 'running') {
+        continue;
+      }
+      this.supervisor.cancelTask(sibling.taskId);
+      this.persistenceService.setTaskStatus(sibling.taskId, 'cancelled');
+      this.persistenceService.updateTaskMetadata(sibling.taskId, {
+        ...(sibling.metadata ?? {}),
+        parallel_resolution: 'accepted_fastest_verified_result',
+        resolved_by_task_id: task.taskId,
+      });
+    }
+  }
+
+  private maybeStartArbitration(parent: PersistedTask, dependencies: PersistedTask[]): boolean {
+    const groups = new Map<string, PersistedTask[]>();
+    for (const dependency of dependencies) {
+      const parallelGroup = typeof dependency.metadata?.parallel_group === 'string' ? dependency.metadata.parallel_group : undefined;
+      if (!parallelGroup) {
+        continue;
+      }
+      const existing = groups.get(parallelGroup) ?? [];
+      existing.push(dependency);
+      groups.set(parallelGroup, existing);
+    }
+
+    for (const [parallelGroup, group] of groups.entries()) {
+      if (group.length < 2) {
+        continue;
+      }
+      const canonicalRole = typeof group[0]?.metadata?.canonical_role === 'string'
+        ? group[0].metadata.canonical_role
+        : normalizeSwarmRole(typeof group[0]?.metadata?.agent_role === 'string' ? group[0].metadata.agent_role : 'implementation-helper');
+      if (!group.every((dependency) => typeof dependency.metadata?.last_outcome_success === 'boolean')) {
+        continue;
+      }
+      if (!this.parallelGroupNeedsArbiter(canonicalRole, group)) {
+        continue;
+      }
+      if (this.hasStageDependency(parent, 'arbitration')) {
+        return true;
+      }
+
+      const summaries = group
+        .map((dependency) => typeof dependency.metadata?.last_outcome_summary === 'string' ? dependency.metadata.last_outcome_summary : dependency.name)
+        .join(' | ');
+      const arbiter = this.createStageTask(
+        parent,
+        'arbitration',
+        'arbiter',
+        `Resolve disagreement for ${canonicalRole} outputs`,
+        summaries,
+        {
+          parallel_group: parallelGroup,
+          canonical_role: 'arbiter',
+          arbitration_role: canonicalRole,
+          arbitration_children: group.map((dependency) => dependency.taskId),
+        },
+      );
+      this.readyQueue.add(arbiter.taskId);
+      this.persistenceService.setTaskStatus(parent.taskId, 'waiting_on_dependency');
+      this.recordTopologySnapshot();
+      return true;
+    }
+
+    return false;
+  }
+
+  private getParallelGroupTasks(parentTaskId: string | undefined, parallelGroup: string): PersistedTask[] {
+    if (!parentTaskId) {
+      return [];
+    }
+    return this.persistenceService
+      .listDependencies(parentTaskId)
+      .map((dependency) => this.persistenceService.getTask(dependency.dependsOnTaskId))
+      .filter((task): task is PersistedTask => Boolean(task))
+      .filter((task) => task.metadata?.parallel_group === parallelGroup);
+  }
+
+  private parallelGroupNeedsArbiter(canonicalRole: string, group: PersistedTask[]): boolean {
+    if (canonicalRole !== 'reviewer' && canonicalRole !== 'verifier') {
+      return false;
+    }
+    const outcomeFlags = new Set(group.map((task) => task.metadata?.last_outcome_success));
+    if (outcomeFlags.size > 1) {
+      return true;
+    }
+    const reasons = new Set(
+      group
+        .map((task) => typeof task.metadata?.last_outcome_reason === 'string' ? task.metadata.last_outcome_reason : undefined)
+        .filter((reason): reason is string => Boolean(reason)),
+    );
+    return reasons.size > 1;
   }
 
   private selectModelForTask(task: PersistedTask, role: string): string {
@@ -1056,10 +1645,29 @@ export class TaskScheduler {
     compact?: string,
   ) {
     const artifacts = this.persistenceService.getArtifactsForTask(task.taskId);
+    const artifactMemory = this.persistenceService.listArtifactMemory(task.taskId);
     const digest = buildTaskDigest({
       task,
       summary,
-      artifacts,
+      artifacts: artifactMemory.length > 0
+        ? artifactMemory.map((entry) => ({
+          artifactId: entry.artifactId,
+          attemptId: '',
+          taskId: entry.taskId,
+          runId: entry.runId,
+          projectId: entry.projectId,
+          kind: entry.kind,
+          summary: entry.shortSummary,
+          content: entry.reasonRelevant,
+          metadata: {
+            reasonRelevant: entry.reasonRelevant,
+            trustConfidence: entry.trustConfidence,
+            sourceTaskId: entry.sourceTaskId,
+            supersededBy: entry.supersededBy,
+          },
+          createdAt: entry.updatedAt,
+        }))
+        : artifacts,
       lastUpdatedBy: updatedBy,
       openQuestions: typeof task.metadata?.clarification_question === 'string' ? [task.metadata.clarification_question] : [],
       activeRisks: typeof task.metadata?.blocked_reason === 'string' ? [task.metadata.blocked_reason] : [],
@@ -1068,6 +1676,18 @@ export class TaskScheduler {
       droidspeak: compact
         ? buildDroidspeakV2('summary_emitted', summary, compact)
         : buildDroidspeakV2(task.status === 'waiting_on_dependency' || task.status === 'waiting_on_human' ? 'blocked' : 'plan_status', summary),
+    });
+    digest.artifactIndex = digest.artifactIndex.map((artifact) => {
+      const indexed = artifactMemory.find((entry) => entry.artifactId === artifact.artifactId);
+      return indexed
+        ? {
+          ...artifact,
+          reasonRelevant: indexed.reasonRelevant,
+          trustConfidence: indexed.trustConfidence,
+          sourceTaskId: indexed.sourceTaskId,
+          supersededBy: indexed.supersededBy,
+        }
+        : artifact;
     });
     this.persistenceService.recordTaskStateDigest(digest);
     this.persistenceService.recordExecutionEvent('memory_pinned', `Task digest updated for ${task.taskId}`, {
@@ -1144,6 +1764,9 @@ export class TaskScheduler {
       maxTokens: this.toPositiveNumber(policyRecord.max_tokens ?? policyRecord.maxTokens),
       maxToolCalls: this.toPositiveNumber(policyRecord.max_tool_calls ?? policyRecord.maxToolCalls),
       timeoutMs: this.toPositiveNumber(policyRecord.timeout_ms ?? policyRecord.timeoutMs),
+      maxParallelHelpers: this.toPositiveNumber(policyRecord.max_parallel_helpers ?? policyRecord.maxParallelHelpers),
+      maxSameRoleHelpers: this.toPositiveNumber(policyRecord.max_same_role_helpers ?? policyRecord.maxSameRoleHelpers),
+      localQueueTolerance: this.toPositiveNumber(policyRecord.local_queue_tolerance ?? policyRecord.localQueueTolerance),
       allowedTools: Array.isArray(policyRecord.allowed_tools)
         ? policyRecord.allowed_tools.filter((value: unknown): value is string => typeof value === 'string')
         : undefined,
@@ -1151,6 +1774,16 @@ export class TaskScheduler {
         ['auto', 'manual'].includes(policyRecord.approval_policy)
         ? (policyRecord.approval_policy as TaskPolicy['approvalPolicy'])
         : undefined,
+      cloudEscalationAllowed: typeof policyRecord.cloud_escalation_allowed === 'boolean'
+        ? policyRecord.cloud_escalation_allowed
+        : (typeof policyRecord.cloudEscalationAllowed === 'boolean' ? policyRecord.cloudEscalationAllowed : undefined),
+      priorityBias: typeof policyRecord.priority_bias === 'string' &&
+        ['time', 'cost', 'balanced'].includes(policyRecord.priority_bias)
+        ? policyRecord.priority_bias as TaskPolicy['priorityBias']
+        : (typeof policyRecord.priorityBias === 'string' &&
+          ['time', 'cost', 'balanced'].includes(policyRecord.priorityBias)
+          ? policyRecord.priorityBias as TaskPolicy['priorityBias']
+          : undefined),
     };
   }
 
@@ -1164,8 +1797,13 @@ export class TaskScheduler {
       maxTokens: overrides.maxTokens ?? defaults.maxTokens,
       maxToolCalls: overrides.maxToolCalls ?? defaults.maxToolCalls,
       timeoutMs: overrides.timeoutMs ?? defaults.timeoutMs,
+      maxParallelHelpers: overrides.maxParallelHelpers ?? defaults.maxParallelHelpers,
+      maxSameRoleHelpers: overrides.maxSameRoleHelpers ?? defaults.maxSameRoleHelpers,
+      localQueueTolerance: overrides.localQueueTolerance ?? defaults.localQueueTolerance,
       allowedTools: allowedTools ? [...allowedTools] : undefined,
       approvalPolicy: overrides.approvalPolicy ?? defaults.approvalPolicy,
+      cloudEscalationAllowed: overrides.cloudEscalationAllowed ?? defaults.cloudEscalationAllowed,
+      priorityBias: overrides.priorityBias ?? defaults.priorityBias,
     };
   }
 
@@ -1379,6 +2017,23 @@ export class TaskScheduler {
   private recordPolicyViolation(task: PersistedTask, detail: string, consumed: number): void {
     this.recordBudgetLimit(task.taskId, detail, consumed);
     this.persistenceService.setTaskStatus(task.taskId, 'waiting_on_human');
+  }
+
+  private hasPendingChildRole(parent: PersistedTask, role: string): boolean {
+    return this.persistenceService
+      .listDependents(parent.taskId)
+      .map((dependency) => this.persistenceService.getTask(dependency.dependsOnTaskId))
+      .filter((task): task is PersistedTask => Boolean(task))
+      .some((task) => {
+        const taskRole = typeof task.metadata?.canonical_role === 'string'
+          ? task.metadata.canonical_role
+          : normalizeSwarmRole(typeof task.metadata?.agent_role === 'string' ? task.metadata.agent_role : '');
+        return taskRole === normalizeSwarmRole(role) && !terminalTaskStatuses.includes(task.status);
+      });
+  }
+
+  private recordTopologySnapshot(): void {
+    this.persistenceService.recordSwarmTopologySnapshot();
   }
 
 }

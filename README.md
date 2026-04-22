@@ -46,6 +46,13 @@ Start a managed swarm:
 DroidSwarm swarm --project-root "$PWD" --env OPENAI_API_KEY=example --config mode=dev
 ```
 
+After the swarm starts, open the Blink UI shown in the CLI output, link Blink to Slack there, then record that project-level setup step:
+
+```bash
+DroidSwarm blink status
+DroidSwarm blink linked --project-root "$PWD"
+```
+
 List active swarms:
 
 ```bash
@@ -120,6 +127,10 @@ The installer now provisions the local runtime stack directly:
 - `llama.cpp` is installed locally, then the installer prompts for which local models to download and writes an inventory at `~/.droidswarm/models/inventory.json`.
 
 The installer writes the resolved service configuration to `~/.droidswarm/services.env`. Swarm startup reads that file, starts Blink server, Mux, and llama.cpp as managed services, and exports their local URLs plus the selected llama model catalog to the orchestrator. Environment variables remain available as overrides, but they are no longer the primary setup path.
+
+The daemon also writes a machine-readable service health snapshot per swarm, and the dashboard board insights now combine that runtime health with persisted Blink/llama/Mux usage so operators can see whether each managed service is both reachable and earning its place in the stack.
+
+Blink-to-Slack linking is tracked per project in `.droidswarm/setup.env`. New project setup starts in a `pending` state, and the swarm/status CLI surfaces that until you complete the link in the Blink UI and run `DroidSwarm blink linked --project-root "$PWD"`.
 
 Optional provider/runtime env:
 

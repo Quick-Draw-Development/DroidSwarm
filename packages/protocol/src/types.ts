@@ -34,6 +34,12 @@ export interface EnvelopeRefs {
   expanded?: string;
 }
 
+export interface DroidspeakV2State {
+  kind: 'plan_status' | 'blocked' | 'unblocked' | 'handoff_ready' | 'verification_needed' | 'summary_emitted' | 'memory_pinned';
+  compact: string;
+  expanded: string;
+}
+
 export interface EnvelopeV2Fields {
   id: string;
   ts: string;
@@ -76,6 +82,7 @@ export interface StatusUpdatePayload {
   status_code: string;
   content: string;
   metadata?: Record<string, unknown>;
+  droidspeak?: DroidspeakV2State;
 }
 
 export interface TaskCreatedPayload {
@@ -131,6 +138,7 @@ export interface ClarificationRequestPayload {
   content: string;
   question_id?: string;
   reason_code?: string;
+  droidspeak?: DroidspeakV2State;
 }
 
 export interface PlanProposedPayload {
@@ -140,6 +148,7 @@ export interface PlanProposedPayload {
   plan?: string;
   confidence?: number;
   dependencies?: string[];
+  droidspeak?: DroidspeakV2State;
 }
 
 export interface TaskDecomposedPayload {
@@ -159,6 +168,7 @@ export interface TaskAssignedPayload {
   task_id: string;
   assignment_id: string;
   assigned_agents: AssignedAgentShape[];
+  droidspeak?: DroidspeakV2State;
 }
 
 export interface SpawnRequestedPayload {
@@ -186,6 +196,7 @@ export interface VerificationRequestedPayload {
   verification_type: string;
   requested_by: string;
   detail?: string;
+  droidspeak?: DroidspeakV2State;
 }
 
 export interface VerificationCompletedPayload {
@@ -193,6 +204,7 @@ export interface VerificationCompletedPayload {
   status: 'passed' | 'failed' | 'blocked';
   reviewer: string;
   details?: string;
+  droidspeak?: DroidspeakV2State;
 }
 
 export interface CheckpointCreatedPayload {
@@ -200,6 +212,7 @@ export interface CheckpointCreatedPayload {
   task_id: string;
   summary?: string;
   metadata?: Record<string, unknown>;
+  droidspeak?: DroidspeakV2State;
 }
 
 export interface RunCompletedPayload {
@@ -327,6 +340,7 @@ type MessageEnvelopeBase<T extends MessageType> = {
   usage?: UsageShape;
   compression?: CompressionShape;
   shorthand?: EnvelopeRefs;
+  droidspeak?: DroidspeakV2State;
 };
 
 export type MessageEnvelope<T extends MessageType = MessageType> = T extends MessageType

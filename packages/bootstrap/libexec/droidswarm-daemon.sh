@@ -18,6 +18,8 @@ fi
 heartbeat_file="$state_dir/heartbeat"
 status_file="$state_dir/status"
 started_epoch_file="$state_dir/started_epoch"
+health_file="$(swarm_service_health_file "$swarm_id")"
+health_json_file="$(swarm_service_health_json_file "$swarm_id")"
 shutdown_requested="0"
 component_start_retries="${DROIDSWARM_COMPONENT_START_RETRIES:-3}"
 service_start_retries="${DROIDSWARM_SERVICE_START_RETRIES:-3}"
@@ -57,6 +59,153 @@ mark_service_status() {
   local name="$1"
   local status="$2"
   printf '%s\n' "$status" >"$(service_status_file "$name" "$state_dir")"
+}
+
+llama_inventory_contains_selected_model() {
+  local inventory_file="${DROIDSWARM_LLAMA_MODELS_FILE:-}"
+  local selected_model="${DROIDSWARM_LLAMA_MODEL:-}"
+
+  if [[ -z "$inventory_file" || -z "$selected_model" || ! -f "$inventory_file" ]]; then
+    return 1
+  fi
+
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$inventory_file" "$selected_model" <<'PY' >/dev/null 2>&1
+import json
+import sys
+
+inventory_path = sys.argv[1]
+selected_model = sys.argv[2]
+with open(inventory_path, 'r', encoding='utf-8') as handle:
+    payload = json.load(handle)
+
+models = payload if isinstance(payload, list) else payload.get('models', [])
+for model in models:
+    if not isinstance(model, dict):
+        continue
+    if model.get('path') == selected_model:
+        sys.exit(0)
+sys.exit(1)
+PY
+    return $?
+  fi
+
+  grep -Fq "$(basename "$selected_model")" "$inventory_file"
+}
+
+llama_inventory_model_count() {
+  local inventory_file="${DROIDSWARM_LLAMA_MODELS_FILE:-}"
+  if [[ -z "$inventory_file" || ! -f "$inventory_file" ]]; then
+    printf '0\n'
+    return
+  fi
+
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$inventory_file" <<'PY' 2>/dev/null
+import json
+import sys
+
+with open(sys.argv[1], 'r', encoding='utf-8') as handle:
+    payload = json.load(handle)
+
+models = payload if isinstance(payload, list) else payload.get('models', [])
+print(len(models) if isinstance(models, list) else 0)
+PY
+    return
+  fi
+
+  grep -c '"path"' "$inventory_file" 2>/dev/null || printf '0\n'
+}
+
+write_service_health_snapshot() {
+  local blink_status mux_status llama_status
+  local blink_reachable mux_reachable llama_reachable
+  local inventory_present selected_model_present inventory_contains_selected all_ready
+  local inventory_count
+
+  blink_status="unknown"
+  mux_status="unknown"
+  llama_status="unknown"
+  blink_reachable="0"
+  mux_reachable="0"
+  llama_reachable="0"
+
+  [[ -f "$(service_status_file "blink-server" "$state_dir")" ]] && blink_status="$(<"$(service_status_file "blink-server" "$state_dir")")"
+  [[ -f "$(service_status_file "mux" "$state_dir")" ]] && mux_status="$(<"$(service_status_file "mux" "$state_dir")")"
+  [[ -f "$(service_status_file "llama.cpp" "$state_dir")" ]] && llama_status="$(<"$(service_status_file "llama.cpp" "$state_dir")")"
+
+  if service_runtime_is_healthy "blink-server" "${DROIDSWARM_BLINK_SERVER_PORT:-}"; then
+    blink_reachable="1"
+  fi
+  if service_runtime_is_healthy "mux" "${DROIDSWARM_MUX_PORT:-}"; then
+    mux_reachable="1"
+  fi
+  if service_runtime_is_healthy "llama.cpp" "${DROIDSWARM_LLAMA_PORT:-}"; then
+    llama_reachable="1"
+  fi
+
+  inventory_present="0"
+  selected_model_present="0"
+  inventory_contains_selected="0"
+  [[ -n "${DROIDSWARM_LLAMA_MODELS_FILE:-}" && -f "${DROIDSWARM_LLAMA_MODELS_FILE:-}" ]] && inventory_present="1"
+  [[ -n "${DROIDSWARM_LLAMA_MODEL:-}" && -f "${DROIDSWARM_LLAMA_MODEL:-}" ]] && selected_model_present="1"
+  if llama_inventory_contains_selected_model; then
+    inventory_contains_selected="1"
+  fi
+  inventory_count="$(llama_inventory_model_count)"
+
+  all_ready="0"
+  if [[ "$blink_reachable" == "1" && "$mux_reachable" == "1" && "$llama_reachable" == "1" && "$selected_model_present" == "1" && "$inventory_contains_selected" == "1" ]]; then
+    all_ready="1"
+  fi
+
+  cat >"$health_file" <<EOF
+DROIDSWARM_HEALTH_UPDATED_AT=$(printf '%q' "$(now_utc)")
+DROIDSWARM_HEALTH_BLINK_STATUS=$(printf '%q' "$blink_status")
+DROIDSWARM_HEALTH_BLINK_REACHABLE=$(printf '%q' "$blink_reachable")
+DROIDSWARM_HEALTH_BLINK_URL=$(printf '%q' "${DROIDSWARM_BLINK_SERVER_URL:-http://127.0.0.1:${DROIDSWARM_BLINK_SERVER_PORT:-}}")
+DROIDSWARM_HEALTH_MUX_STATUS=$(printf '%q' "$mux_status")
+DROIDSWARM_HEALTH_MUX_REACHABLE=$(printf '%q' "$mux_reachable")
+DROIDSWARM_HEALTH_MUX_URL=$(printf '%q' "${DROIDSWARM_MUX_URL:-http://127.0.0.1:${DROIDSWARM_MUX_PORT:-}}")
+DROIDSWARM_HEALTH_LLAMA_STATUS=$(printf '%q' "$llama_status")
+DROIDSWARM_HEALTH_LLAMA_REACHABLE=$(printf '%q' "$llama_reachable")
+DROIDSWARM_HEALTH_LLAMA_URL=$(printf '%q' "${DROIDSWARM_LLAMA_BASE_URL:-http://127.0.0.1:${DROIDSWARM_LLAMA_PORT:-}}")
+DROIDSWARM_HEALTH_LLAMA_MODEL=$(printf '%q' "${DROIDSWARM_LLAMA_MODEL:-}")
+DROIDSWARM_HEALTH_LLAMA_MODEL_PRESENT=$(printf '%q' "$selected_model_present")
+DROIDSWARM_HEALTH_LLAMA_MODELS_FILE=$(printf '%q' "${DROIDSWARM_LLAMA_MODELS_FILE:-}")
+DROIDSWARM_HEALTH_LLAMA_INVENTORY_PRESENT=$(printf '%q' "$inventory_present")
+DROIDSWARM_HEALTH_LLAMA_INVENTORY_COUNT=$(printf '%q' "$inventory_count")
+DROIDSWARM_HEALTH_LLAMA_INVENTORY_HAS_SELECTED=$(printf '%q' "$inventory_contains_selected")
+DROIDSWARM_HEALTH_ALL_READY=$(printf '%q' "$all_ready")
+EOF
+
+  cat >"$health_json_file" <<EOF
+{
+  "updatedAt": "$(json_escape "$(now_utc)")",
+  "allReady": $([[ "$all_ready" == "1" ]] && printf 'true' || printf 'false'),
+  "blink": {
+    "status": "$(json_escape "$blink_status")",
+    "reachable": $([[ "$blink_reachable" == "1" ]] && printf 'true' || printf 'false'),
+    "url": "$(json_escape "${DROIDSWARM_BLINK_SERVER_URL:-http://127.0.0.1:${DROIDSWARM_BLINK_SERVER_PORT:-}}")"
+  },
+  "mux": {
+    "status": "$(json_escape "$mux_status")",
+    "reachable": $([[ "$mux_reachable" == "1" ]] && printf 'true' || printf 'false'),
+    "url": "$(json_escape "${DROIDSWARM_MUX_URL:-http://127.0.0.1:${DROIDSWARM_MUX_PORT:-}}")"
+  },
+  "llama": {
+    "status": "$(json_escape "$llama_status")",
+    "reachable": $([[ "$llama_reachable" == "1" ]] && printf 'true' || printf 'false'),
+    "url": "$(json_escape "${DROIDSWARM_LLAMA_BASE_URL:-http://127.0.0.1:${DROIDSWARM_LLAMA_PORT:-}}")",
+    "model": "$(json_escape "${DROIDSWARM_LLAMA_MODEL:-}")",
+    "modelPresent": $([[ "$selected_model_present" == "1" ]] && printf 'true' || printf 'false'),
+    "inventoryFile": "$(json_escape "${DROIDSWARM_LLAMA_MODELS_FILE:-}")",
+    "inventoryPresent": $([[ "$inventory_present" == "1" ]] && printf 'true' || printf 'false'),
+    "inventoryCount": $([[ "$inventory_count" =~ ^[0-9]+$ ]] && printf '%s' "$inventory_count" || printf '0'),
+    "inventoryHasSelected": $([[ "$inventory_contains_selected" == "1" ]] && printf 'true' || printf 'false')
+  }
+}
+EOF
 }
 
 stop_pid() {
@@ -418,6 +567,7 @@ shutdown() {
   stop_service "mux"
   stop_service "blink-server"
   mark_status "stopped"
+  write_service_health_snapshot
   printf '%s\n' "$(now_utc)" >"$heartbeat_file"
   exit 0
 }
@@ -434,6 +584,7 @@ fail_daemon() {
   stop_service "mux"
   stop_service "blink-server"
   mark_status "failed"
+  write_service_health_snapshot
   printf '%s\n' "$(now_utc)" >"$heartbeat_file"
   exit 1
 }
@@ -604,6 +755,7 @@ sleep 1
 start_component "orchestrator" "-" run_orchestrator
 
 mark_status "running"
+write_service_health_snapshot
 
 while true; do
   printf '%s\n' "$(now_utc)" >"$heartbeat_file"
@@ -664,6 +816,8 @@ while true; do
       fi
     fi
   done
+
+  write_service_health_snapshot
 
   sleep 5
 done

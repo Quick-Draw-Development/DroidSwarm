@@ -49,4 +49,26 @@ var import_agent_prompt = require("./agent-prompt");
     import_strict.default.match(prompt, /blk api-spec/);
     import_strict.default.match(prompt, /droidspeak-v2/);
   });
+  (0, import_node_test.it)("includes the dedicated arbiter output contract", () => {
+    const prompt = (0, import_agent_prompt.buildAgentPrompt)({
+      agentName: "Arbiter-01",
+      role: "arbiter",
+      projectId: "proj-1",
+      projectName: "Project 1",
+      task: {
+        taskId: "task-compare",
+        title: "Resolve reviewer disagreement",
+        description: "Two reviewers disagree on the migration safety.",
+        taskType: "review",
+        priority: "high",
+        createdAt: "2026-03-12T12:00:00.000Z"
+      }
+    });
+    import_strict.default.match(prompt, /Arbiter contract:/);
+    import_strict.default.match(prompt, /agreement summary/i);
+    import_strict.default.match(prompt, /disagreement summary/i);
+    import_strict.default.match(prompt, /winner or merge recommendation/i);
+    import_strict.default.match(prompt, /confidence statement/i);
+    import_strict.default.match(prompt, /follow-up action/i);
+  });
 });

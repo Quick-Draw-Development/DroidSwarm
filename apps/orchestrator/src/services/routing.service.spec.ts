@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { getSwarmRoleDefinition, normalizeSwarmRole } from '@shared-routing';
 import { RoutingService } from './routing.service';
 
 const service = new RoutingService({
@@ -21,6 +22,14 @@ const service = new RoutingService({
 });
 
 describe('RoutingService', () => {
+  it('normalizes existing runtime role aliases into the shared role catalog', () => {
+    assert.equal(normalizeSwarmRole('coder-backend'), 'implementation-helper');
+    assert.equal(normalizeSwarmRole('tester'), 'verifier');
+    assert.equal(normalizeSwarmRole('review'), 'reviewer');
+    assert.equal(getSwarmRoleDefinition('repo-scanner').allowParallelInstances, true);
+    assert.equal(getSwarmRoleDefinition('arbiter').verificationRequired, false);
+  });
+
   it('routes Apple ecosystem work to the first-class local Apple engine', () => {
     const decision = service.decide({
       taskId: 'task-apple',
@@ -59,5 +68,136 @@ describe('RoutingService', () => {
 
     assert.equal(decision.engine, 'codex-cloud');
     assert.equal(decision.modelTier, 'cloud');
+  });
+
+  it('uses canonical local-first defaults for arbiter and verifier roles', () => {
+    const arbiterDecision = service.decide({
+      taskId: 'task-arbiter',
+      runId: 'run-1',
+      name: 'Compare specialist outputs',
+      status: 'queued',
+      priority: 'medium',
+      metadata: {
+        task_type: 'comparison',
+        description: 'Resolve disagreement between two reviewers.',
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }, 'arbiter');
+
+    const verifierDecision = service.decide({
+      taskId: 'task-verifier',
+      runId: 'run-1',
+      name: 'Verify implementation',
+      status: 'queued',
+      priority: 'medium',
+      metadata: {
+        task_type: 'verification',
+        description: 'Run verification after implementation.',
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }, 'tester');
+
+    assert.equal(arbiterDecision.engine, 'local-llama');
+    assert.equal(arbiterDecision.modelTier, 'local-cheap');
+    assert.equal(verifierDecision.engine, 'local-llama');
+    assert.equal(verifierDecision.modelTier, 'local-cheap');
+  });
+
+  it('keeps planning and compression roles local when llama capacity is saturated', () => {
+    const decision = service.decide({
+      taskId: 'task-saturated-planner',
+      runId: 'run-1',
+      name: 'Plan under local pressure',
+      status: 'queued',
+      priority: 'medium',
+      metadata: {
+        task_type: 'plan',
+        description: 'Need planner output while local queue is busy.',
+        queue_depth: 7,
+        fallback_count: 2,
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }, 'checkpoint-compressor');
+
+    assert.equal(decision.engine, 'local-llama');
+    assert.equal(decision.routeKind, 'planner-local-saturated');
+    assert.equal(decision.cloudEscalated, false);
+  });
+
+  it('escalates coding work to cloud only when cloud is allowed and local capacity is saturated', () => {
+    const decision = service.decide({
+      taskId: 'task-saturated-coder',
+      runId: 'run-1',
+      name: 'Queued coding task',
+      status: 'queued',
+      priority: 'high',
+      metadata: {
+        task_type: 'implementation',
+        description: 'Implement a multi-file feature while local queue is saturated.',
+        allow_cloud: true,
+        queue_depth: 6,
+        fallback_count: 2,
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }, 'coder-backend');
+
+    assert.equal(decision.engine, 'codex-cloud');
+    assert.equal(decision.routeKind, 'cloud-escalated-from-local-saturation');
+    assert.equal(decision.escalationReason, 'local_saturated_and_cloud_allowed');
+  });
+
+  it('uses task policy queue tolerance and time bias for cloud escalation', () => {
+    const decision = service.decide({
+      taskId: 'task-time-priority',
+      runId: 'run-1',
+      name: 'Urgent coding task',
+      status: 'queued',
+      priority: 'high',
+      metadata: {
+        task_type: 'implementation',
+        description: 'Multi-file implementation with urgent delivery expectations.',
+        queue_depth: 2,
+        fallback_count: 1,
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }, 'coder-backend', {
+      localQueueTolerance: 2,
+      cloudEscalationAllowed: true,
+      priorityBias: 'time',
+    });
+
+    assert.equal(decision.engine, 'codex-cloud');
+    assert.equal(decision.routeKind, 'cloud-escalated-from-local-saturation');
+  });
+
+  it('keeps coding work local when policy disables cloud escalation', () => {
+    const decision = service.decide({
+      taskId: 'task-local-only',
+      runId: 'run-1',
+      name: 'Local only coding task',
+      status: 'queued',
+      priority: 'high',
+      metadata: {
+        task_type: 'implementation',
+        description: 'Large-scale refactor but must remain local.',
+        allow_cloud: true,
+        queue_depth: 8,
+        fallback_count: 2,
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }, 'coder-backend', {
+      cloudEscalationAllowed: false,
+      priorityBias: 'cost',
+      localQueueTolerance: 3,
+    });
+
+    assert.notEqual(decision.engine, 'codex-cloud');
+    assert.equal(decision.cloudEscalated, false);
   });
 });

@@ -13,6 +13,8 @@ describe('droidspeak translators', () => {
 
     assert.equal(result.translation, 'Handoff ready for coder.');
     assert.equal(result.clauseCount, 1);
+    assert.equal(result.badgeLabel, 'Handoff');
+    assert.equal(result.compact, 'handoff:ready');
     assert.deepEqual(result.unknownTokens, []);
   });
 

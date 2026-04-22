@@ -38,6 +38,12 @@ const toPositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
+const toBooleanFlag = (value, fallback = false) => {
+  if (!value) {
+    return fallback;
+  }
+  return ["1", "true", "yes", "on"].includes(value.toLowerCase());
+};
 const loadConfig = () => {
   const environment = process.env.NODE_ENV ?? "development";
   return {
@@ -46,6 +52,7 @@ const loadConfig = () => {
     projectId: process.env.DROIDSWARM_PROJECT_ID ?? "droidswarm",
     projectName: process.env.DROIDSWARM_PROJECT_NAME ?? "DroidSwarm",
     dbPath: process.env.DROIDSWARM_DB_PATH ?? import_node_path.default.resolve(process.cwd(), "data", "droidswarm.db"),
+    debug: toBooleanFlag(process.env.DROIDSWARM_DEBUG, false),
     operatorToken: process.env.DROIDSWARM_OPERATOR_TOKEN,
     authTimeoutMs: toPositiveInt(process.env.DROIDSWARM_AUTH_TIMEOUT_MS, 5e3),
     heartbeatTimeoutMs: toPositiveInt(process.env.DROIDSWARM_HEARTBEAT_TIMEOUT_MS, 9e4),

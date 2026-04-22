@@ -35,6 +35,18 @@ const DEFAULT_DB_PATH = process.env.DROIDSWARM_DB_PATH ?? path.resolve(process.c
 const DEFAULT_SOCKET_URL = process.env.DROIDSWARM_SOCKET_URL ?? 'ws://127.0.0.1:8765';
 const DEFAULT_ORCHESTRATOR_NAME = process.env.DROIDSWARM_ORCHESTRATOR_NAME ?? 'Orchestrator';
 const require = createRequire(import.meta.url);
+const DEBUG_LOGGING_ENABLED = /^(1|true|yes|on)$/i.test(process.env.DROIDSWARM_DEBUG ?? '');
+
+const dashboardLog = (event: string, detail?: Record<string, unknown>): void => {
+  if (!DEBUG_LOGGING_ENABLED) {
+    return;
+  }
+  if (detail) {
+    console.log('[Dashboard]', event, detail);
+    return;
+  }
+  console.log('[Dashboard]', event);
+};
 
 type RawTaskRow = {
   task_id: string;
@@ -118,6 +130,11 @@ const getDatabase = (): Database.Database => {
   const DatabaseImpl = getDatabaseConstructor();
   databaseInstance = new DatabaseImpl(DEFAULT_DB_PATH);
   ensureDashboardSchema(databaseInstance);
+  dashboardLog('database.ready', {
+    dbPath: DEFAULT_DB_PATH,
+    projectId: getProjectId(),
+    socketUrl: DEFAULT_SOCKET_URL,
+  });
   return databaseInstance;
 };
 
@@ -128,11 +145,15 @@ const ensureDashboardSchema = (database: Database.Database): void => {
       project_id TEXT NOT NULL,
       channel_id TEXT NOT NULL,
       task_id TEXT,
+      session_id TEXT,
+      trace_id TEXT,
       message_type TEXT NOT NULL,
       sender_type TEXT NOT NULL,
+      sender_id TEXT NOT NULL,
       sender_name TEXT NOT NULL,
       content TEXT,
       payload_json TEXT NOT NULL,
+      reply_to_message_id TEXT,
       created_at TEXT NOT NULL
     );
 
@@ -162,6 +183,22 @@ const ensureDashboardSchema = (database: Database.Database): void => {
       created_at TEXT NOT NULL
     );
   `);
+
+  const messageColumns = new Set(
+    (database.prepare('PRAGMA table_info(messages)').all() as Array<{ name: string }>).map((column) => column.name),
+  );
+  if (!messageColumns.has('sender_id')) {
+    database.exec(`ALTER TABLE messages ADD COLUMN sender_id TEXT NOT NULL DEFAULT ''`);
+  }
+  if (!messageColumns.has('session_id')) {
+    database.exec(`ALTER TABLE messages ADD COLUMN session_id TEXT`);
+  }
+  if (!messageColumns.has('trace_id')) {
+    database.exec(`ALTER TABLE messages ADD COLUMN trace_id TEXT`);
+  }
+  if (!messageColumns.has('reply_to_message_id')) {
+    database.exec(`ALTER TABLE messages ADD COLUMN reply_to_message_id TEXT`);
+  }
 };
 
 const mapTaskRecord = (row: Record<string, unknown>): TaskRecord => ({
@@ -1114,7 +1151,12 @@ type OperatorDispatcher = (input: DispatchInput) => Promise<TaskDispatchStatus>;
 
 const defaultOperatorDispatcher: OperatorDispatcher = async (input) => {
   const operatorToken = process.env.DROIDSWARM_OPERATOR_TOKEN;
-  console.log('Dispatching operator message with input:', input);
+  dashboardLog('operator.dispatch.requested', {
+    roomId: input.roomId ?? 'operator',
+    messageType: input.messageType,
+    taskId: input.taskId,
+    username: input.username,
+  });
   return await new Promise<TaskDispatchStatus>((resolve) => {
     const socket = new WebSocket(DEFAULT_SOCKET_URL);
     const connectionName = input.username;
@@ -1127,6 +1169,11 @@ const defaultOperatorDispatcher: OperatorDispatcher = async (input) => {
     }, 2_500);
 
     socket.on('open', () => {
+      dashboardLog('socket.dispatch.connected', {
+        roomId,
+        messageType: input.messageType,
+        taskId: input.taskId,
+      });
       socket.send(JSON.stringify({
         type: 'auth',
         project_id: getProjectId(),
@@ -1159,6 +1206,12 @@ const defaultOperatorDispatcher: OperatorDispatcher = async (input) => {
 
       if (parsed.type === 'status_update' && typeof parsed.payload?.content === 'string' && parsed.payload.content.includes('Authenticated')) {
         messageSent = true;
+        dashboardLog('socket.dispatch.authenticated', {
+          roomId,
+          messageType: input.messageType,
+          taskId: input.taskId,
+          messageId,
+        });
         socket.send(JSON.stringify({
           message_id: messageId,
           project_id: getProjectId(),
@@ -1180,6 +1233,12 @@ const defaultOperatorDispatcher: OperatorDispatcher = async (input) => {
         if (!input.expectedTaskId || parsed.payload?.task_id === input.expectedTaskId) {
           clearTimeout(timeout);
           socket.close();
+          dashboardLog('socket.dispatch.acknowledged', {
+            roomId,
+            messageType: input.messageType,
+            taskId: input.expectedTaskId ?? input.taskId,
+            acknowledgementType: parsed.type,
+          });
           resolve('accepted');
           return;
         }
@@ -1188,12 +1247,24 @@ const defaultOperatorDispatcher: OperatorDispatcher = async (input) => {
       if (parsed.message_id === messageId) {
         clearTimeout(timeout);
         socket.close();
+        dashboardLog('socket.dispatch.echoed', {
+          roomId,
+          messageType: input.messageType,
+          taskId: input.taskId,
+          messageId,
+        });
         resolve('accepted');
       }
     });
 
     socket.on('error', () => {
       clearTimeout(timeout);
+      dashboardLog('socket.dispatch.error', {
+        roomId,
+        messageType: input.messageType,
+        taskId: input.taskId,
+        messageSent,
+      });
       resolve(messageSent ? 'queued' : 'offline');
     });
   });
@@ -1278,6 +1349,10 @@ export const sendChannelMessage = async (input: {
   username: string;
   content: string;
 }): Promise<ChannelMessageResult> => {
+  dashboardLog('channel.message.requested', {
+    taskId: input.taskId,
+    username: input.username,
+  });
   recordCanonicalTaskChat({
     taskId: input.taskId,
     source: 'dashboard',
@@ -1319,8 +1394,8 @@ export const sendChannelMessage = async (input: {
     .prepare(`
       INSERT INTO messages (
         message_id, project_id, channel_id, task_id, message_type, sender_type,
-        sender_name, content, payload_json, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        sender_id, sender_name, content, payload_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     .run(
       message.messageId,
@@ -1330,10 +1405,18 @@ export const sendChannelMessage = async (input: {
       message.messageType,
       message.senderType,
       message.senderName,
+      message.senderName,
       message.content,
       JSON.stringify(message.payload),
       message.createdAt,
     );
+
+  dashboardLog('channel.message.persisted', {
+    taskId: input.taskId,
+    username: input.username,
+    dispatchStatus,
+    messageId: message.messageId,
+  });
 
   return { dispatchStatus, message };
 };
@@ -1347,6 +1430,12 @@ export const createTask = async (input: {
 }): Promise<TaskRecord> => {
   const database = getDatabase();
   const now = new Date().toISOString();
+  dashboardLog('task.create.requested', {
+    title: input.title,
+    taskType: input.taskType,
+    priority: input.priority,
+    username: input.username,
+  });
   const task: TaskRecord = {
     taskId: randomUUID(),
     projectId: getProjectId(),
@@ -1413,6 +1502,12 @@ export const createTask = async (input: {
       JSON.stringify({ dispatch_status: dispatchStatus }),
       new Date().toISOString(),
     );
+
+  dashboardLog('task.create.persisted', {
+    taskId: task.taskId,
+    dispatchStatus,
+    projectId: task.projectId,
+  });
 
   return task;
 };

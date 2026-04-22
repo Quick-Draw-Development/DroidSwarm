@@ -64,7 +64,9 @@ class DroidSwarmSocketServer {
       {
         host: this.config.host,
         port: this.config.port,
-        projectId: this.config.projectId
+        projectId: this.config.projectId,
+        dbPath: this.config.dbPath,
+        debug: this.config.debug
       },
       "Socket server started"
     );
@@ -170,6 +172,21 @@ class DroidSwarmSocketServer {
       this.sendRoomError(client, "Invalid message envelope", "invalid_message_envelope");
       return;
     }
+    if (this.config.debug) {
+      this.logger.info(
+        {
+          connectionId: client.connectionId,
+          roomId: client.roomId,
+          sourceClientType: client.clientType,
+          actorName: client.agentName,
+          messageType: message.type,
+          normalizedVerb: message.verb,
+          taskId: message.task_id,
+          messageId: message.message_id
+        },
+        "Received room message"
+      );
+    }
     if (message.project_id !== this.config.projectId || message.room_id !== client.roomId) {
       this.sendRoomError(client, "Message project or room mismatch", "message_scope_mismatch");
       return;
@@ -211,12 +228,36 @@ class DroidSwarmSocketServer {
     this.handleRoutingSideEffects(normalizedMessage);
     this.persistence.recordMessage(normalizedMessage);
     this.roomManager.broadcast(client.roomId, normalizedMessage);
+    if (this.config.debug) {
+      this.logger.info(
+        {
+          roomId: client.roomId,
+          messageType: normalizedMessage.type,
+          normalizedVerb: normalizedMessage.verb,
+          taskId: normalizedMessage.task_id,
+          messageId: normalizedMessage.message_id
+        },
+        "Persisted and broadcast room message"
+      );
+    }
   }
   handleRoutingSideEffects(message) {
     if (message.type === "task_created") {
       const taskId = message.task_id ?? (typeof message.payload.task_id === "string" ? message.payload.task_id : void 0);
       if (!taskId) {
         return;
+      }
+      if (this.config.debug) {
+        this.logger.info(
+          {
+            taskId,
+            roomId: message.room_id,
+            actorId: message.from.actor_id,
+            actorName: message.from.actor_name,
+            normalizedVerb: message.verb
+          },
+          "Routing task creation into canonical task channel"
+        );
       }
       this.persistence.ensureChannel({
         channelId: taskId,
@@ -256,6 +297,17 @@ class DroidSwarmSocketServer {
       const taskId = message.task_id ?? (typeof message.payload.task_id === "string" ? message.payload.task_id : void 0);
       if (!taskId) {
         return;
+      }
+      if (this.config.debug) {
+        this.logger.info(
+          {
+            taskId,
+            roomId: message.room_id,
+            actorId: message.from.actor_id,
+            actorName: message.from.actor_name
+          },
+          "Recorded task intake acknowledgement"
+        );
       }
       this.persistence.recordTaskEvent({
         eventId: (0, import_node_crypto.randomUUID)(),

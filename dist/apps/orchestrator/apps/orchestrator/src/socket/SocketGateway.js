@@ -41,6 +41,12 @@ class SocketGateway {
     this.channelHeartbeats = /* @__PURE__ */ new Map();
     this.channelReconnects = /* @__PURE__ */ new Map();
   }
+  log(...args) {
+    if (!this.config.debug) {
+      return;
+    }
+    console.log(this.prefix, ...args);
+  }
   setMessageHandler(handler) {
     this.messageHandler = handler;
   }
@@ -72,6 +78,15 @@ class SocketGateway {
     }
   }
   send(message) {
+    if ("message_id" in message) {
+      this.log("sending operator message", {
+        type: message.type,
+        normalizedVerb: message.verb,
+        taskId: message.task_id,
+        roomId: message.room_id,
+        messageId: message.message_id
+      });
+    }
     this.sendToSocket(this.socket, message);
   }
   sendToTask(taskId, message) {
@@ -80,6 +95,12 @@ class SocketGateway {
       console.warn("[SocketGateway] task channel not open for", taskId);
       return;
     }
+    this.log("sending task message", {
+      taskId,
+      type: message.type,
+      normalizedVerb: message.verb,
+      messageId: message.message_id
+    });
     this.sendToSocket(channelSocket, message);
   }
   watchTaskChannel(taskId) {
@@ -89,7 +110,7 @@ class SocketGateway {
     const agentName = `${this.config.agentName}-${taskId}`;
     const channelSocket = new import_ws.default(this.config.socketUrl);
     this.channelSockets.set(taskId, channelSocket);
-    console.log(this.prefix, "connecting to task channel", taskId);
+    this.log("connecting to task channel", taskId);
     channelSocket.on("open", () => {
       this.clearChannelReconnect(taskId);
       this.sendToSocket(
@@ -115,11 +136,11 @@ class SocketGateway {
   connect() {
     const socket = new import_ws.default(this.config.socketUrl);
     this.socket = socket;
-    console.log(this.prefix, "connecting to socket server at", this.config.socketUrl);
+    this.log("connecting to socket server at", this.config.socketUrl);
     socket.on("open", () => {
       this.send((0, import_protocol.buildAuthMessage)(this.config));
       this.startHeartbeat();
-      console.log(this.prefix, "connection established");
+      this.log("connection established");
     });
     socket.on("message", (raw) => {
       this.emitMessage(raw, "operator");
@@ -143,6 +164,14 @@ class SocketGateway {
     }
     try {
       const message = (0, import_protocol.parseEnvelope)(raw.toString());
+      this.log("received message", {
+        source,
+        type: message.type,
+        normalizedVerb: message.verb,
+        taskId: message.task_id,
+        roomId: message.room_id,
+        messageId: message.message_id
+      });
       void this.messageHandler(message, source);
     } catch {
     }

@@ -132,6 +132,8 @@ Options:
   --llama-model PATH
   --env KEY=VALUE           Repeatable
   --config KEY=VALUE        Repeatable
+  --debug
+  --no-debug
   --foreground
   --dry-run
   --help
@@ -647,6 +649,7 @@ cmd_swarm() {
 
   local project_root project_name project_id project_mode swarm_id dashboard_port ws_port db_path
   local agent_count main_branch production_branch repo_url foreground dry_run
+  local debug_enabled debug_explicit
   local dashboard_port_explicit ws_port_explicit
   local blink_port_explicit mux_port_explicit llama_port_explicit
   local node_bin operator_token socket_server_entry orchestrator_entry dashboard_server_entry
@@ -668,6 +671,8 @@ cmd_swarm() {
   repo_url=""
   foreground="0"
   dry_run="0"
+  debug_enabled="${DROIDSWARM_DEBUG:-}"
+  debug_explicit="0"
   dashboard_port_explicit="0"
   ws_port_explicit="0"
   blink_port_explicit="0"
@@ -778,6 +783,14 @@ cmd_swarm() {
         require_value "--config" "${1:-}"
         config_pairs+=("$1")
         ;;
+      --debug)
+        debug_enabled="1"
+        debug_explicit="1"
+        ;;
+      --no-debug)
+        debug_enabled="0"
+        debug_explicit="1"
+        ;;
       --foreground)
         foreground="1"
         ;;
@@ -826,7 +839,14 @@ cmd_swarm() {
     production_branch="${DROIDSWARM_PRODUCTION_BRANCH:-production}"
   fi
 
+  if [[ "$debug_explicit" != "1" && -z "$debug_enabled" ]]; then
+    debug_enabled="${DROIDSWARM_DEBUG:-0}"
+  fi
+
   db_path="${DROIDSWARM_DB_PATH:-}"
+  if [[ -z "$db_path" ]]; then
+    db_path="$(project_db_file "$project_root")"
+  fi
 
   if [[ -z "$swarm_id" ]]; then
     swarm_id="${project_id}-$(date +%s)"
@@ -993,6 +1013,7 @@ cmd_swarm() {
   info "Project root: $project_root"
   info "Dashboard port: $dashboard_port"
   info "WebSocket port: $ws_port"
+  info "Debug logging: $( [[ "$debug_enabled" == "1" ]] && printf 'on' || printf 'off' )"
 
   if [[ "$dry_run" == "1" ]]; then
     return 0
@@ -1009,6 +1030,8 @@ DROIDSWARM_PROJECT_ID=$(printf '%q' "$project_id")
 DROIDSWARM_PROJECT_MODE=$(printf '%q' "$project_mode")
 DROIDSWARM_DASHBOARD_PORT=$(printf '%q' "$dashboard_port")
 DROIDSWARM_WS_PORT=$(printf '%q' "$ws_port")
+DROIDSWARM_DB_PATH=$(printf '%q' "$db_path")
+DROIDSWARM_DEBUG=$(printf '%q' "$debug_enabled")
 DROIDSWARM_AGENT_COUNT=$(printf '%q' "$agent_count")
 DROIDSWARM_MAIN_BRANCH=$(printf '%q' "$main_branch")
 DROIDSWARM_PRODUCTION_BRANCH=$(printf '%q' "$production_branch")

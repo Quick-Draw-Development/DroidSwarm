@@ -62,7 +62,12 @@ class DroidSwarmOrchestratorClient {
     );
   }
   start() {
-    this.log("starting orchestrator");
+    this.log("starting orchestrator", {
+      projectId: this.config.projectId,
+      projectRoot: this.config.projectRoot,
+      dbPath: this.config.dbPath,
+      socketUrl: this.config.socketUrl
+    });
     this.runLifecycle.recoverInterruptedRuns();
     const activeRuns = this.persistence.runs.listActiveRuns();
     if (activeRuns.length === 0) {
@@ -150,6 +155,9 @@ class DroidSwarmOrchestratorClient {
     this.database.close();
   }
   log(...args) {
+    if (!this.config.debug) {
+      return;
+    }
     console.log(this.prefix, ...args);
   }
 }

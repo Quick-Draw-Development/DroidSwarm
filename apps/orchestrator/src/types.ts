@@ -36,6 +36,7 @@ export type CodexAgentResult = import('@shared-workers').LegacyCodexAgentResult;
 
 export interface OrchestratorConfig {
   environment: 'development' | 'test' | 'production';
+  debug?: boolean;
   projectId: string;
   projectName: string;
   projectRoot: string;

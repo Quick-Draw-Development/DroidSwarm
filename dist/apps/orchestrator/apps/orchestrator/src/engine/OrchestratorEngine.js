@@ -119,7 +119,26 @@ class OrchestratorEngine {
       ));
     };
   }
+  log(event, detail) {
+    if (!this.deps.config.debug) {
+      return;
+    }
+    if (detail) {
+      console.log("[OrchestratorEngine]", event, detail);
+      return;
+    }
+    console.log("[OrchestratorEngine]", event);
+  }
   handleAgentAssignment(taskId, agents) {
+    this.log("agents.assigned", {
+      taskId,
+      agentCount: agents.length,
+      agents: agents.map((agent) => ({
+        attemptId: agent.attemptId,
+        agentName: agent.agentName,
+        role: agent.role
+      }))
+    });
     for (const agent of agents) {
       this.attemptMap.set(agent.attemptId, {
         taskId: agent.taskId,
@@ -133,6 +152,15 @@ class OrchestratorEngine {
   handleAgentCommunication(_taskId, _message) {
   }
   async handleMessage(message, source) {
+    this.log("message.received", {
+      source,
+      type: message.type,
+      normalizedVerb: message.verb,
+      taskId: message.task_id ?? message.room_id,
+      actorId: message.from.actor_id,
+      actorName: message.from.actor_name,
+      messageId: message.message_id
+    });
     if (message.type === "task_created") {
       this.handleTaskCreated(message);
       return;
@@ -153,6 +181,12 @@ class OrchestratorEngine {
   }
   handleTaskCreated(message) {
     const payload = message.payload;
+    this.log("task.created", {
+      taskId: payload.task_id,
+      title: payload.title,
+      priority: payload.priority,
+      createdBy: payload.created_by ?? payload.created_by_user_id
+    });
     const task = this.deps.persistenceService.createTask({
       taskId: payload.task_id,
       name: payload.title ?? payload.task_id,
@@ -182,11 +216,23 @@ class OrchestratorEngine {
       branchName: typeof task.metadata?.branch_name === "string" ? task.metadata.branch_name : void 0
     });
     this.deps.gateway.watchTaskChannel(task.taskId);
+    this.log("task.scheduling.requested", {
+      taskId: task.taskId,
+      runId: task.runId,
+      status: task.status
+    });
     this.deps.scheduler.handleNewTask(task.taskId);
   }
   handleStatusUpdate(message) {
     const payload = message.payload;
     const taskId = message.task_id ?? message.room_id;
+    this.log("status.update.received", {
+      taskId,
+      actorId: message.from.actor_id,
+      actorName: message.from.actor_name,
+      statusCode: payload.status_code,
+      normalizedVerb: message.verb
+    });
     if (payload.status_code === "task_cancelled") {
       const detail = payload.content;
       this.deps.controlService.execute({ type: "cancel_task" }, taskId, message.from.actor_name, detail);
@@ -197,6 +243,11 @@ class OrchestratorEngine {
     }
     const attempt = this.lookupAttempt(taskId, message.from.actor_id);
     if (!attempt) {
+      this.log("status.update.unmatched", {
+        taskId,
+        actorId: message.from.actor_id,
+        statusCode: payload.status_code
+      });
       return;
     }
     this.deps.persistenceService.recordExecutionEvent("agent_result", payload.content, {
@@ -211,6 +262,13 @@ class OrchestratorEngine {
   }
   async handleToolRequest(message) {
     const payload = message.payload;
+    this.log("tool.request.received", {
+      taskId: message.task_id ?? message.room_id,
+      requestId: payload.request_id,
+      toolName: payload.tool_name,
+      actorId: message.from.actor_id,
+      actorName: message.from.actor_name
+    });
     const response = await this.deps.toolService.handleRequest({
       requestId: payload.request_id,
       toolName: payload.tool_name,

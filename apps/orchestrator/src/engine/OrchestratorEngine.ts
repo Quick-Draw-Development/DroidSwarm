@@ -37,6 +37,17 @@ export class OrchestratorEngine {
 
   constructor(private readonly deps: EngineDeps) {}
 
+  private log(event: string, detail?: Record<string, unknown>): void {
+    if (!this.deps.config.debug) {
+      return;
+    }
+    if (detail) {
+      console.log('[OrchestratorEngine]', event, detail);
+      return;
+    }
+    console.log('[OrchestratorEngine]', event);
+  }
+
   readonly onPlanProposed = (
     taskId: string,
     planId: string,
@@ -158,6 +169,15 @@ export class OrchestratorEngine {
   };
 
   handleAgentAssignment(taskId: string, agents: SpawnedAgent[]): void {
+    this.log('agents.assigned', {
+      taskId,
+      agentCount: agents.length,
+      agents: agents.map((agent) => ({
+        attemptId: agent.attemptId,
+        agentName: agent.agentName,
+        role: agent.role,
+      })),
+    });
     for (const agent of agents) {
       this.attemptMap.set(agent.attemptId, {
         taskId: agent.taskId,
@@ -174,6 +194,15 @@ export class OrchestratorEngine {
   }
 
   async handleMessage(message: MessageEnvelope, source: MessageSource): Promise<void> {
+    this.log('message.received', {
+      source,
+      type: message.type,
+      normalizedVerb: message.verb,
+      taskId: message.task_id ?? message.room_id,
+      actorId: message.from.actor_id,
+      actorName: message.from.actor_name,
+      messageId: message.message_id,
+    });
     if (message.type === 'task_created') {
       this.handleTaskCreated(message);
       return;
@@ -195,6 +224,12 @@ export class OrchestratorEngine {
 
   private handleTaskCreated(message: MessageEnvelope<'task_created'>): void {
     const payload = message.payload;
+    this.log('task.created', {
+      taskId: payload.task_id,
+      title: payload.title,
+      priority: payload.priority,
+      createdBy: payload.created_by ?? payload.created_by_user_id,
+    });
     const task = this.deps.persistenceService.createTask({
       taskId: payload.task_id,
       name: payload.title ?? payload.task_id,
@@ -224,12 +259,24 @@ export class OrchestratorEngine {
       branchName: typeof task.metadata?.branch_name === 'string' ? task.metadata.branch_name : undefined,
     });
     this.deps.gateway.watchTaskChannel(task.taskId);
+    this.log('task.scheduling.requested', {
+      taskId: task.taskId,
+      runId: task.runId,
+      status: task.status,
+    });
     this.deps.scheduler.handleNewTask(task.taskId);
   }
 
   private handleStatusUpdate(message: MessageEnvelope<'status_update'>): void {
     const payload = message.payload as StatusUpdatePayload & { result?: CodexAgentResult };
     const taskId = message.task_id ?? message.room_id;
+    this.log('status.update.received', {
+      taskId,
+      actorId: message.from.actor_id,
+      actorName: message.from.actor_name,
+      statusCode: payload.status_code,
+      normalizedVerb: message.verb,
+    });
     if (payload.status_code === 'task_cancelled') {
       const detail = payload.content;
       this.deps.controlService.execute({ type: 'cancel_task' }, taskId, message.from.actor_name, detail);
@@ -240,6 +287,11 @@ export class OrchestratorEngine {
     }
     const attempt = this.lookupAttempt(taskId, message.from.actor_id);
     if (!attempt) {
+      this.log('status.update.unmatched', {
+        taskId,
+        actorId: message.from.actor_id,
+        statusCode: payload.status_code,
+      });
       return;
     }
     this.deps.persistenceService.recordExecutionEvent('agent_result', payload.content, {
@@ -255,6 +307,13 @@ export class OrchestratorEngine {
 
   private async handleToolRequest(message: MessageEnvelope<'tool_request'>): Promise<void> {
     const payload = message.payload as ToolRequestPayload;
+    this.log('tool.request.received', {
+      taskId: message.task_id ?? message.room_id,
+      requestId: payload.request_id,
+      toolName: payload.tool_name,
+      actorId: message.from.actor_id,
+      actorName: message.from.actor_name,
+    });
     const response = await this.deps.toolService.handleRequest({
       requestId: payload.request_id,
       toolName: payload.tool_name,

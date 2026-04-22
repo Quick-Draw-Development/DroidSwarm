@@ -48,6 +48,7 @@ export interface ServerConfig {
   projectId: string;
   projectName: string;
   dbPath: string;
+  debug: boolean;
   operatorToken?: string;
   authTimeoutMs: number;
   heartbeatTimeoutMs: number;

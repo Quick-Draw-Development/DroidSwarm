@@ -51,8 +51,16 @@ const parseApprovalPolicy = (value: string | undefined): TaskPolicy['approvalPol
   return undefined;
 };
 
+const parseBooleanFlag = (value: string | undefined, fallback = false): boolean => {
+  if (!value) {
+    return fallback;
+  }
+  return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase());
+};
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  DROIDSWARM_DEBUG: z.string().optional(),
   DROIDSWARM_SOCKET_HOST: z.string().optional(),
   DROIDSWARM_SOCKET_PORT: z.string().optional(),
   DROIDSWARM_SPECS_DIR: z.string().optional(),
@@ -191,6 +199,7 @@ export const loadConfig = (): OrchestratorConfig => {
 
   return {
     environment,
+    debug: parseBooleanFlag(env.DROIDSWARM_DEBUG, false),
     projectId: env.DROIDSWARM_PROJECT_ID ?? 'droidswarm',
     projectName: env.DROIDSWARM_PROJECT_NAME ?? 'DroidSwarm',
     projectRoot,

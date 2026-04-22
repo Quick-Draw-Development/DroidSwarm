@@ -68,8 +68,15 @@ const parseApprovalPolicy = (value) => {
   }
   return void 0;
 };
+const parseBooleanFlag = (value, fallback = false) => {
+  if (!value) {
+    return fallback;
+  }
+  return ["1", "true", "yes", "on"].includes(value.toLowerCase());
+};
 const envSchema = import_zod.z.object({
   NODE_ENV: import_zod.z.enum(["development", "test", "production"]).default("development"),
+  DROIDSWARM_DEBUG: import_zod.z.string().optional(),
   DROIDSWARM_SOCKET_HOST: import_zod.z.string().optional(),
   DROIDSWARM_SOCKET_PORT: import_zod.z.string().optional(),
   DROIDSWARM_SPECS_DIR: import_zod.z.string().optional(),
@@ -196,6 +203,7 @@ const loadConfig = () => {
   };
   return {
     environment,
+    debug: parseBooleanFlag(env.DROIDSWARM_DEBUG, false),
     projectId: env.DROIDSWARM_PROJECT_ID ?? "droidswarm",
     projectName: env.DROIDSWARM_PROJECT_NAME ?? "DroidSwarm",
     projectRoot,

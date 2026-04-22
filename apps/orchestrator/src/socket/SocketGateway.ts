@@ -26,6 +26,13 @@ export class SocketGateway {
 
   constructor(private readonly config: OrchestratorConfig) {}
 
+  private log(...args: unknown[]): void {
+    if (!this.config.debug) {
+      return;
+    }
+    console.log(this.prefix, ...args);
+  }
+
   setMessageHandler(handler: SocketGatewayMessageHandler): void {
     this.messageHandler = handler;
   }
@@ -60,6 +67,15 @@ export class SocketGateway {
   }
 
   send(message: MessageEnvelope | ReturnType<typeof buildAuthMessage>): void {
+    if ('message_id' in message) {
+      this.log('sending operator message', {
+        type: message.type,
+        normalizedVerb: message.verb,
+        taskId: message.task_id,
+        roomId: message.room_id,
+        messageId: message.message_id,
+      });
+    }
     this.sendToSocket(this.socket, message);
   }
 
@@ -69,6 +85,12 @@ export class SocketGateway {
       console.warn('[SocketGateway] task channel not open for', taskId);
       return;
     }
+    this.log('sending task message', {
+      taskId,
+      type: message.type,
+      normalizedVerb: message.verb,
+      messageId: message.message_id,
+    });
     this.sendToSocket(channelSocket, message);
   }
 
@@ -80,7 +102,7 @@ export class SocketGateway {
     const agentName = `${this.config.agentName}-${taskId}`;
     const channelSocket = new WebSocket(this.config.socketUrl);
     this.channelSockets.set(taskId, channelSocket);
-    console.log(this.prefix, 'connecting to task channel', taskId);
+    this.log('connecting to task channel', taskId);
 
     channelSocket.on('open', () => {
       this.clearChannelReconnect(taskId);
@@ -111,12 +133,12 @@ export class SocketGateway {
   private connect(): void {
     const socket = new WebSocket(this.config.socketUrl);
     this.socket = socket;
-    console.log(this.prefix, 'connecting to socket server at', this.config.socketUrl);
+    this.log('connecting to socket server at', this.config.socketUrl);
 
     socket.on('open', () => {
       this.send(buildAuthMessage(this.config));
       this.startHeartbeat();
-      console.log(this.prefix, 'connection established');
+      this.log('connection established');
     });
 
     socket.on('message', (raw) => {
@@ -145,6 +167,14 @@ export class SocketGateway {
 
     try {
       const message = parseEnvelope(raw.toString());
+      this.log('received message', {
+        source,
+        type: message.type,
+        normalizedVerb: message.verb,
+        taskId: message.task_id,
+        roomId: message.room_id,
+        messageId: message.message_id,
+      });
       void this.messageHandler(message, source);
     } catch {
       // ignore unparsable messages

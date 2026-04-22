@@ -1,20 +1,44 @@
-import { HeartbeatEmitter } from './heartbeat-emitter';
-import { normalizeResult } from './result-normalizer';
+import { spawn } from 'node:child_process';
+
+type WorkerMode = 'worker' | 'verifier';
 
 export class WorkerRunner {
-  private readonly heartbeat = new HeartbeatEmitter(() => {
-    process.stdout.write(`${JSON.stringify({ type: 'heartbeat', timestamp: new Date().toISOString() })}\n`);
-  });
-
-  start(): void {
-    this.heartbeat.start();
-    const raw = process.argv[3] ?? process.argv[2];
-    if (!raw) {
-      process.stdout.write(`${JSON.stringify({ type: 'result', payload: normalizeResult({}) })}\n`);
-      this.heartbeat.stop();
-      return;
+  async start(): Promise<void> {
+    const mode = this.parseMode();
+    const entry = this.resolveEntry(mode);
+    const exitCode = await this.runChild(entry);
+    if (exitCode !== 0) {
+      process.exitCode = exitCode;
     }
-    process.stdout.write(`${JSON.stringify({ type: 'result', payload: normalizeResult(JSON.parse(raw) as Record<string, unknown>) })}\n`);
-    this.heartbeat.stop();
+  }
+
+  private parseMode(): WorkerMode {
+    return process.argv[2] === 'verifier' ? 'verifier' : 'worker';
+  }
+
+  private resolveEntry(mode: WorkerMode): string {
+    const orchestratorEntry = process.env.DROIDSWARM_ORCHESTRATOR_ENTRY;
+    if (!orchestratorEntry) {
+      throw new Error('Missing DROIDSWARM_ORCHESTRATOR_ENTRY for worker-host delegation.');
+    }
+    return orchestratorEntry;
+  }
+
+  private runChild(entry: string): Promise<number> {
+    return new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [entry, ...process.argv.slice(2)], {
+        env: process.env,
+        stdio: 'inherit',
+      });
+
+      child.on('error', reject);
+      child.on('exit', (code, signal) => {
+        if (signal) {
+          reject(new Error(`Worker child exited from signal ${signal}.`));
+          return;
+        }
+        resolve(code ?? 1);
+      });
+    });
   }
 }

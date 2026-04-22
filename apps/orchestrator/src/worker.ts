@@ -16,7 +16,6 @@ import { buildAuthMessage, parseEnvelope } from './protocol';
 import type { HandoffPacket, MessageEnvelope, TaskRecord, TaskScope, TaskStateDigest, WorkerEngine, WorkerHeartbeat, WorkerResult } from './types';
 import { CompressionShape, StatusUpdatePayload, ToolResponsePayload, UsageShape } from '@protocol';
 import { LocalLlamaAdapter } from './adapters/worker/local-llama.adapter';
-import { AppleIntelligenceWorkerAdapter } from './adapters/worker/apple-intelligence.adapter';
 import { CodexCloudAdapter } from './adapters/worker/codex-cloud.adapter';
 import { CodexCliAdapter } from './adapters/worker/codex-cli.adapter';
 import { MuxWorkerAdapter } from './adapters/worker/mux-worker.adapter';
@@ -105,8 +104,13 @@ const getAdapter = (config: ReturnType<typeof loadConfig>, engine: WorkerEngine,
   switch (engine) {
     case 'local-llama':
       return new LocalLlamaAdapter({ baseUrl: config.llamaBaseUrl, timeoutMs: config.llamaTimeoutMs });
-    case 'apple-intelligence':
+    case 'apple-intelligence': {
+      // Apple SDK wiring is optional; only resolve it when that engine is actually selected.
+      // This keeps non-Apple local workers runnable on hosts without the Apple package installed.
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { AppleIntelligenceWorkerAdapter } = require('./adapters/worker/apple-intelligence.adapter') as typeof import('./adapters/worker/apple-intelligence.adapter');
       return new AppleIntelligenceWorkerAdapter({ model: config.modelRouting.apple });
+    }
     case 'codex-cloud':
       return new CodexCloudAdapter({
         apiBaseUrl: config.codexApiBaseUrl,
@@ -129,7 +133,7 @@ const getAdapter = (config: ReturnType<typeof loadConfig>, engine: WorkerEngine,
   }
 };
 
-const runWorker = async (): Promise<void> => {
+export const runWorker = async (): Promise<void> => {
   const config = loadConfig();
   const options = parseOptions();
   const socket = new WebSocket(config.socketUrl);

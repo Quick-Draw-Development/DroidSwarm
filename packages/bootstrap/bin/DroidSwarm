@@ -144,6 +144,16 @@ Options:
 EOF
 }
 
+format_local_http_url() {
+  local port="${1:-}"
+  if [[ -z "$port" || "$port" == "-" ]]; then
+    printf '%s\n' "-"
+    return 0
+  fi
+
+  printf 'http://127.0.0.1:%s\n' "$port"
+}
+
 print_update_help() {
   cat <<'EOF'
 Usage:
@@ -346,7 +356,7 @@ ensure_service_runtime_ready() {
     return 0
   fi
 
-  warn "Local DroidSwarm service runtime is missing or invalid. Attempting automatic repair."
+  info "Local DroidSwarm service runtime is missing or invalid. Attempting automatic repair."
   repair_script="$(resolve_repair_script_path)" || {
     err "Unable to locate repair script for automatic service recovery."
     return 1
@@ -380,16 +390,25 @@ service_listener_is_adoptable() {
   command_line="$(printf '%s' "$command_line" | tr '[:upper:]' '[:lower:]')"
   expected_name="$(printf '%s' "$expected_name" | tr '[:upper:]' '[:lower:]')"
 
-  if [[ -n "$expected_name" && "$command_line" == *"$expected_name"* ]]; then
-    return 0
-  fi
-
-  for token in "$@"; do
-    token="$(printf '%s' "$token" | tr '[:upper:]' '[:lower:]')"
-    if [[ -n "$token" && "$command_line" == *"$token"* ]]; then
+  if [[ "$service_name" == "llama.cpp" ]]; then
+    if [[ -n "$expected_name" && "$command_line" == *"$expected_name"* ]]; then
+      if llama_service_looks_compatible "$port"; then
+        return 0
+      fi
+      return 1
+    fi
+  else
+    if [[ -n "$expected_name" && "$command_line" == *"$expected_name"* ]]; then
       return 0
     fi
-  done
+
+    for token in "$@"; do
+      token="$(printf '%s' "$token" | tr '[:upper:]' '[:lower:]')"
+      if [[ -n "$token" && "$command_line" == *"$token"* ]]; then
+        return 0
+      fi
+    done
+  fi
 
   local swarm_id candidate_pid candidate_port
   for swarm_id in $(active_swarm_ids); do
@@ -418,9 +437,34 @@ service_listener_is_adoptable() {
       candidate_pid="$(<"$(service_pid_file "$service_name" "$(swarm_dir "$swarm_id")")")"
     fi
     if [[ -n "$candidate_pid" && "$candidate_pid" == "$listener_pid" ]]; then
-      return 0
+      if [[ "$service_name" != "llama.cpp" ]] || llama_service_looks_compatible "$port"; then
+        return 0
+      fi
     fi
   done
+
+  return 1
+}
+
+llama_service_looks_compatible() {
+  local port="$1"
+  local base_url="http://127.0.0.1:${port}"
+
+  if ! port_is_listening "$port"; then
+    return 1
+  fi
+
+  if http_probe "${base_url}/v1/models" 2; then
+    return 0
+  fi
+
+  if http_post_json_probe "${base_url}/completion" '{"prompt":"health","n_predict":1}' 3; then
+    return 0
+  fi
+
+  if http_post_json_probe "${base_url}/v1/completions" '{"model":"default","prompt":"health","max_tokens":1}' 3; then
+    return 0
+  fi
 
   return 1
 }
@@ -1079,6 +1123,7 @@ cmd_swarm() {
   info "Project root: $project_root"
   info "Dashboard port: $dashboard_port"
   info "WebSocket port: $ws_port"
+  info "Blink UI port: $blink_port"
   info "Debug logging: $( [[ "$debug_enabled" == "1" ]] && printf 'on' || printf 'off' )"
 
   if [[ "$dry_run" == "1" ]]; then
@@ -1178,6 +1223,7 @@ print_swarm_runtime_status() {
   local pid status uptime
   local socket_component_status dashboard_component_status orch_component_status bridge_component_status
   local blink_component_status mux_component_status llama_component_status
+  local dashboard_url ws_url blink_url
 
   pid="-"
   status="stopped"
@@ -1189,6 +1235,9 @@ print_swarm_runtime_status() {
   blink_component_status="-"
   mux_component_status="-"
   llama_component_status="-"
+  dashboard_url="-"
+  ws_url="-"
+  blink_url="-"
 
   if [[ -f "$(swarm_status_file "$swarm_id")" ]]; then
     status="$(<"$(swarm_status_file "$swarm_id")")"
@@ -1224,17 +1273,24 @@ print_swarm_runtime_status() {
     llama_component_status="$(<"$(service_status_file "llama.cpp" "$(swarm_dir "$swarm_id")")")"
   fi
 
-  if [[ "$include_header" == "1" ]]; then
-    printf '%-28s %-18s %-10s %-8s %-8s %-8s %-12s\n' \
-      "SWARM_ID" "PROJECT_ID" "STATUS" "PID" "DASH" "WS" "UPTIME"
+  dashboard_url="$(format_local_http_url "${DROIDSWARM_DASHBOARD_PORT:-"-"}")"
+  if [[ -n "${DROIDSWARM_WS_PORT:-}" ]]; then
+    ws_url="ws://127.0.0.1:${DROIDSWARM_WS_PORT}"
   fi
-  printf '%-28s %-18s %-10s %-8s %-8s %-8s %-12s\n' \
+  blink_url="$(format_local_http_url "${DROIDSWARM_BLINK_SERVER_PORT:-"-"}")"
+
+  if [[ "$include_header" == "1" ]]; then
+    printf '%-28s %-18s %-10s %-8s %-8s %-8s %-8s %-12s\n' \
+      "SWARM_ID" "PROJECT_ID" "STATUS" "PID" "DASH" "WS" "BLINK" "UPTIME"
+  fi
+  printf '%-28s %-18s %-10s %-8s %-8s %-8s %-8s %-12s\n' \
     "$swarm_id" \
     "${DROIDSWARM_PROJECT_ID:-unknown}" \
     "$status" \
     "$pid" \
     "${DROIDSWARM_DASHBOARD_PORT:-"-"}" \
     "${DROIDSWARM_WS_PORT:-"-"}" \
+    "${DROIDSWARM_BLINK_SERVER_PORT:-"-"}" \
     "$uptime"
   printf '  components: socket=%s dashboard=%s orchestrator=%s blink-bridge=%s\n' \
     "$socket_component_status" \
@@ -1245,6 +1301,10 @@ print_swarm_runtime_status() {
     "$blink_component_status" \
     "$mux_component_status" \
     "$llama_component_status"
+  printf '  urls: dashboard=%s ws=%s blink=%s\n' \
+    "$dashboard_url" \
+    "$ws_url" \
+    "$blink_url"
 }
 
 project_swarm_ids() {
@@ -1343,8 +1403,8 @@ EOF
     shift
   done
 
-  printf '%-28s %-18s %-10s %-8s %-8s %-8s %-12s\n' \
-    "SWARM_ID" "PROJECT_ID" "STATUS" "PID" "DASH" "WS" "UPTIME"
+  printf '%-28s %-18s %-10s %-8s %-8s %-8s %-8s %-12s\n' \
+    "SWARM_ID" "PROJECT_ID" "STATUS" "PID" "DASH" "WS" "BLINK" "UPTIME"
 
   local swarm_id pid status uptime
   local found="0"

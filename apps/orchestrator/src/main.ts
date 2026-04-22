@@ -16,9 +16,11 @@ const startOrchestrator = (): void => {
 
 const bootstrapWorker = (mode: 'worker' | 'verifier'): void => {
   if (mode === 'worker') {
-    require('./worker');
+    const { runWorker } = require('./worker') as typeof import('./worker');
+    void runWorker();
   } else {
-    require('./verifier');
+    const { runVerifier } = require('./verifier') as typeof import('./verifier');
+    void runVerifier();
   }
 };
 

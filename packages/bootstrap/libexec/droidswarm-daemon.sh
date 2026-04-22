@@ -123,6 +123,52 @@ service_adopted_pid() {
   printf '%s\n' "${!pid_var:-}"
 }
 
+llama_service_looks_healthy() {
+  local port="$1"
+  local base_url="http://127.0.0.1:${port}"
+
+  if ! port_is_listening "$port"; then
+    return 1
+  fi
+
+  if http_probe "${base_url}/v1/models" 2; then
+    return 0
+  fi
+
+  if http_post_json_probe "${base_url}/completion" '{"prompt":"health","n_predict":1}' 3; then
+    return 0
+  fi
+
+  if http_post_json_probe "${base_url}/v1/completions" '{"model":"default","prompt":"health","max_tokens":1}' 3; then
+    return 0
+  fi
+
+  return 1
+}
+
+service_passes_health_check() {
+  local name="$1"
+  local port="$2"
+  local pid="${3:-}"
+
+  if [[ -z "$port" ]] || ! port_is_listening "$port"; then
+    return 1
+  fi
+
+  if [[ -n "$pid" ]] && ! is_pid_running "$pid"; then
+    return 1
+  fi
+
+  case "$name" in
+    llama.cpp)
+      llama_service_looks_healthy "$port"
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
 start_component() {
   local name="$1"
   local health_port="$2"
@@ -191,9 +237,11 @@ start_service() {
 
   if port_is_listening "$port"; then
     if [[ -n "$existing_pid" ]] && is_pid_running "$existing_pid"; then
-      mark_service_status "$name" "running"
-      printf '[%s] reusing existing %s on port %s (pid %s)\n' "$(now_utc)" "$name" "$port" "$existing_pid" >>"$log_file"
-      return 0
+      if service_passes_health_check "$name" "$port" "$existing_pid"; then
+        mark_service_status "$name" "running"
+        printf '[%s] reusing existing %s on port %s (pid %s)\n' "$(now_utc)" "$name" "$port" "$existing_pid" >>"$log_file"
+        return 0
+      fi
     fi
 
     if service_should_adopt "$name"; then
@@ -202,11 +250,13 @@ start_service() {
         local adopted_pid
         adopted_pid="$(service_adopted_pid "$name" || true)"
         if [[ -z "$adopted_pid" || "$adopted_pid" == "$listener_pid" ]]; then
-          printf '%s\n' "$listener_pid" >"$pid_file"
-          printf '1\n' >"$(service_adopted_file "$name" "$state_dir")"
-          mark_service_status "$name" "running"
-          printf '[%s] adopted %s on port %s (pid %s)\n' "$(now_utc)" "$name" "$port" "$listener_pid" >>"$log_file"
-          return 0
+          if service_passes_health_check "$name" "$port" "$listener_pid"; then
+            printf '%s\n' "$listener_pid" >"$pid_file"
+            printf '1\n' >"$(service_adopted_file "$name" "$state_dir")"
+            mark_service_status "$name" "running"
+            printf '[%s] adopted %s on port %s (pid %s)\n' "$(now_utc)" "$name" "$port" "$listener_pid" >>"$log_file"
+            return 0
+          fi
         fi
       fi
     fi
@@ -224,7 +274,7 @@ start_service() {
     printf '%s\n' "$pid" >"$pid_file"
     rm -f "$(service_adopted_file "$name" "$state_dir")"
 
-    if wait_for_port "$port" 20 1 && is_pid_running "$pid"; then
+    if wait_for_port "$port" 20 1 && service_passes_health_check "$name" "$port" "$pid"; then
       mark_service_status "$name" "running"
       return 0
     fi
@@ -303,6 +353,25 @@ maybe_restart_service() {
   rm -f "$(service_adopted_file "$name" "$state_dir")"
   printf '%s\n' $((restart_count + 1)) >"$restart_count_file"
   restart_service "$name" "$port" "$@"
+}
+
+service_runtime_is_healthy() {
+  local name="$1"
+  local port="$2"
+  local pid_file pid
+  pid_file="$(service_pid_file "$name" "$state_dir")"
+  pid=""
+
+  if [[ -f "$pid_file" ]]; then
+    pid="$(<"$pid_file")"
+  fi
+
+  if [[ -f "$(service_adopted_file "$name" "$state_dir")" ]]; then
+    service_passes_health_check "$name" "$port" ""
+    return $?
+  fi
+
+  service_passes_health_check "$name" "$port" "$pid"
 }
 
 stop_component() {
@@ -484,7 +553,7 @@ if [[ -f "$DROIDSWARM_SERVICE_CONFIG" ]]; then
 fi
 
 DROIDSWARM_BLINK_SERVER_START_CMD="${DROIDSWARM_BLINK_SERVER_BIN} --host 127.0.0.1 --port ${DROIDSWARM_BLINK_SERVER_PORT}"
-DROIDSWARM_MUX_START_CMD="${DROIDSWARM_MUX_BIN} server --port ${DROIDSWARM_MUX_PORT}"
+DROIDSWARM_MUX_START_CMD="${DROIDSWARM_MUX_BIN} server --host 127.0.0.1 --port ${DROIDSWARM_MUX_PORT}"
 DROIDSWARM_LLAMA_START_CMD="${DROIDSWARM_LLAMA_SERVER_BIN} --host 127.0.0.1 --port ${DROIDSWARM_LLAMA_PORT} -m ${DROIDSWARM_LLAMA_MODEL}"
 
 for required_var in \
@@ -566,8 +635,21 @@ while true; do
 
   for service_name in blink-server mux llama.cpp; do
     service_pid="$(<"$(service_pid_file "$service_name" "$state_dir")")"
-    if ! is_pid_running "$service_pid"; then
+    service_port=""
+    case "$service_name" in
+      blink-server)
+        service_port="$DROIDSWARM_BLINK_SERVER_PORT"
+        ;;
+      mux)
+        service_port="$DROIDSWARM_MUX_PORT"
+        ;;
+      llama.cpp)
+        service_port="$DROIDSWARM_LLAMA_PORT"
+        ;;
+    esac
+    if ! service_runtime_is_healthy "$service_name" "$service_port"; then
       if [[ "$shutdown_requested" != "1" ]]; then
+        mark_service_status "$service_name" "retrying"
         case "$service_name" in
           blink-server)
             maybe_restart_service "$service_name" "$DROIDSWARM_BLINK_SERVER_PORT" run_blink_server

@@ -12,9 +12,11 @@ const startOrchestrator = () => {
 };
 const bootstrapWorker = (mode2) => {
   if (mode2 === "worker") {
-    require("./worker");
+    const { runWorker } = require("./worker");
+    void runWorker();
   } else {
-    require("./verifier");
+    const { runVerifier } = require("./verifier");
+    void runVerifier();
   }
 };
 const mode = process.argv[2];

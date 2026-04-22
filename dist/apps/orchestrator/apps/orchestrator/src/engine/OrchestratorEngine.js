@@ -241,7 +241,7 @@ class OrchestratorEngine {
     if (!payload.result || !["agent_completed", "agent_blocked", "agent_failed"].includes(payload.status_code)) {
       return;
     }
-    const attempt = this.lookupAttempt(taskId, message.from.actor_id);
+    const attempt = this.lookupAttempt(taskId, message.from.actor_id, message.from.actor_name);
     if (!attempt) {
       this.log("status.update.unmatched", {
         taskId,
@@ -285,20 +285,20 @@ class OrchestratorEngine {
       response.error
     ));
   }
-  lookupAttempt(taskId, agentName) {
+  lookupAttempt(taskId, actorId, actorName) {
     for (const [attemptId, attempt] of this.attemptMap.entries()) {
-      if (attempt.taskId === taskId && attempt.agentName === agentName) {
+      if (attempt.taskId === taskId && (attempt.agentName === actorId || actorName && attempt.agentName === actorName)) {
         return { attemptId, ...attempt };
       }
     }
     const attempts = this.deps.persistenceService.listAttemptsForTask(taskId);
-    const matched = attempts.find((attempt) => attempt.agentName === agentName);
+    const matched = attempts.find((attempt) => attempt.agentName === actorId || actorName && attempt.agentName === actorName);
     if (!matched) {
       return void 0;
     }
     const role = typeof matched.metadata?.role === "string" ? matched.metadata.role : "worker";
-    this.attemptMap.set(matched.attemptId, { taskId, role, agentName });
-    return { attemptId: matched.attemptId, taskId, role, agentName };
+    this.attemptMap.set(matched.attemptId, { taskId, role, agentName: matched.agentName });
+    return { attemptId: matched.attemptId, taskId, role, agentName: matched.agentName };
   }
 }
 // Annotate the CommonJS export names for ESM import in node:

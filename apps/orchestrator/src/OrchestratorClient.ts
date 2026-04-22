@@ -115,10 +115,9 @@ export class DroidSwarmOrchestratorClient {
     });
 
     this.gateway.setMessageHandler(this.engine.handleMessage.bind(this.engine));
+    this.gateway.start();
 
-    for (const task of this.persistenceService.getTasks()) {
-      this.registry.register(this.toTaskRecord(task));
-    }
+    this.hydrateExistingTasks();
 
     const recoveredSummaries = this.runLifecycle.getRecoverySummaries();
     for (const summary of recoveredSummaries) {
@@ -138,7 +137,6 @@ export class DroidSwarmOrchestratorClient {
     }
 
     this.log('run ready', this.currentRun.runId);
-    this.gateway.start();
   }
 
   stop(): void {
@@ -171,5 +169,19 @@ export class DroidSwarmOrchestratorClient {
       createdByUserId: typeof task.metadata?.created_by === 'string' ? task.metadata.created_by : undefined,
       branchName: typeof task.metadata?.branch_name === 'string' ? task.metadata.branch_name : undefined,
     };
+  }
+
+  private hydrateExistingTasks(): void {
+    const tasks = this.persistenceService?.getTasks() ?? [];
+    for (const task of tasks) {
+      this.registry.register(this.toTaskRecord(task));
+      if (this.shouldWatchTaskChannel(task)) {
+        this.gateway.watchTaskChannel(task.taskId);
+      }
+    }
+  }
+
+  private shouldWatchTaskChannel(task: PersistedTask): boolean {
+    return !['completed', 'failed', 'cancelled', 'verified'].includes(task.status);
   }
 }

@@ -123,7 +123,7 @@ const trimLog = (input: string): string => {
   return `${input.slice(0, MAX_LOG_LENGTH)}\n...log truncated`;
 };
 
-const runVerifier = async (): Promise<void> => {
+export const runVerifier = async (): Promise<void> => {
   const config = loadConfig();
   const options = parseOptions();
   const socket = new WebSocket(config.socketUrl);
@@ -226,7 +226,9 @@ const runVerifier = async (): Promise<void> => {
   socket.close();
 };
 
-runVerifier().catch((error) => {
-  console.error('Verifier failed', error);
-  process.exit(1);
-});
+if (require.main === module) {
+  runVerifier().catch((error) => {
+    console.error('Verifier failed', error);
+    process.exit(1);
+  });
+}

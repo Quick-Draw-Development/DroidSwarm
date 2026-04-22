@@ -352,6 +352,35 @@ PY
   return 1
 }
 
+http_probe() {
+  local url="$1"
+  local timeout="${2:-2}"
+
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsS --max-time "$timeout" "$url" >/dev/null 2>&1
+    return $?
+  fi
+
+  return 1
+}
+
+http_post_json_probe() {
+  local url="$1"
+  local json="$2"
+  local timeout="${3:-3}"
+
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsS --max-time "$timeout" \
+      -H 'content-type: application/json' \
+      -X POST \
+      --data "$json" \
+      "$url" >/dev/null 2>&1
+    return $?
+  fi
+
+  return 1
+}
+
 listener_pid_for_port() {
   local port="$1"
 

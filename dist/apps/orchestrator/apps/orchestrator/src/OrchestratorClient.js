@@ -128,9 +128,8 @@ class DroidSwarmOrchestratorClient {
       onAgentCommunication: this.engine.handleAgentCommunication.bind(this.engine)
     });
     this.gateway.setMessageHandler(this.engine.handleMessage.bind(this.engine));
-    for (const task of this.persistenceService.getTasks()) {
-      this.registry.register(this.toTaskRecord(task));
-    }
+    this.gateway.start();
+    this.hydrateExistingTasks();
     const recoveredSummaries = this.runLifecycle.getRecoverySummaries();
     for (const summary of recoveredSummaries) {
       for (const taskId of summary.resumedTasks) {
@@ -148,7 +147,6 @@ class DroidSwarmOrchestratorClient {
       );
     }
     this.log("run ready", this.currentRun.runId);
-    this.gateway.start();
   }
   stop() {
     if (this.currentRun) {
@@ -178,6 +176,18 @@ class DroidSwarmOrchestratorClient {
       createdByUserId: typeof task.metadata?.created_by === "string" ? task.metadata.created_by : void 0,
       branchName: typeof task.metadata?.branch_name === "string" ? task.metadata.branch_name : void 0
     };
+  }
+  hydrateExistingTasks() {
+    const tasks = this.persistenceService?.getTasks() ?? [];
+    for (const task of tasks) {
+      this.registry.register(this.toTaskRecord(task));
+      if (this.shouldWatchTaskChannel(task)) {
+        this.gateway.watchTaskChannel(task.taskId);
+      }
+    }
+  }
+  shouldWatchTaskChannel(task) {
+    return !["completed", "failed", "cancelled", "verified"].includes(task.status);
   }
 }
 // Annotate the CommonJS export names for ESM import in node:

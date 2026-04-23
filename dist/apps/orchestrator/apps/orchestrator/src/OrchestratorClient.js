@@ -46,6 +46,7 @@ var import_run_lifecycle = require("./run-lifecycle");
 var import_run_shutdown = require("./run-shutdown");
 var import_ToolService = require("./tools/ToolService");
 var import_project_registry = require("./services/project-registry.service");
+var import_federation_bus = require("@federation-bus");
 class DroidSwarmOrchestratorClient {
   constructor(config = (0, import_config.loadConfig)()) {
     this.config = config;
@@ -141,6 +142,7 @@ class DroidSwarmOrchestratorClient {
     });
     this.gateway.setMessageHandler(this.engine.handleMessage.bind(this.engine));
     this.gateway.start();
+    void this.announceFederationPresence();
     this.hydrateExistingTasks();
     this.persistenceService.recordSwarmTopologySnapshot();
     const recoveredSummaries = this.runLifecycle.getRecoverySummaries();
@@ -201,6 +203,32 @@ class DroidSwarmOrchestratorClient {
   }
   shouldWatchTaskChannel(task) {
     return !["completed", "failed", "cancelled", "verified"].includes(task.status);
+  }
+  async announceFederationPresence() {
+    if (!this.config.federationEnabled || !this.config.federationAdminUrl || !this.config.federationBusUrl) {
+      return;
+    }
+    try {
+      await (0, import_federation_bus.onboardPeer)(this.config.federationAdminUrl, {
+        peerId: this.config.federationNodeId ?? this.config.projectId,
+        busUrl: this.config.federationBusUrl,
+        adminUrl: this.config.federationAdminUrl,
+        capabilities: ["envelope-v2", "orchestrator", "drift-detection"],
+        projectIds: [this.config.projectId],
+        ts: (/* @__PURE__ */ new Date()).toISOString()
+      }, this.config.federationSigningKeyId && this.config.federationSigningPrivateKey ? {
+        keyId: this.config.federationSigningKeyId,
+        privateKeyPem: this.config.federationSigningPrivateKey
+      } : void 0);
+      this.log("federation onboarded", {
+        nodeId: this.config.federationNodeId,
+        projectId: this.config.projectId
+      });
+    } catch (error) {
+      this.log("federation onboard failed", {
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
   }
 }
 // Annotate the CommonJS export names for ESM import in node:

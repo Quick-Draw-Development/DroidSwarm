@@ -302,10 +302,11 @@
       ]
     },
     "transpilePackages": [
-      "@shared-tracing",
       "@federation-bus",
+      "@shared-tracing",
       "@protocol-alias",
       "@protocol",
+      "@model-router",
       "@shared-projects"
     ],
     "turbopack": {

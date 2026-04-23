@@ -38,6 +38,7 @@ var import_agent_prompt = require("./agent-prompt");
 var import_messages = require("./messages");
 var import_protocol = require("./protocol");
 var import_local_llama = require("./adapters/worker/local-llama.adapter");
+var import_mlx = require("./adapters/worker/mlx.adapter");
 var import_codex_cloud = require("./adapters/worker/codex-cloud.adapter");
 var import_codex_cli = require("./adapters/worker/codex-cli.adapter");
 const parseOptions = () => {
@@ -89,11 +90,18 @@ const getAdapter = (config, engine, workspacePath) => {
   switch (engine) {
     case "local-llama":
       return new import_local_llama.LocalLlamaAdapter({ baseUrl: config.llamaBaseUrl, timeoutMs: config.llamaTimeoutMs });
+    case "mlx":
+      return new import_mlx.MlxAdapter({
+        baseUrl: config.mlx?.baseUrl ?? config.llamaBaseUrl,
+        timeoutMs: config.llamaTimeoutMs
+      });
     case "apple-intelligence": {
       const { AppleIntelligenceWorkerAdapter } = require("./adapters/worker/apple-intelligence.adapter");
       return new AppleIntelligenceWorkerAdapter({
         model: config.modelRouting.apple,
-        sdkEnabled: config.appleIntelligence?.enabled
+        sdkEnabled: config.appleIntelligence?.enabled,
+        preferredByHost: config.appleIntelligence?.preferredByHost,
+        availableTools: config.allowedTools
       });
     }
     case "codex-cloud":
@@ -163,7 +171,7 @@ const runWorker = async () => {
   });
   const scope = resolveScope(config, options);
   const engine = options.engine ?? "local-llama";
-  const modelOverride = options.model ?? (engine === "local-llama" ? config.llamaModel : engine === "apple-intelligence" ? config.modelRouting.apple : engine === "codex-cloud" ? config.codexCloudModel : config.codexModel);
+  const modelOverride = options.model ?? (engine === "local-llama" ? config.llamaModel : engine === "mlx" ? config.modelRouting.mlx ?? "mlx/local" : engine === "apple-intelligence" ? config.modelRouting.apple : engine === "codex-cloud" ? config.codexCloudModel : config.codexModel);
   const reportLLMCall = (payload, usage2) => {
     sendMessage(
       socket,

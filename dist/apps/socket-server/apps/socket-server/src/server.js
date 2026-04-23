@@ -256,7 +256,20 @@ class DroidSwarmSocketServer {
   async startFederationPolling() {
     try {
       const status = this.config.federationAdminUrl ? await (0, import_federation_bus.fetchBusStatus)(this.config.federationAdminUrl) : void 0;
-      this.federationLastSequence = status?.recentEventCount ?? 0;
+      this.federationLastSequence = status?.latestSequence ?? 0;
+      if (this.config.federationAdminUrl) {
+        await (0, import_federation_bus.onboardPeer)(this.config.federationAdminUrl, {
+          peerId: this.config.federationNodeId,
+          busUrl: this.config.federationBusUrl,
+          adminUrl: this.config.federationAdminUrl,
+          capabilities: ["envelope-v2", "socket-server", "drift-detection"],
+          projectIds: this.config.allowedProjectIds && this.config.allowedProjectIds.length > 0 ? this.config.allowedProjectIds : [this.config.projectId],
+          ts: (/* @__PURE__ */ new Date()).toISOString()
+        }, this.config.federationSigningKeyId && this.config.federationSigningPrivateKey ? {
+          keyId: this.config.federationSigningKeyId,
+          privateKeyPem: this.config.federationSigningPrivateKey
+        } : void 0);
+      }
     } catch (error) {
       this.logger.warn(
         { error: error instanceof Error ? error.message : String(error) },
@@ -316,7 +329,7 @@ class DroidSwarmSocketServer {
     try {
       this.persistence.ensureChannel({
         channelId: message.room_id,
-        projectId: this.config.projectId,
+        projectId: message.project_id,
         taskId: message.task_id,
         channelType: message.room_id === "operator" ? "operator" : "task",
         name: message.room_id,

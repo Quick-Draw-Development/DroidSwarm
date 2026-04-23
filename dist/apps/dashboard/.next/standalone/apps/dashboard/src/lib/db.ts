@@ -1239,10 +1239,10 @@ export const getRunServiceUsage = (runId?: string): RunServiceUsageSummary | und
       const isLocalCapableRole = ['planner', 'researcher', 'reviewer', 'verifier', 'checkpoint-compressor', 'arbiter', 'summarizer'].includes(role);
       if (isLocalCapableRole) {
         localCapableAttempts += 1;
-        if (engine === 'local-llama') {
+        if (engine === 'local-llama' || engine === 'mlx' || engine === 'apple-intelligence') {
           localCapableLocalAttempts += 1;
         }
-        if (typeof engine === 'string' && engine !== 'local-llama') {
+        if (typeof engine === 'string' && !['local-llama', 'mlx', 'apple-intelligence'].includes(engine)) {
           localCapableCloudAttempts += 1;
         }
       }

@@ -240,4 +240,56 @@ const toolServiceStub = {
     import_strict.default.equal(recordedEvents[0]?.transportBody?.reportedHandoffHash, "handoff-remote");
     import_strict.default.equal(recordedEvents[0]?.transportBody?.expectedHandoffHash, "handoff-expected");
   });
+  (0, import_node_test.it)("records federated drift trace events relayed from the bus", async () => {
+    const recordedEvents = [];
+    const persistenceService = {
+      recordExecutionEvent: (eventType, detail, _metadata, transport) => {
+        recordedEvents.push({ eventType, detail, transportBody: transport?.transportBody });
+      },
+      getLatestTaskStateDigest: () => void 0,
+      getLatestHandoffPacket: () => void 0
+    };
+    const engine = new import_OrchestratorEngine.OrchestratorEngine({
+      config: TEST_CONFIG,
+      persistenceService,
+      scheduler: {},
+      supervisor: {},
+      gateway: {
+        send: () => void 0,
+        watchTaskChannel: () => void 0,
+        setMessageHandler: () => void 0
+      },
+      chatResponder: {},
+      controlService: {},
+      registry: new import_worker_registry.WorkerRegistry(),
+      runLifecycle: {},
+      toolService: toolServiceStub
+    });
+    const message = {
+      message_id: "msg-trace-1",
+      project_id: TEST_CONFIG.projectId,
+      room_id: "task-3",
+      task_id: "task-3",
+      type: "trace_event",
+      verb: "drift.detected",
+      body: {
+        detail: "Federation drift detected for task-3.",
+        reportedDigestHash: "digest-remote",
+        expectedDigestHash: "digest-local"
+      },
+      payload: {
+        detail: "Federation drift detected for task-3."
+      },
+      from: {
+        actor_type: "agent",
+        actor_id: "node-remote",
+        actor_name: "node-remote"
+      },
+      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    await engine.handleMessage(message, "task");
+    import_strict.default.equal(recordedEvents[0]?.eventType, "agent_result");
+    import_strict.default.equal(recordedEvents[0]?.detail, "Federation drift detected for task-3.");
+    import_strict.default.equal(recordedEvents[0]?.transportBody?.expectedDigestHash, "digest-local");
+  });
 });

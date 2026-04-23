@@ -175,6 +175,10 @@ class OrchestratorEngine {
       this.deps.gateway.send((0, import_messages.buildOperatorChatResponse)(this.deps.config, content));
       return;
     }
+    if (message.type === "trace_event" && message.verb === "drift.detected") {
+      this.handleFederationDriftEvent(message);
+      return;
+    }
     if (message.type !== "status_update") {
       return;
     }
@@ -351,6 +355,26 @@ class OrchestratorEngine {
       response.result,
       response.error
     ));
+  }
+  handleFederationDriftEvent(message) {
+    const taskId = message.task_id ?? message.room_id;
+    const payload = typeof message.payload === "object" && message.payload !== null ? message.payload : void 0;
+    const detail = typeof payload?.detail === "string" ? payload.detail : typeof message.body?.detail === "string" ? message.body.detail : `Federation drift detected for ${taskId}.`;
+    this.log("federation.drift.received", {
+      taskId,
+      messageId: message.message_id,
+      actorId: message.from.actor_id,
+      actorName: message.from.actor_name
+    });
+    this.deps.persistenceService.recordExecutionEvent("agent_result", detail, {
+      taskId,
+      source: "federation-bus",
+      drift: message.body
+    }, {
+      taskId,
+      normalizedVerb: "drift.detected",
+      transportBody: message.body
+    });
   }
   lookupAttempt(taskId, actorId, actorName) {
     for (const [attemptId, attempt] of this.attemptMap.entries()) {

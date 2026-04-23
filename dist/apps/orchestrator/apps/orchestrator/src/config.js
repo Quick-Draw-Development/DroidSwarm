@@ -33,6 +33,7 @@ module.exports = __toCommonJS(config_exports);
 var import_node_fs = __toESM(require("node:fs"));
 var import_node_path = __toESM(require("node:path"));
 var import_shared_git = require("@shared-git");
+var import_model_router = require("@model-router");
 var import_specs = require("./specs");
 var import_zod = require("zod");
 const toPositiveInt = (value, fallback) => {
@@ -155,8 +156,11 @@ const envSchema = import_zod.z.object({
   DROIDSWARM_MODEL_VERIFICATION: import_zod.z.string().optional(),
   DROIDSWARM_MODEL_CODE: import_zod.z.string().optional(),
   DROIDSWARM_MODEL_APPLE: import_zod.z.string().optional(),
+  DROIDSWARM_MODEL_MLX: import_zod.z.string().optional(),
   DROIDSWARM_MODEL_DEFAULT: import_zod.z.string().optional(),
   DROIDSWARM_APPLE_INTELLIGENCE_ENABLED: import_zod.z.string().optional(),
+  DROIDSWARM_MLX_ENABLED: import_zod.z.string().optional(),
+  DROIDSWARM_MLX_BASE_URL: import_zod.z.string().optional(),
   DROIDSWARM_ROUTING_PLANNER_ROLES: import_zod.z.string().optional(),
   DROIDSWARM_ROUTING_APPLE_ROLES: import_zod.z.string().optional(),
   DROIDSWARM_ROUTING_APPLE_HINTS: import_zod.z.string().optional(),
@@ -215,10 +219,19 @@ const loadConfig = () => {
   const verificationModel = env.DROIDSWARM_MODEL_VERIFICATION ?? "gpt-4o-mini";
   const codeModel = env.DROIDSWARM_MODEL_CODE ?? "claude-3.5-sonnet";
   const appleModel = env.DROIDSWARM_MODEL_APPLE ?? "apple-intelligence/local";
+  const mlxModel = env.DROIDSWARM_MODEL_MLX ?? "mlx/local";
   const defaultModel = env.DROIDSWARM_MODEL_DEFAULT ?? env.DROIDSWARM_CODEX_MODEL ?? "o1-preview";
   const appleSdkAvailable = hasAppleIntelligenceSdk();
-  const appleIntelligenceConfigured = env.DROIDSWARM_APPLE_INTELLIGENCE_ENABLED == null ? true : parseBooleanFlag(env.DROIDSWARM_APPLE_INTELLIGENCE_ENABLED, true);
+  const prefersAppleHost = (0, import_model_router.detectAppleSilicon)();
+  const appleIntelligenceConfigured = env.DROIDSWARM_APPLE_INTELLIGENCE_ENABLED == null ? prefersAppleHost : parseBooleanFlag(env.DROIDSWARM_APPLE_INTELLIGENCE_ENABLED, true);
   const appleIntelligenceEnabled = appleIntelligenceConfigured && appleSdkAvailable;
+  const mlxEnabled = parseBooleanFlag(env.DROIDSWARM_MLX_ENABLED, prefersAppleHost);
+  const mlxBaseUrl = env.DROIDSWARM_MLX_BASE_URL;
+  const mlxAvailable = (0, import_model_router.detectMlxRuntime)({
+    enabled: mlxEnabled,
+    baseUrl: mlxBaseUrl,
+    model: mlxModel
+  });
   const budgetMaxConsumed = toPositiveIntOrUndefined(env.DROIDSWARM_BUDGET_MAX_CONSUMED);
   const allowedTools = parseCommaList(env.DROIDSWARM_ALLOWED_TOOLS);
   const policyAllowedTools = parseOptionalCommaList(env.DROIDSWARM_POLICY_ALLOWED_TOOLS) ?? (allowedTools.length > 0 ? allowedTools : void 0);
@@ -272,7 +285,7 @@ const loadConfig = () => {
         remoteEntry: record.remoteEntry,
         remoteCommand: typeof record.remoteCommand === "string" ? record.remoteCommand : void 0,
         roles: Array.isArray(record.roles) ? record.roles.filter((value) => typeof value === "string") : void 0,
-        engines: Array.isArray(record.engines) ? record.engines.filter((value) => value === "local-llama" || value === "apple-intelligence" || value === "codex-cloud" || value === "codex-cli") : void 0,
+        engines: Array.isArray(record.engines) ? record.engines.filter((value) => value === "local-llama" || value === "mlx" || value === "apple-intelligence" || value === "codex-cloud" || value === "codex-cli") : void 0,
         modelTier,
         workspaceRoot: typeof record.workspaceRoot === "string" ? record.workspaceRoot : void 0,
         nodeId: typeof record.nodeId === "string" ? record.nodeId : void 0
@@ -346,11 +359,19 @@ const loadConfig = () => {
       verification: verificationModel,
       code: codeModel,
       apple: appleModel,
+      mlx: mlxModel,
       default: defaultModel
     },
     appleIntelligence: {
       enabled: appleIntelligenceEnabled,
-      sdkAvailable: appleSdkAvailable
+      sdkAvailable: appleSdkAvailable,
+      preferredByHost: prefersAppleHost
+    },
+    mlx: {
+      enabled: mlxEnabled,
+      available: mlxAvailable,
+      baseUrl: mlxBaseUrl,
+      model: mlxModel
     },
     routingPolicy: {
       plannerRoles: parseCommaList(env.DROIDSWARM_ROUTING_PLANNER_ROLES ?? "plan,planner,research,review,orchestrator,checkpoint,compress"),

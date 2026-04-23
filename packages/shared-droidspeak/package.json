@@ -1,0 +1,12 @@
+{
+  "name": "@droidswarm/shared-droidspeak",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": {
+      "import": "./src/index.ts"
+    }
+  },
+  "devDependencies": {}
+}

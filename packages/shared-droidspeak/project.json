@@ -1,0 +1,25 @@
+{
+  "name": "shared-droidspeak",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/shared-droidspeak/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "@nx/esbuild:esbuild",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "dist/packages/shared-droidspeak",
+        "tsConfig": "packages/shared-droidspeak/tsconfig.lib.json",
+        "packageJson": "packages/shared-droidspeak/package.json",
+        "main": "packages/shared-droidspeak/src/index.ts",
+        "format": ["esm"],
+        "bundle": false
+      }
+    },
+    "lint": {
+      "executor": "@nx/linter:eslint",
+      "outputs": ["{options.outputFile}"]
+    }
+  },
+  "tags": []
+}

@@ -44,16 +44,17 @@
     "esbuild": "^0.19.2",
     "nx": "^22.5.4",
     "prettier": "^3.8.1",
+    "protocol": "file:packages/protocol",
+    "protocol-alias": "file:packages/protocol-alias",
     "tslib": "^2.3.0",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.2",
-    "protocol": "file:packages/protocol",
-    "protocol-alias": "file:packages/protocol-alias"
+    "typescript": "^5.9.2"
   },
   "engines": {
     "node": "25.8.0"
   },
   "dependencies": {
+    "@slack/bolt": "^4.7.1",
     "better-sqlite3": "^12.6.2",
     "next": "~16.0.1",
     "pino": "^10.3.1",

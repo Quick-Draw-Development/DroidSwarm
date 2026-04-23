@@ -1,6 +1,6 @@
 # DroidSwarm
 
-This repository is an Nx monorepo for a local-first, durable multi-agent system. `apps/orchestrator` remains the canonical control plane, `apps/dashboard` is the primary UI, `apps/socket-server` is the live messaging gateway, and `apps/blink-bridge` mirrors the canonical task chat to Blink/Slack.
+This repository is an Nx monorepo for a local-first, durable multi-agent system. `apps/orchestrator` remains the canonical control plane, `apps/dashboard` is the primary UI, and `apps/socket-server` is the live messaging gateway.
 
 ## Install
 
@@ -46,11 +46,25 @@ Start a managed swarm:
 DroidSwarm swarm --project-root "$PWD" --env OPENAI_API_KEY=example --config mode=dev
 ```
 
-After the swarm starts, open the Blink UI shown in the CLI output, link Blink to Slack there, then record that project-level setup step:
+Start a managed swarm with optional federation enabled:
 
 ```bash
-DroidSwarm blink status
-DroidSwarm blink linked --project-root "$PWD"
+DroidSwarm swarm --project-root "$PWD" --enable-federation --enable-federation-adb
+```
+
+Inspect federation status and onboard a peer device:
+
+```bash
+DroidSwarm federation status
+DroidSwarm federation devices
+DroidSwarm federation onboard --swarm-id <id> --serial <adb-serial>
+```
+
+If you want a swarm to reuse previously onboarded Android workers automatically, keep the project-level worker registry and pass it explicitly when needed:
+
+```bash
+DroidSwarm setup --project-root "$PWD" --project-mode existing --enable-federation --enable-federation-adb
+DroidSwarm swarm --project-root "$PWD" --enable-federation --federation-remote-workers-file .droidswarm/federation-workers.json
 ```
 
 List active swarms:
@@ -99,9 +113,10 @@ The repo now carries the shared contracts and persistence scaffolding for multi-
 - `apps/orchestrator`: durable control-plane service that ingests operator/channel events, persists runs/tasks/checkpoints, schedules Codex workers, and feeds the dashboard timeline.
 - `apps/dashboard`: Next.js dashboard that reads directly from the orchestrator datastore and now exposes project, task chat, heartbeat, routing, and memory views.
 - `apps/socket-server`: live operator/agent gateway that now mirrors canonical task chat records into persistence.
-- `apps/blink-bridge`: Blink/Slack synchronization adapter for the canonical task chat stream.
 - `apps/worker-host`: optional local worker runtime for adapter-based execution.
-- `packages/*`: shared contracts and services for routing, workers, projects, git policy, memory, chat, skills, Mux, Codex, llama.cpp, tracing, and persistence helpers.
+- `packages/*`: shared contracts and services for routing, workers, projects, git policy, memory, chat, skills, Codex, llama.cpp, tracing, persistence helpers, and optional federation work.
+  - `packages/federation-bus`: optional BEHCS-style peer bus for cross-node EnvelopeV2 relay, heartbeat, kick, signing, and peer status.
+  - `packages/federation-adb`: optional Android/ADB discovery and onboarding helpers plus a local ADB supervisor.
 - `skills/*`: shared skill packs for orchestrator, planner, researcher, reviewer, bugfix, feature, repo onboarding, and PR review.
 - `packages/bootstrap`: install/setup scripts, CLI assets, and system specs.
 
@@ -110,7 +125,7 @@ The repo now carries the shared contracts and persistence scaffolding for multi-
 - `docs/orchestrator-architecture.md` describes the final control-plane flow (durable runs/tasks, scheduler decisions, supervisor lifecycle, and the dashboard insights that read them).
 - `docs/orchestrator-protocol-migration.md` details EnvelopeV2, compact verbs, TaskStateDigest/HandoffPacket artifacts, and the execution-centered event schema (`plan_proposed`, `verification_requested`, `artifact_created`, etc.) used for compatibility and replay.
 - `docs/orchestrator-runlife-guide.md` explains the explicit run lifecycle, dependency semantics, durable event flow, policy enforcement, operator command model, and restart/recovery guarantees that now drive the control plane.
-- `docs/architecture/*.md` covers the merged multi-project system, worker contract, chat sync, project registry, routing policy, git policy, checkpoint memory, and Blink bridge.
+- `docs/architecture/*.md` covers the merged multi-project system, worker contract, chat sync, project registry, routing policy, git policy, and checkpoint memory.
 
 ## Testing
 
@@ -122,20 +137,23 @@ The repo now carries the shared contracts and persistence scaffolding for multi-
 
 The installer now provisions the local runtime stack directly:
 
-- `blink-server` is installed automatically and Blink setup verifies Docker is installed and running before swarm startup.
-- `mux` is installed automatically via the supported npm CLI package and started as a managed local service.
 - `llama.cpp` is installed locally, then the installer prompts for which local models to download and writes an inventory at `~/.droidswarm/models/inventory.json`.
+- Optional federation runtimes are staged into the installed runtime so a swarm can start a local federation bus and ADB supervisor when federation is enabled.
+- `DroidSwarm federation onboard` now also registers a reusable Android remote-worker record in `.droidswarm/federation-workers.json`, which the orchestrator can use to launch federated ADB-backed workers on later swarms.
 
-The installer writes the resolved service configuration to `~/.droidswarm/services.env`. Swarm startup reads that file, starts Blink server, Mux, and llama.cpp as managed services, and exports their local URLs plus the selected llama model catalog to the orchestrator. Environment variables remain available as overrides, but they are no longer the primary setup path.
+The installer writes the resolved service configuration to `~/.droidswarm/services.env`. Swarm startup reads that file, starts llama.cpp as a managed local service, and exports its local URL plus the selected llama model catalog to the orchestrator. Environment variables remain available as overrides, but they are no longer the primary setup path.
 
-The daemon also writes a machine-readable service health snapshot per swarm, and the dashboard board insights now combine that runtime health with persisted Blink/llama/Mux usage so operators can see whether each managed service is both reachable and earning its place in the stack.
+The daemon also writes a machine-readable service health snapshot per swarm, and the dashboard board insights combine that runtime health with persisted local-model usage so operators can see whether llama.cpp is both reachable and carrying useful work.
 
-Blink-to-Slack linking is tracked per project in `.droidswarm/setup.env`. New project setup starts in a `pending` state, and the swarm/status CLI surfaces that until you complete the link in the Blink UI and run `DroidSwarm blink linked --project-root "$PWD"`.
+When federation is enabled, the daemon also writes a machine-readable `federation-status.json` snapshot per swarm. The dashboard board insights surface federation enablement, bus/admin URLs, peer counts, and known peers directly from that snapshot.
+
+Federated worker status updates also carry digest/handoff hashes. The orchestrator compares those against the latest persisted continuity packets and emits a federated drift report when a remote node is running against stale continuity state.
 
 Optional provider/runtime env:
 
 - `DROIDSWARM_CODEX_API_KEY`, `DROIDSWARM_CODEX_API_BASE_URL`, `DROIDSWARM_CODEX_CLOUD_MODEL`
 - `DROIDSWARM_MODEL_APPLE` for the first-class local Apple Intelligence agent
-- `DROIDSWARM_SLACK_BOT_TOKEN`, `DROIDSWARM_SLACK_API_BASE_URL`
-- `DROIDSWARM_BLINK_API_TOKEN`, `DROIDSWARM_BLINK_API_BASE_URL`
-- `DROIDSWARM_WORKER_HOST_ENTRY` and `DROIDSWARM_BLINK_BRIDGE_ENTRY` when running separate built runtimes
+- `DROIDSWARM_WORKER_HOST_ENTRY` when running a separate built worker runtime
+- `DROIDSWARM_ENABLE_FEDERATION`, `DROIDSWARM_FEDERATION_PEERS`, `DROIDSWARM_FEDERATION_BUS_PORT`, `DROIDSWARM_FEDERATION_ADMIN_PORT`
+- `DROIDSWARM_ENABLE_FEDERATION_ADB`, `DROIDSWARM_FEDERATION_ADB_PORT`, `DROIDSWARM_FEDERATION_ADB_BIN`
+- `DROIDSWARM_FEDERATION_REMOTE_WORKERS_FILE`, `DROIDSWARM_FEDERATION_SIGNING_KEY_ID`, `DROIDSWARM_FEDERATION_SIGNING_PRIVATE_KEY`

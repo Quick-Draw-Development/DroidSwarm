@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import Database from 'better-sqlite3';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 const resolveDatabasePath = (): string =>
   process.env.DROIDSWARM_DB_PATH ?? path.resolve(process.cwd(), 'data', 'droidswarm.db');
@@ -24,12 +24,14 @@ const readProjectIdFromDatabase = (): string | null => {
   }
 };
 
-export function GET() {
+export function GET(request: NextRequest) {
   const socketUrl =
     process.env.NEXT_PUBLIC_DROIDSWARM_SOCKET_URL ??
     process.env.DROIDSWARM_SOCKET_URL ??
     'ws://127.0.0.1:8765';
+  const requestedProjectId = request.nextUrl.searchParams.get('projectId');
   const projectId =
+    requestedProjectId ??
     process.env.NEXT_PUBLIC_DROIDSWARM_PROJECT_ID ??
     process.env.DROIDSWARM_PROJECT_ID ??
     readProjectIdFromDatabase() ??

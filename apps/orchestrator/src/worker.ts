@@ -18,7 +18,6 @@ import { CompressionShape, StatusUpdatePayload, ToolResponsePayload, UsageShape 
 import { LocalLlamaAdapter } from './adapters/worker/local-llama.adapter';
 import { CodexCloudAdapter } from './adapters/worker/codex-cloud.adapter';
 import { CodexCliAdapter } from './adapters/worker/codex-cli.adapter';
-import { MuxWorkerAdapter } from './adapters/worker/mux-worker.adapter';
 
 interface WorkerOptions {
   task: TaskRecord;
@@ -109,7 +108,10 @@ const getAdapter = (config: ReturnType<typeof loadConfig>, engine: WorkerEngine,
       // This keeps non-Apple local workers runnable on hosts without the Apple package installed.
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const { AppleIntelligenceWorkerAdapter } = require('./adapters/worker/apple-intelligence.adapter') as typeof import('./adapters/worker/apple-intelligence.adapter');
-      return new AppleIntelligenceWorkerAdapter({ model: config.modelRouting.apple });
+      return new AppleIntelligenceWorkerAdapter({
+        model: config.modelRouting.apple,
+        sdkEnabled: config.appleIntelligence?.enabled,
+      });
     }
     case 'codex-cloud':
       return new CodexCloudAdapter({
@@ -121,12 +123,6 @@ const getAdapter = (config: ReturnType<typeof loadConfig>, engine: WorkerEngine,
       return new CodexCliAdapter({
         config,
         projectRoot: workspacePath,
-      });
-    case 'mux-local':
-      return new MuxWorkerAdapter({
-        command: process.env.DROIDSWARM_MUX_WORKER_CMD ?? process.execPath,
-        args: process.env.DROIDSWARM_MUX_WORKER_ARGS ? process.env.DROIDSWARM_MUX_WORKER_ARGS.split(' ') : ['-e', 'console.log(process.argv.slice(1).join(" "))'],
-        cwd: workspacePath,
       });
     default:
       return new LocalLlamaAdapter({ baseUrl: config.llamaBaseUrl, timeoutMs: config.llamaTimeoutMs });
@@ -162,6 +158,14 @@ export const runWorker = async (): Promise<void> => {
       'execution',
       'agent_started',
       `${options.agentName} started ${options.role} work.`,
+      undefined,
+      {
+        metadata: {
+          federationNodeId: config.federationNodeId,
+          digestHash: options.taskDigest?.federationHash,
+          handoffHash: options.handoffPacket?.federationHash,
+        },
+      },
     ),
   );
 
@@ -228,7 +232,14 @@ export const runWorker = async (): Promise<void> => {
         'agent_heartbeat',
         `Heartbeat from ${options.agentName}`,
         undefined,
-        buildHeartbeatPayload(heartbeat),
+        {
+          ...buildHeartbeatPayload(heartbeat),
+          metadata: {
+            federationNodeId: config.federationNodeId,
+            digestHash: options.taskDigest?.federationHash,
+            handoffHash: options.handoffPacket?.federationHash,
+          },
+        },
       ),
     );
   }, Math.max(1000, Math.floor(config.heartbeatMs / 2)));
@@ -322,7 +333,14 @@ export const runWorker = async (): Promise<void> => {
         'agent_failed',
         error instanceof Error ? error.message : 'Codex execution failed.',
         undefined,
-        { result: errorResult },
+        {
+          result: errorResult,
+          metadata: {
+            federationNodeId: config.federationNodeId,
+            digestHash: options.taskDigest?.federationHash,
+            handoffHash: options.handoffPacket?.federationHash,
+          },
+        },
       ),
     );
     socket.close();
@@ -408,7 +426,14 @@ export const runWorker = async (): Promise<void> => {
       result.success ? 'agent_completed' : 'agent_blocked',
       result.summary,
       compression,
-      { result },
+      {
+        result,
+        metadata: {
+          federationNodeId: config.federationNodeId,
+          digestHash: options.taskDigest?.federationHash,
+          handoffHash: options.handoffPacket?.federationHash,
+        },
+      },
     ),
   );
   socket.close();

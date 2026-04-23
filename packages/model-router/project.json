@@ -1,0 +1,33 @@
+{
+  "name": "model-router",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "root": "packages/model-router",
+  "sourceRoot": "packages/model-router/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc -p packages/model-router/tsconfig.json"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc --noEmit -p packages/model-router/tsconfig.json"
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc --noEmit -p packages/model-router/tsconfig.json"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node --import tsx --test packages/model-router/src/**/*.spec.ts"
+      }
+    }
+  }
+}

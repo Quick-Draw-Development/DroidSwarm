@@ -94,6 +94,7 @@ const baseEnvelopeSchema = import_zod.z.object({
   artifact_refs: import_zod.z.array(import_zod.z.string().min(1)).optional(),
   memory_refs: import_zod.z.array(import_zod.z.string().min(1)).optional(),
   risk: envelopeRiskSchema.optional(),
+  audit_hash: import_zod.z.string().min(1).optional(),
   body: import_zod.z.record(import_zod.z.string(), import_zod.z.unknown()).optional(),
   from: actorRefSchema,
   timestamp: isoTimestampSchema,

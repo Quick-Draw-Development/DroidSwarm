@@ -9,6 +9,7 @@ import type { TaskScheduler } from '../scheduler/TaskScheduler';
 import type { AgentSupervisor } from '../AgentSupervisor';
 import type { CodexAgentResult, MessageEnvelope, OrchestratorConfig, SpawnedAgent } from '../types';
 import type { StatusUpdatePayload, ToolRequestPayload } from '@protocol';
+import { postToBus } from '@federation-bus';
 import {
   buildCheckpointCreatedMessage,
   buildOperatorChatResponse,
@@ -30,6 +31,17 @@ type EngineDeps = {
   registry: WorkerRegistry;
   runLifecycle: RunLifecycleService;
   toolService: ToolService;
+};
+
+type FederationDriftReport = {
+  taskId: string;
+  detail: string;
+  nodeId?: string;
+  reportedDigestHash?: string;
+  expectedDigestHash?: string;
+  reportedHandoffHash?: string;
+  expectedHandoffHash?: string;
+  detectedAt: string;
 };
 
 export class OrchestratorEngine {
@@ -285,6 +297,18 @@ export class OrchestratorEngine {
     if (!payload.result || !['agent_completed', 'agent_blocked', 'agent_failed'].includes(payload.status_code)) {
       return;
     }
+    const federationDrift = this.detectFederationDrift(taskId, payload.metadata);
+    if (federationDrift) {
+      this.deps.persistenceService.recordExecutionEvent('agent_result', federationDrift.detail, {
+        taskId,
+        drift: federationDrift,
+      }, {
+        taskId,
+        normalizedVerb: 'drift.detected',
+        transportBody: federationDrift,
+      });
+      void this.broadcastFederationDrift(taskId, federationDrift);
+    }
     const attempt = this.lookupAttempt(taskId, message.from.actor_id, message.from.actor_name);
     if (!attempt) {
       this.log('status.update.unmatched', {
@@ -303,6 +327,74 @@ export class OrchestratorEngine {
       shorthand: message.shorthand,
     });
     this.deps.scheduler.handleAgentResult(taskId, attempt.attemptId, attempt.agentName, attempt.role, payload.result);
+  }
+
+  private detectFederationDrift(
+    taskId: string,
+    metadata: Record<string, unknown> | undefined,
+  ): FederationDriftReport | undefined {
+    if (!metadata) {
+      return undefined;
+    }
+
+    const latestDigest = this.deps.persistenceService.getLatestTaskStateDigest(taskId);
+    const latestHandoff = this.deps.persistenceService.getLatestHandoffPacket(taskId);
+    const reportedDigestHash = typeof metadata.digestHash === 'string' ? metadata.digestHash : undefined;
+    const reportedHandoffHash = typeof metadata.handoffHash === 'string' ? metadata.handoffHash : undefined;
+    const expectedDigestHash = latestDigest?.federationHash;
+    const expectedHandoffHash = latestHandoff?.federationHash;
+
+    if (
+      (!reportedDigestHash || !expectedDigestHash || reportedDigestHash === expectedDigestHash)
+      && (!reportedHandoffHash || !expectedHandoffHash || reportedHandoffHash === expectedHandoffHash)
+    ) {
+      return undefined;
+    }
+
+    return {
+      taskId,
+      detail: `Federation drift detected for ${taskId}.`,
+      nodeId: typeof metadata.federationNodeId === 'string' ? metadata.federationNodeId : undefined,
+      reportedDigestHash,
+      expectedDigestHash,
+      reportedHandoffHash,
+      expectedHandoffHash,
+      detectedAt: new Date().toISOString(),
+    };
+  }
+
+  private async broadcastFederationDrift(taskId: string, drift: FederationDriftReport): Promise<void> {
+    if (!this.deps.config.federationEnabled || !this.deps.config.federationBusUrl) {
+      return;
+    }
+
+    try {
+      await postToBus(this.deps.config.federationBusUrl, {
+        sourceNodeId: this.deps.config.federationNodeId ?? this.deps.config.projectId,
+        envelope: {
+          id: `drift-${taskId}-${Date.now()}`,
+          ts: new Date().toISOString(),
+          project_id: this.deps.config.projectId,
+          swarm_id: this.deps.config.federationNodeId,
+          task_id: taskId,
+          room_id: taskId,
+          agent_id: this.deps.config.agentName,
+          role: this.deps.config.agentRole,
+          verb: 'drift.detected',
+          body: drift,
+        },
+      }, this.deps.config.federationSigningKeyId && this.deps.config.federationSigningPrivateKey
+        ? {
+          keyId: this.deps.config.federationSigningKeyId,
+          privateKeyPem: this.deps.config.federationSigningPrivateKey,
+        }
+        : undefined);
+    } catch (error) {
+      this.log('federation.drift.broadcast.failed', {
+        taskId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   private async handleToolRequest(message: MessageEnvelope<'tool_request'>): Promise<void> {

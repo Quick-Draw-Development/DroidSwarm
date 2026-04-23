@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const WORKER_ENGINES = ['local-llama', 'apple-intelligence', 'codex-cloud', 'codex-cli', 'mux-local', 'blink-agent'] as const;
+export const WORKER_ENGINES = ['local-llama', 'apple-intelligence', 'codex-cloud', 'codex-cli'] as const;
 export type WorkerEngine = (typeof WORKER_ENGINES)[number];
 export const MODEL_TIERS = ['local-cheap', 'local-capable', 'cloud'] as const;
 export type ModelTier = (typeof MODEL_TIERS)[number];
@@ -21,6 +21,7 @@ export const COMPACT_VERBS = [
   'handoff.ready',
   'summary.emitted',
   'memory.pinned',
+  'drift.detected',
   'status.updated',
   'tool.request',
   'tool.response',
@@ -73,6 +74,7 @@ export interface EnvelopeV2 {
   artifact_refs?: string[];
   memory_refs?: string[];
   risk?: EnvelopeRisk;
+  audit_hash?: string;
   body: Record<string, unknown>;
 }
 
@@ -93,6 +95,7 @@ export const COMPACT_VERB_DICTIONARY: Record<CompactVerb, string> = {
   'handoff.ready': 'A helper handoff is ready.',
   'summary.emitted': 'A summary update was emitted.',
   'memory.pinned': 'Durable memory or digest state was pinned.',
+  'drift.detected': 'A federation drift or continuity mismatch was detected.',
   'status.updated': 'A status update was emitted.',
   'tool.request': 'A tool request was emitted.',
   'tool.response': 'A tool response was emitted.',
@@ -187,6 +190,7 @@ export const envelopeV2Schema: z.ZodType<EnvelopeV2> = z.object({
   artifact_refs: z.array(z.string()).optional(),
   memory_refs: z.array(z.string()).optional(),
   risk: envelopeRiskSchema.optional(),
+  audit_hash: z.string().min(1).optional(),
   body: z.record(z.string(), z.unknown()),
 }).strict();
 
@@ -328,6 +332,7 @@ export const normalizeToEnvelopeV2 = (input: unknown): EnvelopeV2 => {
     artifact_refs: inferArtifactRefs(record, payload),
     memory_refs: inferMemoryRefs(record, payload),
     risk: inferRisk(record, payload),
+    audit_hash: asString(record.audit_hash) ?? asString(payload.audit_hash),
     body: normalizedBody,
   });
 };
@@ -463,6 +468,8 @@ export interface TaskStateDigest {
   verificationState: string;
   lastUpdatedBy: string;
   ts: string;
+  federationHash?: string;
+  auditHash?: string;
   droidspeak?: DroidspeakV2State;
 }
 
@@ -494,6 +501,8 @@ export interface HandoffPacket {
   requiredReads: string[];
   summary: string;
   ts: string;
+  federationHash?: string;
+  auditHash?: string;
   droidspeak?: DroidspeakV2State;
 }
 
@@ -520,7 +529,7 @@ export interface TaskChatMessage {
   taskId: string;
   runId: string;
   projectId: string;
-  source: 'dashboard' | 'slack' | 'blink' | 'agent' | 'system';
+  source: 'dashboard' | 'agent' | 'system';
   externalThreadId?: string;
   externalMessageId?: string;
   authorType: 'user' | 'agent' | 'system';

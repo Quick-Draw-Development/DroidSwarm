@@ -116,7 +116,9 @@ export class RunLifecycleService {
             recovery_reason: 'requeued_after_restart',
             recovery_previous_status: task.status,
             recovery_digest_id: latestDigest?.id,
+            recovery_digest_hash: latestDigest?.federationHash,
             recovery_handoff_id: latestHandoff?.id,
+            recovery_handoff_hash: latestHandoff?.federationHash,
           },
           updatedAt: nowIso(),
         });

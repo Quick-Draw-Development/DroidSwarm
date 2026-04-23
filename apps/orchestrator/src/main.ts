@@ -1,9 +1,13 @@
 import '../../../packages/protocol-alias/src/index';
+import { instrumentOrchestrator, tracer } from '@shared-tracing';
 import { DroidSwarmOrchestratorClient } from './OrchestratorClient';
 
 const startOrchestrator = (): void => {
-  const orchestrator = new DroidSwarmOrchestratorClient();
+  const orchestrator = instrumentOrchestrator(new DroidSwarmOrchestratorClient());
   const shutdown = (): void => {
+    tracer.audit('ORCHESTRATOR_SIGNAL_STOP', {
+      signal: 'shutdown',
+    });
     orchestrator.stop();
     process.exit(0);
   };

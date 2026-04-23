@@ -5,7 +5,7 @@ export class RoutingService {
   private readonly routing = new SharedRoutingService();
 
   constructor(
-    private readonly config: Pick<OrchestratorConfig, 'routingPolicy' | 'modelRouting'>,
+    private readonly config: Pick<OrchestratorConfig, 'routingPolicy' | 'modelRouting' | 'appleIntelligence'>,
   ) {}
 
   decide(task: PersistedTask, role: string, policy?: TaskPolicy): RoutingDecision {
@@ -30,6 +30,7 @@ export class RoutingService {
       fallbackCount: typeof task.metadata?.fallback_count === 'number' ? task.metadata.fallback_count : 0,
       localQueueTolerance: policy?.localQueueTolerance,
       priorityBias: policy?.priorityBias,
+      appleEnabled: this.config.appleIntelligence?.enabled ?? true,
       planningHints: this.config.routingPolicy.plannerRoles,
       appleRoles: this.config.routingPolicy.appleRoles,
       appleHints: this.config.routingPolicy.appleTaskHints,

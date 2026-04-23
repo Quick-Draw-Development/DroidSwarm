@@ -5,6 +5,7 @@ import { getSwarmRoleDefinition } from '@shared-routing';
 import { WorkerRegistry } from './worker-registry';
 import type {
   CompactVerb,
+  FederationRemoteWorkerTarget,
   HandoffPacket,
   ModelTier,
   OrchestratorConfig,
@@ -68,6 +69,7 @@ export const defaultRoleInstructions = (task: TaskRecord): RequestedAgent[] => {
 export class AgentSupervisor {
   private readonly agents = new Map<string, ActiveAgent>();
   private readonly roleCounters = new Map<string, number>();
+  private remoteTargetCursor = 0;
   private callbacks: AgentSupervisorCallbacks;
 
   constructor(
@@ -100,6 +102,7 @@ export class AgentSupervisor {
 
     const agentName = this.nextAgentName(role);
     const mode = role === 'tester' ? 'verifier' : 'worker';
+    const executionTarget = this.selectExecutionTarget(role, options?.engine, options?.modelTier);
     const child = fork(this.entryScript, [mode, JSON.stringify({
       task,
       role,
@@ -122,7 +125,17 @@ export class AgentSupervisor {
       requiredReads: options?.requiredReads,
       compactVerbDictionary: options?.compactVerbDictionary,
     })], {
-      env: process.env,
+      env: {
+        ...process.env,
+        ...(executionTarget
+          ? {
+            DROIDSWARM_FEDERATION_REMOTE_SERIAL: executionTarget.serial,
+            DROIDSWARM_FEDERATION_REMOTE_ENTRY: executionTarget.remoteEntry,
+            DROIDSWARM_FEDERATION_REMOTE_COMMAND: executionTarget.remoteCommand ?? 'node',
+            ...(executionTarget.workspaceRoot ? { DROIDSWARM_FEDERATION_REMOTE_WORKSPACE_ROOT: executionTarget.workspaceRoot } : {}),
+          }
+          : {}),
+      },
       stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
     });
 
@@ -171,6 +184,16 @@ export class AgentSupervisor {
       taskId: task.taskId,
       role,
       attemptId,
+      executionTarget: executionTarget
+        ? {
+          mode: 'federated-adb',
+          targetId: executionTarget.targetId,
+          serial: executionTarget.serial,
+          nodeId: executionTarget.nodeId,
+        }
+        : {
+          mode: 'local',
+        },
     };
     this.callbacks.onAgentsAssigned?.(task.taskId, [spawned]);
     return spawned;
@@ -229,5 +252,40 @@ export class AgentSupervisor {
     const nextValue = (this.roleCounters.get(prefix) ?? 0) + 1;
     this.roleCounters.set(prefix, nextValue);
     return `${prefix}-${String(nextValue).padStart(2, '0')}-${randomUUID().slice(0, 4)}`;
+  }
+
+  private selectExecutionTarget(
+    role: string,
+    engine?: WorkerEngine,
+    modelTier?: ModelTier,
+  ): FederationRemoteWorkerTarget | undefined {
+    if (!this.config.federationEnabled) {
+      return undefined;
+    }
+
+    const targets = this.config.federationRemoteWorkers ?? [];
+    if (targets.length === 0) {
+      return undefined;
+    }
+
+    const eligible = targets.filter((target) => {
+      if (target.roles && target.roles.length > 0 && !target.roles.includes(role)) {
+        return false;
+      }
+      if (engine && target.engines && target.engines.length > 0 && !target.engines.includes(engine)) {
+        return false;
+      }
+      if (modelTier && target.modelTier && target.modelTier !== modelTier) {
+        return false;
+      }
+      return true;
+    });
+    if (eligible.length === 0) {
+      return undefined;
+    }
+
+    const selected = eligible[this.remoteTargetCursor % eligible.length];
+    this.remoteTargetCursor += 1;
+    return selected;
   }
 }

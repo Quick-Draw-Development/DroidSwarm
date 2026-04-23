@@ -5,6 +5,7 @@ This project now relies on `apps/orchestrator` as the durable control plane: it 
 1. **Event ingestion and persistence**
    - `SocketGateway` reuses the existing WebSocket plumbing to authenticate and listen on the operator room plus per-task channels.
    - Incoming worker/operator traffic is normalized to `EnvelopeV2` compatibility fields before persistence or dispatch.
+   - When federation is enabled, `apps/socket-server` also publishes canonical envelopes to the local federation bus and relays polled peer envelopes back into local rooms, so the orchestrator still consumes one local room stream.
    - Incoming `task_created`, `status_update`, `chat`, and execution events are validated via the protocol schema and stored immediately in `task_events` plus the tables under `persistence/schema.ts`.
    - The persistence service (`OrchestratorPersistenceService`) offers a repository-style API for runs, tasks, attempts, dependencies, artifacts, checkpoints, budgets, operator actions, and verification reviews so no business logic touches raw SQL directly.
 
@@ -12,12 +13,15 @@ This project now relies on `apps/orchestrator` as the durable control plane: it 
     - `TaskScheduler` owns the task graph: it tracks queued workloads, enforces depth/fan-out limits, launches verified workers through the supervisor, starts verification/review stages, records checkpoints/artifacts, and emits policy/budget events. When side-effect-heavy artifacts are emitted, the scheduler blocks the attempt, records a budget event, and injects an explicit review task before allowing further work.
     - The scheduler now resolves each task’s policy by merging metadata overrides with the global `policyDefaults` from configuration and persists that `effective_policy` on every attempt, ensuring auditability and consistent enforcement after restarts.
    - `OrchestratorEngine` wires the scheduler to the `AgentSupervisor`, operator commands, and the gateway. It also keeps an agent→attempt map and persists normalized transport metadata beside the legacy execution-event model.
+   - When federation is enabled, the engine also compares reported digest/handoff hashes from remote workers against the latest persisted continuity packets. Mismatches are recorded as canonical `drift.detected` transport metadata and can be rebroadcast over the federation bus.
    - `WorkerRegistry` is now a small helper for broadcasting agent presence; the durable persistence layer is the canonical source of truth.
 
 3. **Supervisor and agent runtime**
    - `AgentSupervisor` is limited to process lifecycle tasks (spawn, terminate, callbacks, agent counting). It no longer interprets workflow topology or requested-agent fan-out directly.
+   - In federated setups the supervisor can choose a remote Android/ADB execution target from the project-level worker registry (`.droidswarm/federation-workers.json`) and launch `worker-host` through `adb shell` with a projected swarm environment.
    - Codex workers emit structured `CodexAgentResult` messages (status, requested agents, artifacts, compression) that the scheduler consumes, persists, and uses to gate the next action.
    - Spawned helpers receive the latest `TaskStateDigest` plus a `HandoffPacket` with required reads, preserving continuity without replaying the full room transcript.
+   - `apps/worker-host` remains the execution wrapper. In federated setups it can also be pointed at remote Android/ADB-hosted runtimes through explicit federation env, keeping the execution contract consistent even when the worker process is not local. The remote shell command now projects the required socket/model/auth env so the remote worker can reconnect to the same swarm instead of only running a bare node process.
 
 ## Execution Flow
 
@@ -60,6 +64,10 @@ The following tables are now the orchestrator’s ground truth (indexes on run/t
 ## Dashboard Integration
 
 `apps/dashboard` now reads the orchestrator database directly via `listRuns`, `listTaskNodesForRun`, `listArtifactsForRun`, `listCheckpointEvents`, `listBudgetEventsForRun`, `listAgentAssignmentsForRun`, `listVerificationOutcomesForRun`, and `listRunTimelineEvents`. Task detail views prefer canonical digest/handoff/routing rows and only fall back to inferred dependency/plan summaries when canonical rows are absent.
+
+When federation is enabled, the board also reads the daemon-written federation snapshot (`federation-status.json`) so operators can see whether federation is enabled, which bus/admin URLs are active, how many peers are connected, and which peers have recently heartbeated.
+
+The dashboard federation card complements that runtime snapshot with canonical run/task data, so operators can correlate remote peers with actual task execution rather than just bus availability.
 
 ## Testing and Migration
 

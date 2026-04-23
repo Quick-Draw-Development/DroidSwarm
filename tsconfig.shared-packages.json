@@ -12,7 +12,8 @@
     "noEmit": false
   },
   "include": [
-    "packages/shared-*/src/**/*.ts"
+    "packages/shared-*/src/**/*.ts",
+    "packages/federation-*/src/**/*.ts"
   ],
   "exclude": [
     "node_modules",

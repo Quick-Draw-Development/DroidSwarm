@@ -190,6 +190,23 @@ export interface OrchestrationInsightsData {
   allocatorPolicy?: RunAllocatorPolicySummary;
   topology?: SwarmTopologySummary;
   serviceUsage?: RunServiceUsageSummary;
+  federation?: FederationStatusSummary;
+  auditTrail?: AuditTrailSummary;
+}
+
+export interface AuditTrailSummary {
+  merkleRoot: string;
+  chainVerified: boolean;
+  latestEvents: Array<{
+    id: number;
+    ts: string;
+    eventType: string;
+    nodeId: string;
+    taskId?: string;
+    runId?: string;
+    detail: string;
+    hash: string;
+  }>;
 }
 export interface ProjectIdentity {
   projectId: string;
@@ -293,16 +310,6 @@ export interface RunServiceUsageSummary {
     updatedAt?: string;
     allReady: boolean;
     exportsReady: boolean;
-    blink: {
-      status: string;
-      reachable: boolean;
-      url?: string;
-    };
-    mux: {
-      status: string;
-      reachable: boolean;
-      url?: string;
-    };
     llama: {
       status: string;
       reachable: boolean;
@@ -313,16 +320,6 @@ export interface RunServiceUsageSummary {
       inventoryCount: number;
       inventoryHasSelected: boolean;
     };
-  };
-  blink: {
-    mirroredMessages: number;
-    pendingMessages: number;
-    failureCount: number;
-    retryCount: number;
-    providerBreakdown: Array<{
-      provider: string;
-      count: number;
-    }>;
   };
   llama: {
     requestCount: number;
@@ -341,21 +338,35 @@ export interface RunServiceUsageSummary {
     meetsLocalCoverageTarget: boolean;
     meetsCloudEscalationTarget: boolean;
   };
-  mux: {
-    workspaceLeaseCount: number;
-    brokeredExecutionCount: number;
-    activeRoleCoverage: Array<{
-      role: string;
-      count: number;
-    }>;
-    assessment: 'active-broker' | 'workspace-only' | 'idle';
-    recommendation: string;
-  };
   policy: {
     status: 'healthy' | 'warning' | 'action-needed';
     summary: string;
     actions: string[];
   };
+}
+
+export interface FederationPeerSummary {
+  peerId: string;
+  busUrl: string;
+  adminUrl?: string;
+  capabilities: string[];
+  lastHeartbeatAt?: string;
+  lastKickAt?: string;
+}
+
+export interface FederationStatusSummary {
+  enabled: boolean;
+  state: string;
+  nodeId?: string;
+  host?: string;
+  busPort?: number;
+  adminPort?: number;
+  busUrl?: string;
+  adminUrl?: string;
+  peerCount?: number;
+  recentEventCount?: number;
+  peers: FederationPeerSummary[];
+  updatedAt?: string;
 }
 
 export interface ProjectMemorySummary {

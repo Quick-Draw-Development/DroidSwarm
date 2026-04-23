@@ -169,18 +169,6 @@ default_install_command() {
         printf 'brew install llama.cpp\n'
         return 0
         ;;
-      docker)
-        printf 'brew install docker colima\n'
-        return 0
-        ;;
-      blink-server)
-        printf 'npm install -g blink-server\n'
-        return 0
-        ;;
-      mux)
-        printf 'npm install -g mux\n'
-        return 0
-        ;;
     esac
   fi
 
@@ -267,98 +255,6 @@ link_installed_binary() {
   ln -sf "$source_path" "$target_path"
 }
 
-install_blink_server_binary() {
-  local install_root="$1"
-  local target_path="$2"
-  local prefix_dir="$install_root/vendor/blink"
-
-  mkdir -p "$prefix_dir"
-  npm install -g --prefix "$prefix_dir" blink-server >&2
-  link_installed_binary "$prefix_dir/bin/blink-server" "$target_path"
-}
-
-install_mux_binary() {
-  local install_root="$1"
-  local target_path="$2"
-  local prefix_dir="$install_root/vendor/mux"
-
-  mkdir -p "$prefix_dir"
-  npm install -g --prefix "$prefix_dir" mux >&2
-  link_installed_binary "$prefix_dir/bin/mux" "$target_path"
-}
-
-start_docker_runtime() {
-  if docker info >/dev/null 2>&1; then
-    return 0
-  fi
-
-  if command -v colima >/dev/null 2>&1; then
-    info "Starting Colima for Blink..."
-    colima start >/dev/null 2>&1 || true
-  fi
-
-  if docker info >/dev/null 2>&1; then
-    return 0
-  fi
-
-  if [[ "$(uname -s)" == "Darwin" && -d "/Applications/Docker.app" ]] && command -v open >/dev/null 2>&1; then
-    info "Starting Docker Desktop for Blink..."
-    open -a Docker >/dev/null 2>&1 || true
-  fi
-
-  if docker info >/dev/null 2>&1; then
-    return 0
-  fi
-
-  if command -v systemctl >/dev/null 2>&1; then
-    sudo systemctl start docker >/dev/null 2>&1 || true
-  elif command -v service >/dev/null 2>&1; then
-    sudo service docker start >/dev/null 2>&1 || true
-  fi
-
-  local attempt
-  for attempt in 1 2 3 4 5; do
-    if docker info >/dev/null 2>&1; then
-      return 0
-    fi
-    sleep 2
-  done
-
-  return 1
-}
-
-ensure_docker_runtime() {
-  local install_cmd="${1:-}"
-
-  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-    return 0
-  fi
-
-  if ! command -v docker >/dev/null 2>&1; then
-    if [[ -n "$install_cmd" ]]; then
-      run_install_command "docker" "$install_cmd"
-    fi
-  fi
-
-  if command -v docker >/dev/null 2>&1 && start_docker_runtime; then
-    return 0
-  fi
-
-  pause_for_manual_step \
-    "Docker is required for Blink server" \
-    "Install Docker and make sure the Docker daemon is running before continuing." \
-    "command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1"
-}
-
-ensure_blink_runtime() {
-  local node_install_cmd docker_install_cmd
-  node_install_cmd="$(default_install_command "node" 2>/dev/null || true)"
-  docker_install_cmd="$(default_install_command "docker" 2>/dev/null || true)"
-
-  ensure_minimum_node_major 22 "$node_install_cmd"
-  ensure_docker_runtime "$docker_install_cmd"
-}
-
 install_runtime_dependencies() {
   local runtime_dir="$1"
   local runtime_name="$2"
@@ -388,7 +284,7 @@ install_runtime_dependencies() {
     fi
   fi
 
-  if [[ -d "$runtime_dir/packages" ]] && compgen -G "$runtime_dir/packages/shared-*" >/dev/null; then
+  if [[ -d "$runtime_dir/packages" ]] && { compgen -G "$runtime_dir/packages/shared-*" >/dev/null || compgen -G "$runtime_dir/packages/federation-*" >/dev/null; }; then
     ensure_runtime_support_dependency "$runtime_dir" "tslib"
     ensure_runtime_support_dependency "$runtime_dir" "zod"
   fi
@@ -577,6 +473,7 @@ workspace_runtime_artifacts_ready() {
   [[ -f "$workspace_root/dist/apps/socket-server/main.js" ]] \
     && [[ -f "$workspace_root/dist/apps/orchestrator/main.js" ]] \
     && compgen -G "$workspace_root/dist/packages/shared-*" >/dev/null \
+    && compgen -G "$workspace_root/dist/packages/federation-*" >/dev/null \
     && [[ -d "$workspace_root/dist/apps/dashboard/.next/standalone" ]]
 }
 
@@ -588,7 +485,7 @@ build_workspace_runtime_artifacts() {
   (
     cd "$workspace_root"
     node scripts/build-shared-packages.js
-    npx nx run-many -t build --projects orchestrator,socket-server,dashboard,blink-bridge,worker-host
+    npx nx run-many -t build --projects orchestrator,socket-server,dashboard,worker-host
   ) || {
     err "Failed to build required runtime artifacts from downloaded source."
     exit 1
@@ -606,7 +503,7 @@ ensure_workspace_runtime_artifacts() {
 
   if ! workspace_runtime_artifacts_ready "$workspace_root"; then
     err "Runtime artifacts are still incomplete after build."
-    err "Expected built apps under dist/apps and shared packages under dist/packages/shared-*"
+    err "Expected built apps under dist/apps and shared/federation packages under dist/packages/*"
     exit 1
   fi
 }
@@ -644,28 +541,12 @@ validate_positive_port() {
 }
 
 validate_service_config() {
-  validate_nonempty_single_line "DROIDSWARM_BLINK_SERVER_BIN" "$BLINK_SERVER_BIN"
-  validate_nonempty_single_line "DROIDSWARM_MUX_BIN" "$MUX_BIN"
   validate_nonempty_single_line "DROIDSWARM_LLAMA_SERVER_BIN" "$LLAMA_SERVER_BIN"
   validate_nonempty_single_line "DROIDSWARM_LLAMA_MODEL" "$LLAMA_MODEL"
   validate_nonempty_single_line "DROIDSWARM_LLAMA_MODEL_NAME" "$LLAMA_MODEL_NAME"
   validate_nonempty_single_line "DROIDSWARM_LLAMA_MODELS_FILE" "$LLAMA_MODELS_FILE"
-  validate_nonempty_single_line "DROIDSWARM_BLINK_SERVER_START_CMD" "$BLINK_SERVER_START_CMD"
-  validate_nonempty_single_line "DROIDSWARM_MUX_START_CMD" "$MUX_START_CMD"
   validate_nonempty_single_line "DROIDSWARM_LLAMA_START_CMD" "$LLAMA_START_CMD"
-  validate_positive_port "DROIDSWARM_BLINK_SERVER_PORT" "$BLINK_SERVER_PORT"
-  validate_positive_port "DROIDSWARM_MUX_PORT" "$MUX_PORT"
   validate_positive_port "DROIDSWARM_LLAMA_PORT" "$LLAMA_PORT"
-
-  if [[ ! -x "$BLINK_SERVER_BIN" ]]; then
-    err "Installer resolved a non-executable Blink binary: $BLINK_SERVER_BIN"
-    exit 1
-  fi
-
-  if [[ ! -x "$MUX_BIN" ]]; then
-    err "Installer resolved a non-executable Mux binary: $MUX_BIN"
-    exit 1
-  fi
 
   if [[ ! -x "$LLAMA_SERVER_BIN" ]]; then
     err "Installer resolved a non-executable llama.cpp binary: $LLAMA_SERVER_BIN"
@@ -696,7 +577,7 @@ validate_service_config_file() {
     exit 1
   fi
 
-  if ! env -i /bin/bash -lc "set -a; source '$file'; [[ -n \"\$DROIDSWARM_BLINK_SERVER_BIN\" ]] && [[ -n \"\$DROIDSWARM_MUX_BIN\" ]] && [[ -n \"\$DROIDSWARM_LLAMA_SERVER_BIN\" ]] && [[ -n \"\$DROIDSWARM_LLAMA_MODEL\" ]]" >/dev/null 2>&1; then
+  if ! env -i /bin/bash -lc "set -a; source '$file'; [[ -n \"\$DROIDSWARM_LLAMA_SERVER_BIN\" ]] && [[ -n \"\$DROIDSWARM_LLAMA_MODEL\" ]]" >/dev/null 2>&1; then
     err "Installer wrote an unreadable or incomplete service config: $file"
     exit 1
   fi
@@ -785,29 +666,8 @@ ensure_service_binary() {
 
   local binary_path=""
   if binary_path="$(resolve_service_binary "$env_value" "$install_cmd" "$@" 2>/dev/null)"; then
-    if [[ "$component" == "blink-server" ]]; then
-      ensure_blink_runtime
-    fi
     printf '%s\n' "$binary_path"
     return 0
-  fi
-
-  if [[ "$component" == "blink-server" && -z "$install_cmd" ]]; then
-    ensure_blink_runtime
-    install_blink_server_binary "$INSTALL_ROOT" "$INSTALL_BIN_DIR/blink-server"
-    if binary_path="$(resolve_service_binary "$INSTALL_BIN_DIR/blink-server" "" "$@" 2>/dev/null)"; then
-      printf '%s\n' "$binary_path"
-      return 0
-    fi
-  fi
-
-  if [[ "$component" == "mux" && -z "$install_cmd" ]]; then
-    if install_mux_binary "$INSTALL_ROOT" "$INSTALL_BIN_DIR/mux"; then
-      if binary_path="$(resolve_service_binary "$INSTALL_BIN_DIR/mux" "" "$@" 2>/dev/null)"; then
-        printf '%s\n' "$binary_path"
-        return 0
-      fi
-    fi
   fi
 
   local default_cmd=""
@@ -827,9 +687,6 @@ ensure_service_binary() {
     "command -v '$primary_candidate' >/dev/null 2>&1 || [[ -n '$env_value' && -x '$env_value' ]]"
 
   if binary_path="$(resolve_service_binary "$env_value" "" "$@" 2>/dev/null)"; then
-    if [[ "$component" == "blink-server" ]]; then
-      ensure_blink_runtime
-    fi
     printf '%s\n' "$binary_path"
     return 0
   fi
@@ -1163,7 +1020,6 @@ ensure_workspace_runtime_artifacts "$WORKSPACE_SOURCE_ROOT"
 
 SOCKET_RUNTIME_SOURCE="$WORKSPACE_SOURCE_ROOT/dist/apps/socket-server"
 ORCHESTRATOR_RUNTIME_SOURCE="$WORKSPACE_SOURCE_ROOT/dist/apps/orchestrator"
-BLINK_BRIDGE_RUNTIME_SOURCE="$WORKSPACE_SOURCE_ROOT/dist/apps/blink-bridge"
 WORKER_HOST_RUNTIME_SOURCE="$WORKSPACE_SOURCE_ROOT/dist/apps/worker-host"
 DASHBOARD_DIST_SOURCE="$WORKSPACE_SOURCE_ROOT/dist/apps/dashboard/.next"
 DIST_DIR="$DASHBOARD_DIST_SOURCE"
@@ -1182,6 +1038,11 @@ done
 
 if ! compgen -G "$WORKSPACE_SOURCE_ROOT/dist/packages/shared-*" >/dev/null; then
   err "Missing built shared runtime artifacts under dist/packages/shared-*"
+  exit 1
+fi
+
+if ! compgen -G "$WORKSPACE_SOURCE_ROOT/dist/packages/federation-*" >/dev/null; then
+  err "Missing built federation runtime artifacts under dist/packages/federation-*"
   exit 1
 fi
 
@@ -1212,28 +1073,34 @@ cp -R "$SOURCE_DIR/specs/." "$INSTALL_ROOT/specs/"
 if [[ -f "$WORKSPACE_SOURCE_ROOT/VERSION" ]]; then
   cp "$WORKSPACE_SOURCE_ROOT/VERSION" "$INSTALL_ROOT/VERSION"
 fi
-rm -rf "$INSTALL_ROOT/runtime/socket-server" "$INSTALL_ROOT/runtime/orchestrator" "$INSTALL_ROOT/runtime/dashboard" "$INSTALL_ROOT/runtime/blink-bridge" "$INSTALL_ROOT/runtime/worker-host"
+rm -rf "$INSTALL_ROOT/runtime/socket-server" "$INSTALL_ROOT/runtime/orchestrator" "$INSTALL_ROOT/runtime/dashboard" "$INSTALL_ROOT/runtime/worker-host" "$INSTALL_ROOT/runtime/federation-bus" "$INSTALL_ROOT/runtime/federation-adb"
 mkdir -p "$INSTALL_ROOT/runtime/socket-server" "$INSTALL_ROOT/runtime/orchestrator" "$INSTALL_ROOT/runtime/dashboard/.next"
 cp -R "$SOCKET_RUNTIME_SOURCE/." "$INSTALL_ROOT/runtime/socket-server/"
 mkdir -p "$INSTALL_ROOT/runtime/socket-server/packages"
 cp -R "$WORKSPACE_SOURCE_ROOT"/dist/packages/shared-* "$INSTALL_ROOT/runtime/socket-server/packages/"
+cp -R "$WORKSPACE_SOURCE_ROOT"/dist/packages/federation-* "$INSTALL_ROOT/runtime/socket-server/packages/"
 install_runtime_dependencies "$INSTALL_ROOT/runtime/socket-server" "socket-server"
 cp -R "$ORCHESTRATOR_RUNTIME_SOURCE/." "$INSTALL_ROOT/runtime/orchestrator/"
 mkdir -p "$INSTALL_ROOT/runtime/orchestrator/packages"
 cp -R "$WORKSPACE_SOURCE_ROOT"/dist/packages/shared-* "$INSTALL_ROOT/runtime/orchestrator/packages/"
+cp -R "$WORKSPACE_SOURCE_ROOT"/dist/packages/federation-* "$INSTALL_ROOT/runtime/orchestrator/packages/"
 install_runtime_dependencies "$INSTALL_ROOT/runtime/orchestrator" "orchestrator"
-if [[ -d "$BLINK_BRIDGE_RUNTIME_SOURCE" ]]; then
-  mkdir -p "$INSTALL_ROOT/runtime/blink-bridge"
-  cp -R "$BLINK_BRIDGE_RUNTIME_SOURCE/." "$INSTALL_ROOT/runtime/blink-bridge/"
-  install_runtime_dependencies "$INSTALL_ROOT/runtime/blink-bridge" "blink-bridge"
-fi
 if [[ -d "$WORKER_HOST_RUNTIME_SOURCE" ]]; then
   mkdir -p "$INSTALL_ROOT/runtime/worker-host"
   cp -R "$WORKER_HOST_RUNTIME_SOURCE/." "$INSTALL_ROOT/runtime/worker-host/"
   mkdir -p "$INSTALL_ROOT/runtime/worker-host/packages"
   cp -R "$WORKSPACE_SOURCE_ROOT"/dist/packages/shared-* "$INSTALL_ROOT/runtime/worker-host/packages/"
+  cp -R "$WORKSPACE_SOURCE_ROOT"/dist/packages/federation-* "$INSTALL_ROOT/runtime/worker-host/packages/"
   install_runtime_dependencies "$INSTALL_ROOT/runtime/worker-host" "worker-host"
 fi
+mkdir -p "$INSTALL_ROOT/runtime/federation-bus"
+cp -R "$WORKSPACE_SOURCE_ROOT/dist/packages/federation-bus/." "$INSTALL_ROOT/runtime/federation-bus/"
+mkdir -p "$INSTALL_ROOT/runtime/federation-bus/packages"
+cp -R "$WORKSPACE_SOURCE_ROOT"/dist/packages/shared-* "$INSTALL_ROOT/runtime/federation-bus/packages/"
+install_runtime_dependencies "$INSTALL_ROOT/runtime/federation-bus" "federation-bus"
+mkdir -p "$INSTALL_ROOT/runtime/federation-adb"
+cp -R "$WORKSPACE_SOURCE_ROOT/dist/packages/federation-adb/." "$INSTALL_ROOT/runtime/federation-adb/"
+install_runtime_dependencies "$INSTALL_ROOT/runtime/federation-adb" "federation-adb"
 cp -R "$DASHBOARD_RUNTIME_SOURCE/." "$INSTALL_ROOT/runtime/dashboard/"
 install_runtime_dependencies "$INSTALL_ROOT/runtime/dashboard" "dashboard"
 normalize_dashboard_runtime "$INSTALL_ROOT/runtime/dashboard"
@@ -1265,25 +1132,17 @@ chmod +x \
   "$INSTALL_ROOT/scripts/repair-droidswarm.sh"
 ln -sf "$INSTALL_ROOT/bin/DroidSwarm" "$BIN_DIR/DroidSwarm"
 
-BLINK_SERVER_BIN="${DROIDSWARM_BLINK_SERVER_BIN:-$INSTALL_BIN_DIR/blink-server}"
-MUX_BIN="${DROIDSWARM_MUX_BIN:-$INSTALL_BIN_DIR/mux}"
 LLAMA_SERVER_BIN="${DROIDSWARM_LLAMA_SERVER_BIN:-$INSTALL_BIN_DIR/llama-server}"
 LLAMA_MODEL="${DROIDSWARM_LLAMA_MODEL:-$MODELS_DIR/default.gguf}"
 LLAMA_MODEL_NAME="${DROIDSWARM_LLAMA_MODEL_NAME:-}"
-BLINK_SERVER_INSTALL_CMD="${DROIDSWARM_BLINK_SERVER_INSTALL_CMD:-}"
-MUX_INSTALL_CMD="${DROIDSWARM_MUX_INSTALL_CMD:-}"
 LLAMA_INSTALL_CMD="${DROIDSWARM_LLAMA_INSTALL_CMD:-}"
 LLAMA_MODEL_DOWNLOAD_CMD="${DROIDSWARM_LLAMA_MODEL_DOWNLOAD_CMD:-}"
-BLINK_SERVER_PORT="${DROIDSWARM_BLINK_SERVER_PORT:-8950}"
-MUX_PORT="${DROIDSWARM_MUX_PORT:-8960}"
 LLAMA_PORT="${DROIDSWARM_LLAMA_PORT:-11434}"
 
 if [[ -z "$LLAMA_INSTALL_CMD" && -z "$LLAMA_SERVER_BIN" ]] && command -v brew >/dev/null 2>&1; then
   LLAMA_INSTALL_CMD="brew install llama.cpp"
 fi
 
-BLINK_SERVER_BIN="$(ensure_service_binary "blink-server" "$BLINK_SERVER_BIN" "$BLINK_SERVER_INSTALL_CMD" "DROIDSWARM_BLINK_SERVER_INSTALL_CMD" "DROIDSWARM_BLINK_SERVER_BIN" blink-server blink)"
-MUX_BIN="$(ensure_service_binary "mux" "$MUX_BIN" "$MUX_INSTALL_CMD" "DROIDSWARM_MUX_INSTALL_CMD" "DROIDSWARM_MUX_BIN" mux)"
 LLAMA_SERVER_BIN="$(ensure_service_binary "llama-server" "$LLAMA_SERVER_BIN" "$LLAMA_INSTALL_CMD" "DROIDSWARM_LLAMA_INSTALL_CMD" "DROIDSWARM_LLAMA_SERVER_BIN" llama-server)"
 
 if [[ -z "$LLAMA_MODEL_URL" && -z "$LLAMA_MODEL_DOWNLOAD_CMD" && ! -f "$LLAMA_MODEL" ]] && existing_llama_model="$(load_existing_llama_model "$LLAMA_MODELS_FILE" 2>/dev/null || true)" && [[ -n "$existing_llama_model" ]]; then
@@ -1303,15 +1162,11 @@ if [[ "$LLAMA_MODEL" != "$MODELS_DIR/default.gguf" ]]; then
   ln -sf "$LLAMA_MODEL" "$MODELS_DIR/default.gguf"
 fi
 
-BLINK_SERVER_START_CMD="${DROIDSWARM_BLINK_SERVER_START_CMD:-$BLINK_SERVER_BIN --host 127.0.0.1 --port $BLINK_SERVER_PORT}"
-MUX_START_CMD="${DROIDSWARM_MUX_START_CMD:-$MUX_BIN server --host 127.0.0.1 --port $MUX_PORT}"
 LLAMA_START_CMD="${DROIDSWARM_LLAMA_START_CMD:-$LLAMA_SERVER_BIN --host 127.0.0.1 --port $LLAMA_PORT -m $LLAMA_MODEL}"
 
 validate_service_config
 
 : >"$SERVICE_CONFIG_FILE"
-write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_BLINK_SERVER_BIN" "$BLINK_SERVER_BIN"
-write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_MUX_BIN" "$MUX_BIN"
 write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_LLAMA_SERVER_BIN" "$LLAMA_SERVER_BIN"
 write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_LLAMA_MODEL" "$LLAMA_MODEL"
 write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_LLAMA_MODEL_NAME" "$LLAMA_MODEL_NAME"
@@ -1319,20 +1174,13 @@ write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_LLAMA_MODELS_FILE" "$LLAMA_M
 write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_RUNTIME_DIR" "$RUNTIME_DIR"
 write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_BIN_INSTALL_DIR" "$INSTALL_BIN_DIR"
 write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_MODELS_DIR" "$MODELS_DIR"
-write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_DEFAULT_BLINK_SERVER_BIN" "$INSTALL_BIN_DIR/blink-server"
-write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_DEFAULT_MUX_BIN" "$INSTALL_BIN_DIR/mux"
 write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_DEFAULT_LLAMA_SERVER_BIN" "$INSTALL_BIN_DIR/llama-server"
 write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_DEFAULT_LLAMA_MODEL" "$MODELS_DIR/default.gguf"
-write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_DEFAULT_BLINK_BRIDGE_ENTRY" "$RUNTIME_DIR/blink-bridge/main.js"
 write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_DEFAULT_WORKER_HOST_ENTRY" "$RUNTIME_DIR/worker-host/main.js"
-write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_BLINK_SERVER_PORT" "$BLINK_SERVER_PORT"
-write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_MUX_PORT" "$MUX_PORT"
+write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_DEFAULT_FEDERATION_BUS_ENTRY" "$RUNTIME_DIR/federation-bus/src/service.js"
+write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_DEFAULT_FEDERATION_ADB_ENTRY" "$RUNTIME_DIR/federation-adb/src/service.js"
 write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_LLAMA_PORT" "$LLAMA_PORT"
-write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_BLINK_API_BASE_URL" "http://127.0.0.1:$BLINK_SERVER_PORT"
-write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_MUX_BASE_URL" "http://127.0.0.1:$MUX_PORT"
 write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_LLAMA_BASE_URL" "http://127.0.0.1:$LLAMA_PORT"
-write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_BLINK_SERVER_START_CMD" "$BLINK_SERVER_START_CMD"
-write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_MUX_START_CMD" "$MUX_START_CMD"
 write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_LLAMA_START_CMD" "$LLAMA_START_CMD"
 
 validate_service_config_file "$SERVICE_CONFIG_FILE"

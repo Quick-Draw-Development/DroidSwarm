@@ -20,6 +20,7 @@ __export(OrchestratorEngine_exports, {
   OrchestratorEngine: () => OrchestratorEngine
 });
 module.exports = __toCommonJS(OrchestratorEngine_exports);
+var import_federation_bus = require("@federation-bus");
 var import_messages = require("../messages");
 class OrchestratorEngine {
   constructor(deps) {
@@ -241,6 +242,18 @@ class OrchestratorEngine {
     if (!payload.result || !["agent_completed", "agent_blocked", "agent_failed"].includes(payload.status_code)) {
       return;
     }
+    const federationDrift = this.detectFederationDrift(taskId, payload.metadata);
+    if (federationDrift) {
+      this.deps.persistenceService.recordExecutionEvent("agent_result", federationDrift.detail, {
+        taskId,
+        drift: federationDrift
+      }, {
+        taskId,
+        normalizedVerb: "drift.detected",
+        transportBody: federationDrift
+      });
+      void this.broadcastFederationDrift(taskId, federationDrift);
+    }
     const attempt = this.lookupAttempt(taskId, message.from.actor_id, message.from.actor_name);
     if (!attempt) {
       this.log("status.update.unmatched", {
@@ -259,6 +272,60 @@ class OrchestratorEngine {
       shorthand: message.shorthand
     });
     this.deps.scheduler.handleAgentResult(taskId, attempt.attemptId, attempt.agentName, attempt.role, payload.result);
+  }
+  detectFederationDrift(taskId, metadata) {
+    if (!metadata) {
+      return void 0;
+    }
+    const latestDigest = this.deps.persistenceService.getLatestTaskStateDigest(taskId);
+    const latestHandoff = this.deps.persistenceService.getLatestHandoffPacket(taskId);
+    const reportedDigestHash = typeof metadata.digestHash === "string" ? metadata.digestHash : void 0;
+    const reportedHandoffHash = typeof metadata.handoffHash === "string" ? metadata.handoffHash : void 0;
+    const expectedDigestHash = latestDigest?.federationHash;
+    const expectedHandoffHash = latestHandoff?.federationHash;
+    if ((!reportedDigestHash || !expectedDigestHash || reportedDigestHash === expectedDigestHash) && (!reportedHandoffHash || !expectedHandoffHash || reportedHandoffHash === expectedHandoffHash)) {
+      return void 0;
+    }
+    return {
+      taskId,
+      detail: `Federation drift detected for ${taskId}.`,
+      nodeId: typeof metadata.federationNodeId === "string" ? metadata.federationNodeId : void 0,
+      reportedDigestHash,
+      expectedDigestHash,
+      reportedHandoffHash,
+      expectedHandoffHash,
+      detectedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+  }
+  async broadcastFederationDrift(taskId, drift) {
+    if (!this.deps.config.federationEnabled || !this.deps.config.federationBusUrl) {
+      return;
+    }
+    try {
+      await (0, import_federation_bus.postToBus)(this.deps.config.federationBusUrl, {
+        sourceNodeId: this.deps.config.federationNodeId ?? this.deps.config.projectId,
+        envelope: {
+          id: `drift-${taskId}-${Date.now()}`,
+          ts: (/* @__PURE__ */ new Date()).toISOString(),
+          project_id: this.deps.config.projectId,
+          swarm_id: this.deps.config.federationNodeId,
+          task_id: taskId,
+          room_id: taskId,
+          agent_id: this.deps.config.agentName,
+          role: this.deps.config.agentRole,
+          verb: "drift.detected",
+          body: drift
+        }
+      }, this.deps.config.federationSigningKeyId && this.deps.config.federationSigningPrivateKey ? {
+        keyId: this.deps.config.federationSigningKeyId,
+        privateKeyPem: this.deps.config.federationSigningPrivateKey
+      } : void 0);
+    } catch (error) {
+      this.log("federation.drift.broadcast.failed", {
+        taskId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
   }
   async handleToolRequest(message) {
     const payload = message.payload;

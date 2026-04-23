@@ -87,6 +87,7 @@ const baseEnvelopeSchema = z.object({
   artifact_refs: z.array(z.string().min(1)).optional(),
   memory_refs: z.array(z.string().min(1)).optional(),
   risk: envelopeRiskSchema.optional(),
+  audit_hash: z.string().min(1).optional(),
   body: z.record(z.string(), z.unknown()).optional(),
   from: actorRefSchema,
   timestamp: isoTimestampSchema,

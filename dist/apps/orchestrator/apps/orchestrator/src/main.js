@@ -1,8 +1,12 @@
 var import_src = require("../../../packages/protocol-alias/src/index");
+var import_shared_tracing = require("@shared-tracing");
 var import_OrchestratorClient = require("./OrchestratorClient");
 const startOrchestrator = () => {
-  const orchestrator = new import_OrchestratorClient.DroidSwarmOrchestratorClient();
+  const orchestrator = (0, import_shared_tracing.instrumentOrchestrator)(new import_OrchestratorClient.DroidSwarmOrchestratorClient());
   const shutdown = () => {
+    import_shared_tracing.tracer.audit("ORCHESTRATOR_SIGNAL_STOP", {
+      signal: "shutdown"
+    });
     orchestrator.stop();
     process.exit(0);
   };

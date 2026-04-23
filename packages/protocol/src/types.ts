@@ -55,6 +55,7 @@ export interface EnvelopeV2Fields {
   artifact_refs?: string[];
   memory_refs?: string[];
   risk?: EnvelopeRisk;
+  audit_hash?: string;
   body: Record<string, unknown>;
 }
 
@@ -328,6 +329,7 @@ type MessageEnvelopeBase<T extends MessageType> = {
   artifact_refs?: string[];
   memory_refs?: string[];
   risk?: EnvelopeRisk;
+  audit_hash?: string;
   body?: Record<string, unknown>;
   type: T;
   from: ActorRef;

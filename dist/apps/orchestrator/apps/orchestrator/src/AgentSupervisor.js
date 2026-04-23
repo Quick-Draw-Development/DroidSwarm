@@ -48,6 +48,7 @@ class AgentSupervisor {
     this.entryScript = entryScript;
     this.agents = /* @__PURE__ */ new Map();
     this.roleCounters = /* @__PURE__ */ new Map();
+    this.remoteTargetCursor = 0;
     this.callbacks = callbacks;
   }
   setCallbacks(callbacks) {
@@ -60,6 +61,7 @@ class AgentSupervisor {
     this.registry.register(task);
     const agentName = this.nextAgentName(role);
     const mode = role === "tester" ? "verifier" : "worker";
+    const executionTarget = this.selectExecutionTarget(role, options?.engine, options?.modelTier);
     const child = (0, import_node_child_process.fork)(this.entryScript, [mode, JSON.stringify({
       task,
       role,
@@ -82,7 +84,15 @@ class AgentSupervisor {
       requiredReads: options?.requiredReads,
       compactVerbDictionary: options?.compactVerbDictionary
     })], {
-      env: process.env,
+      env: {
+        ...process.env,
+        ...executionTarget ? {
+          DROIDSWARM_FEDERATION_REMOTE_SERIAL: executionTarget.serial,
+          DROIDSWARM_FEDERATION_REMOTE_ENTRY: executionTarget.remoteEntry,
+          DROIDSWARM_FEDERATION_REMOTE_COMMAND: executionTarget.remoteCommand ?? "node",
+          ...executionTarget.workspaceRoot ? { DROIDSWARM_FEDERATION_REMOTE_WORKSPACE_ROOT: executionTarget.workspaceRoot } : {}
+        } : {}
+      },
       stdio: ["ignore", "pipe", "pipe", "ipc"]
     });
     child.stdout?.setEncoding("utf8");
@@ -117,7 +127,15 @@ class AgentSupervisor {
       agentName,
       taskId: task.taskId,
       role,
-      attemptId
+      attemptId,
+      executionTarget: executionTarget ? {
+        mode: "federated-adb",
+        targetId: executionTarget.targetId,
+        serial: executionTarget.serial,
+        nodeId: executionTarget.nodeId
+      } : {
+        mode: "local"
+      }
     };
     this.callbacks.onAgentsAssigned?.(task.taskId, [spawned]);
     return spawned;
@@ -162,6 +180,33 @@ class AgentSupervisor {
     const nextValue = (this.roleCounters.get(prefix) ?? 0) + 1;
     this.roleCounters.set(prefix, nextValue);
     return `${prefix}-${String(nextValue).padStart(2, "0")}-${(0, import_node_crypto.randomUUID)().slice(0, 4)}`;
+  }
+  selectExecutionTarget(role, engine, modelTier) {
+    if (!this.config.federationEnabled) {
+      return void 0;
+    }
+    const targets = this.config.federationRemoteWorkers ?? [];
+    if (targets.length === 0) {
+      return void 0;
+    }
+    const eligible = targets.filter((target) => {
+      if (target.roles && target.roles.length > 0 && !target.roles.includes(role)) {
+        return false;
+      }
+      if (engine && target.engines && target.engines.length > 0 && !target.engines.includes(engine)) {
+        return false;
+      }
+      if (modelTier && target.modelTier && target.modelTier !== modelTier) {
+        return false;
+      }
+      return true;
+    });
+    if (eligible.length === 0) {
+      return void 0;
+    }
+    const selected = eligible[this.remoteTargetCursor % eligible.length];
+    this.remoteTargetCursor += 1;
+    return selected;
   }
 }
 // Annotate the CommonJS export names for ESM import in node:

@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
+import { tracer } from '@shared-tracing';
+
 import type { PersistenceClient } from './repositories';
 import type {
   ArtifactMemoryIndexEntry,
@@ -173,6 +175,12 @@ export class OrchestratorPersistenceService {
       updatedAt: nowIso(),
     };
     this.persistence.tasks.create(updated);
+    tracer.audit('TASK_STATE_CHANGE', {
+      runId: this.run.runId,
+      taskId,
+      previousStatus: existing.status,
+      status,
+    });
   }
 
   updateTaskPriority(taskId: string, priority: PersistedTask['priority']): void {
@@ -428,6 +436,15 @@ export class OrchestratorPersistenceService {
     },
   ): void {
     this.persistence.recordExecutionEvent(this.run.runId, eventType, detail, metadata, options);
+    tracer.audit('STATE_CHANGE', {
+      runId: this.run.runId,
+      eventType,
+      detail,
+      metadata: metadata ?? {},
+      taskId: options?.taskId,
+      normalizedVerb: options?.normalizedVerb,
+      transportBody: options?.transportBody,
+    });
   }
 
   updateTaskMetadata(taskId: string, metadata: Record<string, unknown>): void {
@@ -510,6 +527,15 @@ export class OrchestratorPersistenceService {
   }
 
   recordTaskStateDigest(digest: TaskStateDigest): void {
+    const audit = tracer.audit('TASK_STATE_DIGEST', {
+      runId: digest.runId,
+      projectId: digest.projectId,
+      taskId: digest.taskId,
+      digestId: digest.id,
+      verificationState: digest.verificationState,
+      federationHash: digest.federationHash,
+    });
+    digest.auditHash = audit.hash;
     this.persistence.digests.record(digest);
   }
 
@@ -522,6 +548,18 @@ export class OrchestratorPersistenceService {
   }
 
   recordHandoffPacket(packet: HandoffPacket): void {
+    const audit = tracer.audit('TASK_HANDOFF', {
+      runId: packet.runId,
+      projectId: packet.projectId,
+      taskId: packet.taskId,
+      handoffId: packet.id,
+      fromTaskId: packet.fromTaskId,
+      toTaskId: packet.toTaskId,
+      toRole: packet.toRole,
+      digestId: packet.digestId,
+      federationHash: packet.federationHash,
+    });
+    packet.auditHash = audit.hash;
     this.persistence.handoffs.record(packet);
   }
 
@@ -558,6 +596,15 @@ export class OrchestratorPersistenceService {
       summary: result.summary,
       payloadJson: JSON.stringify(result),
       createdAt: nowIso(),
+    });
+    tracer.audit('CODE_EXEC_RESULT', {
+      runId: this.run.runId,
+      taskId,
+      attemptId,
+      engine: result.engine,
+      model: result.model,
+      success: result.success,
+      summary: result.summary,
     });
   }
 

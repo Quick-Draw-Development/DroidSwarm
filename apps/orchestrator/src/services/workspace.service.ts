@@ -2,7 +2,6 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { allocateWorkspaceLease } from '@shared-mux';
 import type { OrchestratorConfig, PersistedTask, TaskAttemptRecord } from '../types';
 
 export interface WorkspaceLeaseRecord {
@@ -11,7 +10,6 @@ export interface WorkspaceLeaseRecord {
   branch: string;
   rootPath: string;
   readOnly: boolean;
-  muxSessionId: string;
 }
 
 export class WorkspaceService {
@@ -20,14 +18,7 @@ export class WorkspaceService {
   ensureWorkspace(task: PersistedTask, attemptId: string, branch: string, readOnly: boolean): WorkspaceLeaseRecord {
     const rootPath = task.rootPath ?? this.config.projectRoot;
     const workspaceId = task.workspaceId ?? attemptId;
-    const lease = allocateWorkspaceLease({
-      projectId: task.projectId ?? this.config.projectId,
-      repoId: task.repoId ?? this.config.repoId,
-      rootPath,
-      branch,
-      workspaceId,
-    });
-    const workspacePath = path.resolve(this.config.workspaceRoot, lease.workspaceId);
+    const workspacePath = path.resolve(this.config.workspaceRoot, workspaceId);
 
     fs.mkdirSync(this.config.workspaceRoot, { recursive: true });
     if (!fs.existsSync(workspacePath)) {
@@ -35,12 +26,11 @@ export class WorkspaceService {
     }
 
     return {
-      workspaceId: lease.workspaceId,
+      workspaceId,
       path: workspacePath,
       branch,
       rootPath,
       readOnly,
-      muxSessionId: lease.muxSessionId,
     };
   }
 
@@ -58,7 +48,6 @@ export class WorkspaceService {
       branch: attempt.branch,
       rootPath: attempt.rootPath,
       readOnly: Boolean(attempt.metadata?.read_only),
-      muxSessionId: typeof attempt.metadata?.mux_session_id === 'string' ? attempt.metadata.mux_session_id : `mux-${attempt.workspaceId}`,
     };
   }
 

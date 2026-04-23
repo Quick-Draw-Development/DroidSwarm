@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { createHash, createPublicKey, verify as verifySignature } from 'node:crypto';
 import { createRequire } from 'node:module';
+import { gunzipSync } from 'node:zlib';
 
 import WebSocket from 'ws';
 import type Database from 'better-sqlite3';
@@ -10,10 +12,13 @@ import type { DroidspeakV2State } from '@shared-types';
 import type {
   ArtifactSummary,
   AgentAssignmentSummary,
+  AuditTrailSummary,
   BoardStatus,
   BudgetEventSummary,
   CheckpointSummary,
   DependencySummary,
+  FederationPeerSummary,
+  FederationStatusSummary,
   MessageRecord,
   ProjectIdentity,
   ProjectMemorySummary,
@@ -41,6 +46,7 @@ const DEFAULT_SOCKET_URL = process.env.DROIDSWARM_SOCKET_URL ?? 'ws://127.0.0.1:
 const DEFAULT_ORCHESTRATOR_NAME = process.env.DROIDSWARM_ORCHESTRATOR_NAME ?? 'Orchestrator';
 const require = createRequire(import.meta.url);
 const DEBUG_LOGGING_ENABLED = /^(1|true|yes|on)$/i.test(process.env.DROIDSWARM_DEBUG ?? '');
+const GENESIS_AUDIT_HASH = 'genesis-hash-00000000000000000000000000000000';
 
 const dashboardLog = (event: string, detail?: Record<string, unknown>): void => {
   if (!DEBUG_LOGGING_ENABLED) {
@@ -51,6 +57,124 @@ const dashboardLog = (event: string, detail?: Record<string, unknown>): void => 
     return;
   }
   console.log('[Dashboard]', event);
+};
+
+type AuditLogRow = {
+  id: number;
+  ts: string;
+  swarm_id: string;
+  node_id: string;
+  event_type: string;
+  payload: Buffer;
+  prev_hash: string;
+  merkle_leaf: string;
+  signature?: string | null;
+  height: number;
+};
+
+const normalizePem = (value: string): string => value.includes('\\n') ? value.replace(/\\n/g, '\n') : value;
+
+const stableSerialize = (input: unknown): string => {
+  if (input == null || typeof input !== 'object') {
+    return JSON.stringify(input);
+  }
+  if (Array.isArray(input)) {
+    return `[${input.map((item) => stableSerialize(item)).join(',')}]`;
+  }
+  const record = input as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableSerialize(record[key])}`).join(',')}}`;
+};
+
+const inflateAuditPayload = (payload: Buffer): Record<string, unknown> =>
+  JSON.parse(gunzipSync(payload).toString('utf8')) as Record<string, unknown>;
+
+const computeAuditLeafHash = (input: {
+  ts: string;
+  swarmId: string;
+  nodeId: string;
+  eventType: string;
+  payload: Record<string, unknown>;
+  prevHash: string;
+  height: number;
+}): string =>
+  createHash('sha256')
+    .update([
+      input.ts,
+      input.swarmId,
+      input.nodeId,
+      input.eventType,
+      stableSerialize(input.payload),
+      input.prevHash,
+      String(input.height),
+    ].join('|'))
+    .digest('hex');
+
+const computeAuditMerkleRoot = (leaves: string[]): string => {
+  if (leaves.length === 0) {
+    return 'empty';
+  }
+
+  let level = [...leaves];
+  while (level.length > 1) {
+    const next: string[] = [];
+    for (let index = 0; index < level.length; index += 2) {
+      const left = level[index];
+      const right = level[index + 1] ?? left;
+      next.push(createHash('sha256').update(left + right).digest('hex'));
+    }
+    level = next;
+  }
+  return level[0];
+};
+
+const resolveAuditPublicKey = (): string | undefined => {
+  const envPublicKey = process.env.DROIDSWARM_AUDIT_SIGNING_PUBLIC_KEY;
+  if (envPublicKey) {
+    return normalizePem(envPublicKey);
+  }
+  const configuredFile = process.env.DROIDSWARM_AUDIT_SIGNING_KEY_FILE;
+  const keyFile = configuredFile ?? path.resolve(path.dirname(DEFAULT_DB_PATH), 'audit-signing-keypair.json');
+  if (!fs.existsSync(keyFile)) {
+    return undefined;
+  }
+  try {
+    const raw = JSON.parse(fs.readFileSync(keyFile, 'utf8')) as { publicKeyPem?: string };
+    return typeof raw.publicKeyPem === 'string' ? raw.publicKeyPem : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const verifyAuditSignature = (hash: string, signature?: string | null): boolean => {
+  if (!signature) {
+    return true;
+  }
+  const publicKeyPem = resolveAuditPublicKey();
+  if (!publicKeyPem) {
+    return false;
+  }
+  try {
+    return verifySignature(
+      null,
+      Buffer.from(hash, 'utf8'),
+      createPublicKey(publicKeyPem),
+      Buffer.from(signature, 'base64'),
+    );
+  } catch {
+    return false;
+  }
+};
+
+const readAuditRows = (database: Database.Database, limit?: number): AuditLogRow[] => {
+  const limitClause = typeof limit === 'number' ? 'LIMIT ?' : '';
+  const statement = database.prepare(`
+    SELECT id, ts, swarm_id, node_id, event_type, payload, prev_hash, merkle_leaf, signature, height
+    FROM audit_log
+    ORDER BY id DESC
+    ${limitClause}
+  `);
+  const rows = (typeof limit === 'number' ? statement.all(limit) : statement.all()) as AuditLogRow[];
+  return rows;
 };
 
 type RawTaskRow = {
@@ -263,14 +387,201 @@ const parsePayload = (value?: string | null): Record<string, unknown> | undefine
   }
 };
 
-const getSwarmHealthSnapshotPath = (): string | undefined => {
+const parseBooleanFlag = (value: unknown, fallback = false): boolean => {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value !== 'string') {
+    return fallback;
+  }
+  return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase());
+};
+
+const parsePositiveInt = (value: unknown): number | undefined => {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return value;
+  }
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+};
+
+const parseNonNegativeInt = (value: unknown): number | undefined => {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+    return value;
+  }
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+};
+
+const toStringValue = (value: unknown): string | undefined => typeof value === 'string' && value.length > 0 ? value : undefined;
+
+const getSwarmDirectory = (): string | undefined => {
   const swarmId = process.env.DROIDSWARM_SWARM_ID;
   const droidswarmHome = process.env.DROIDSWARM_HOME ?? path.join(process.env.HOME ?? '', '.droidswarm');
   if (!swarmId || !droidswarmHome) {
     return undefined;
   }
 
-  return path.join(droidswarmHome, 'swarms', swarmId, 'service-health.json');
+  return path.join(droidswarmHome, 'swarms', swarmId);
+};
+
+const getSwarmHealthSnapshotPath = (): string | undefined => {
+  const swarmDir = getSwarmDirectory();
+  if (!swarmDir) {
+    return undefined;
+  }
+
+  return path.join(swarmDir, 'service-health.json');
+};
+
+const getFederationSnapshotPath = (): string | undefined => {
+  const swarmDir = getSwarmDirectory();
+  if (!swarmDir) {
+    return undefined;
+  }
+
+  const candidates = [
+    'federation-status.json',
+    'federation.json',
+    'bus-status.json',
+    'status.json',
+  ].map((fileName) => path.join(swarmDir, fileName));
+
+  return candidates.find((candidate) => fs.existsSync(candidate));
+};
+
+const buildFederationUrl = (host: string | undefined, port?: number): string | undefined => {
+  if (!port || port <= 0) {
+    return undefined;
+  }
+
+  const resolvedHost = !host || host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host;
+  return `http://${resolvedHost}:${port}`;
+};
+
+const parseFederationPeerRecord = (value: unknown): FederationPeerSummary | undefined => {
+  if (typeof value !== 'object' || value === null) {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  const peerId = toStringValue(record.peerId ?? record.peer_id ?? record.id);
+  const busUrl = toStringValue(record.busUrl ?? record.bus_url);
+  if (!peerId || !busUrl) {
+    return undefined;
+  }
+
+  return {
+    peerId,
+    busUrl,
+    adminUrl: toStringValue(record.adminUrl ?? record.admin_url),
+    capabilities: Array.isArray(record.capabilities)
+      ? record.capabilities.filter((entry): entry is string => typeof entry === 'string')
+      : [],
+    lastHeartbeatAt: toStringValue(record.lastHeartbeatAt ?? record.last_heartbeat_at),
+    lastKickAt: toStringValue(record.lastKickAt ?? record.last_kick_at),
+  };
+};
+
+const parseFederationPeers = (value?: string): FederationPeerSummary[] => {
+  if (!value) {
+    return [];
+  }
+
+  return value.split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0)
+    .map((entry): FederationPeerSummary | undefined => {
+      const busUrl = entry.startsWith('http://') || entry.startsWith('https://')
+        ? entry.replace(/\/$/, '')
+        : `http://${entry.replace(/\/$/, '')}`;
+      try {
+        const parsed = new URL(busUrl);
+        const adminPort = parsed.port ? Number.parseInt(parsed.port, 10) + 3 : 4950;
+        return {
+          peerId: parsed.host.replace(/[^a-zA-Z0-9_.:-]/g, '-'),
+          busUrl,
+          adminUrl: `${parsed.protocol}//${parsed.hostname}:${adminPort}`,
+          capabilities: [] as string[],
+        };
+      } catch {
+        return undefined;
+      }
+    })
+    .filter((entry): entry is FederationPeerSummary => entry != null);
+};
+
+const getFederationEnvStatus = (): FederationStatusSummary => {
+  const enabled = parseBooleanFlag(process.env.DROIDSWARM_ENABLE_FEDERATION, false);
+  const nodeId = process.env.DROIDSWARM_FEDERATION_NODE_ID ?? process.env.DROIDSWARM_SWARM_ID;
+  const host = process.env.DROIDSWARM_FEDERATION_HOST;
+  const busPort = parsePositiveInt(process.env.DROIDSWARM_FEDERATION_BUS_PORT);
+  const adminPort = parsePositiveInt(process.env.DROIDSWARM_FEDERATION_ADMIN_PORT);
+  const busUrl = process.env.DROIDSWARM_FEDERATION_BUS_URL ?? buildFederationUrl(host, busPort);
+  const adminUrl = process.env.DROIDSWARM_FEDERATION_ADMIN_URL ?? buildFederationUrl(host, adminPort);
+  const peers = parseFederationPeers(process.env.DROIDSWARM_FEDERATION_PEERS);
+
+  return {
+    enabled,
+    state: enabled ? (peers.length > 0 ? 'active' : 'enabled') : 'disabled',
+    nodeId,
+    host,
+    busPort,
+    adminPort,
+    busUrl,
+    adminUrl,
+    peerCount: peers.length > 0 ? peers.length : undefined,
+    peers,
+  };
+};
+
+const getFederationStatusFromSnapshot = (): FederationStatusSummary | undefined => {
+  const snapshotPath = getFederationSnapshotPath();
+  if (!snapshotPath) {
+    return undefined;
+  }
+
+  try {
+    const raw = JSON.parse(fs.readFileSync(snapshotPath, 'utf8')) as Record<string, unknown>;
+    const peers = Array.isArray(raw.peers)
+      ? raw.peers.map(parseFederationPeerRecord).filter((entry): entry is FederationPeerSummary => entry != null)
+      : [];
+    const counters = typeof raw.counters === 'object' && raw.counters !== null
+      ? raw.counters as Record<string, unknown>
+      : undefined;
+    const peerCount = parseNonNegativeInt(raw.peerCount) ?? (peers.length > 0 ? peers.length : 0);
+    const recentEventCount = parseNonNegativeInt(raw.recentEventCount);
+    const enabled = parseBooleanFlag(raw.enabled, true);
+    const explicitState = toStringValue(raw.state ?? raw.status);
+    const state = explicitState ?? (enabled ? (peerCount && peerCount > 0 ? 'active' : 'enabled') : 'disabled');
+
+    return {
+      enabled,
+      state,
+      nodeId: toStringValue(raw.nodeId ?? raw.node_id),
+      host: toStringValue(raw.host),
+      busPort: parsePositiveInt(raw.busPort ?? raw.bus_port),
+      adminPort: parsePositiveInt(raw.adminPort ?? raw.admin_port),
+      busUrl: toStringValue(raw.busUrl ?? raw.bus_url),
+      adminUrl: toStringValue(raw.adminUrl ?? raw.admin_url),
+      peerCount,
+      recentEventCount: recentEventCount ?? parsePositiveInt(counters?.envelopesReceived),
+      peers,
+      updatedAt: toStringValue(raw.updatedAt ?? raw.updated_at),
+    };
+  } catch {
+    return undefined;
+  }
+};
+
+export const getFederationStatus = (): FederationStatusSummary | undefined => {
+  return getFederationStatusFromSnapshot() ?? getFederationEnvStatus();
 };
 
 const getRunServiceHealth = (): RunServiceUsageSummary['health'] | undefined => {
@@ -281,24 +592,12 @@ const getRunServiceHealth = (): RunServiceUsageSummary['health'] | undefined => 
 
   try {
     const raw = JSON.parse(fs.readFileSync(snapshotPath, 'utf8')) as Record<string, unknown>;
-    const blink = typeof raw.blink === 'object' && raw.blink !== null ? raw.blink as Record<string, unknown> : {};
-    const mux = typeof raw.mux === 'object' && raw.mux !== null ? raw.mux as Record<string, unknown> : {};
     const llama = typeof raw.llama === 'object' && raw.llama !== null ? raw.llama as Record<string, unknown> : {};
 
     const health = {
       updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : undefined,
       allReady: raw.allReady === true,
-      exportsReady: [blink.url, mux.url, llama.url].every((value) => typeof value === 'string' && value.length > 0),
-      blink: {
-        status: typeof blink.status === 'string' ? blink.status : 'unknown',
-        reachable: blink.reachable === true,
-        url: typeof blink.url === 'string' ? blink.url : undefined,
-      },
-      mux: {
-        status: typeof mux.status === 'string' ? mux.status : 'unknown',
-        reachable: mux.reachable === true,
-        url: typeof mux.url === 'string' ? mux.url : undefined,
-      },
+      exportsReady: typeof llama.url === 'string' && llama.url.length > 0,
       llama: {
         status: typeof llama.status === 'string' ? llama.status : 'unknown',
         reachable: llama.reachable === true,
@@ -320,7 +619,7 @@ const getRunServiceHealth = (): RunServiceUsageSummary['health'] | undefined => 
 const recordCanonicalTaskChat = (input: {
   taskId: string;
   runId?: string;
-  source: 'dashboard' | 'agent' | 'system' | 'slack' | 'blink';
+  source: 'dashboard' | 'agent' | 'system';
   authorType: 'user' | 'agent' | 'system';
   authorId: string;
   body: string;
@@ -492,10 +791,13 @@ const buildActiveAgents = (database: Database.Database, taskId: string): TaskDet
   return Array.from(agentsMap.values());
 };
 
-export const getProjectIdentity = (): ProjectIdentity => ({
-  projectId: getProjectId(),
-  projectName: getProjectName(),
-});
+export const getProjectIdentity = (projectId = getProjectId()): ProjectIdentity => {
+  const project = listProjects().find((entry) => entry.projectId === projectId);
+  return {
+    projectId,
+    projectName: project?.name ?? getProjectName(),
+  };
+};
 
 export const listProjects = (): ProjectSummary[] => {
   const database = getDatabase();
@@ -856,44 +1158,6 @@ export const getRunServiceUsage = (runId?: string): RunServiceUsageSummary | und
   try {
     const database = getDatabase();
 
-    const blinkRows = database.prepare(`
-      SELECT m.metadata_json
-      FROM task_chat_messages m
-      JOIN tasks t ON t.task_id = m.task_id
-      WHERE t.run_id = ?
-    `).all(runId) as Array<{ metadata_json?: string | null }>;
-    const bindingsRow = database.prepare(`
-      SELECT COUNT(*) AS binding_count
-      FROM project_chat_bindings pcb
-      JOIN tasks t ON t.task_id = pcb.task_id
-      WHERE t.run_id = ?
-    `).get(runId) as { binding_count?: number } | undefined;
-
-    let mirroredMessages = 0;
-    let pendingMessages = 0;
-    let failureCount = 0;
-    let retryCount = 0;
-    const providerBreakdown = new Map<string, number>();
-
-    for (const row of blinkRows) {
-      const metadata = parseMetadata(row.metadata_json);
-      const provider = typeof metadata?.provider === 'string' ? metadata.provider : 'unknown';
-      if (typeof metadata?.provider === 'string') {
-        providerBreakdown.set(provider, (providerBreakdown.get(provider) ?? 0) + 1);
-      }
-      if (metadata?.mirrored === true) {
-        mirroredMessages += 1;
-      } else if (bindingsRow?.binding_count && bindingsRow.binding_count > 0) {
-        pendingMessages += 1;
-      }
-      if (typeof metadata?.mirror_last_error === 'string' && metadata.mirror_last_error.length > 0) {
-        failureCount += 1;
-      }
-      if (typeof metadata?.mirror_attempts === 'number' && metadata.mirror_attempts > 1) {
-        retryCount += metadata.mirror_attempts - 1;
-      }
-    }
-
     const attemptRows = database.prepare(`
       SELECT attempt_id, metadata_json
       FROM task_attempts
@@ -955,7 +1219,6 @@ export const getRunServiceUsage = (runId?: string): RunServiceUsageSummary | und
 
     const llamaRoleCounts = new Map<string, number>();
     const bypassReasons = new Map<string, number>();
-    const muxRoleCounts = new Map<string, number>();
     let llamaRequestCount = 0;
     let llamaFailureCount = 0;
     let totalLlamaLatency = 0;
@@ -963,8 +1226,6 @@ export const getRunServiceUsage = (runId?: string): RunServiceUsageSummary | und
     let localCapableAttempts = 0;
     let localCapableLocalAttempts = 0;
     let localCapableCloudAttempts = 0;
-    let workspaceLeaseCount = 0;
-    let brokeredExecutionCount = 0;
 
     for (const [attemptId, metadata] of attemptMetadata.entries()) {
       const role = typeof metadata.role === 'string' ? metadata.role : 'worker';
@@ -974,14 +1235,6 @@ export const getRunServiceUsage = (runId?: string): RunServiceUsageSummary | und
       const engine = typeof routingDecision?.engine === 'string'
         ? routingDecision.engine
         : latestResultByAttempt.get(attemptId)?.engine;
-
-      if (typeof metadata.mux_session_id === 'string' && metadata.mux_session_id.length > 0) {
-        workspaceLeaseCount += 1;
-      }
-      if (engine === 'mux-local') {
-        brokeredExecutionCount += 1;
-        muxRoleCounts.set(role, (muxRoleCounts.get(role) ?? 0) + 1);
-      }
 
       const isLocalCapableRole = ['planner', 'researcher', 'reviewer', 'verifier', 'checkpoint-compressor', 'arbiter', 'summarizer'].includes(role);
       if (isLocalCapableRole) {
@@ -1025,21 +1278,10 @@ export const getRunServiceUsage = (runId?: string): RunServiceUsageSummary | und
     const cloudBypassRatePercent = localCapableAttempts > 0
       ? Number(((localCapableCloudAttempts / localCapableAttempts) * 100).toFixed(1))
       : 0;
-    const muxAssessment: RunServiceUsageSummary['mux']['assessment'] = brokeredExecutionCount > 0
-      ? 'active-broker'
-      : workspaceLeaseCount > 0
-        ? 'workspace-only'
-        : 'idle';
 
     const health = getRunServiceHealth();
     const policyActions: string[] = [];
     if (health && !health.allReady) {
-      if (!health.blink.reachable) {
-        policyActions.push('Blink is not reachable from the swarm runtime.');
-      }
-      if (!health.mux.reachable) {
-        policyActions.push('Mux is not reachable from the swarm runtime.');
-      }
       if (!health.llama.reachable) {
         policyActions.push('llama.cpp is not reachable from the swarm runtime.');
       }
@@ -1056,13 +1298,6 @@ export const getRunServiceUsage = (runId?: string): RunServiceUsageSummary | und
     if (localCapableAttempts > 0 && cloudBypassRatePercent >= 10) {
       policyActions.push('Cloud bypass rate is above the 10% target for standard local-first runs.');
     }
-    if (muxAssessment !== 'active-broker') {
-      policyActions.push(
-        muxAssessment === 'workspace-only'
-          ? 'Mux is only providing workspace/session leases; reduce its operator prominence unless brokered execution increases.'
-          : 'Mux is idle in persisted run data; de-emphasize or remove it from the operator surface until it carries brokered work.',
-      );
-    }
     const policyStatus: RunServiceUsageSummary['policy']['status'] = policyActions.length === 0
       ? 'healthy'
       : (
@@ -1073,15 +1308,6 @@ export const getRunServiceUsage = (runId?: string): RunServiceUsageSummary | und
 
     return {
       health,
-      blink: {
-        mirroredMessages,
-        pendingMessages,
-        failureCount,
-        retryCount,
-        providerBreakdown: Array.from(providerBreakdown.entries())
-          .map(([provider, count]) => ({ provider, count }))
-          .sort((left, right) => right.count - left.count || left.provider.localeCompare(right.provider)),
-      },
       llama: {
         requestCount: llamaRequestCount,
         failureCount: llamaFailureCount,
@@ -1099,26 +1325,13 @@ export const getRunServiceUsage = (runId?: string): RunServiceUsageSummary | und
         meetsLocalCoverageTarget: localCoveragePercent >= 80,
         meetsCloudEscalationTarget: cloudBypassRatePercent < 10,
       },
-      mux: {
-        workspaceLeaseCount,
-        brokeredExecutionCount,
-        activeRoleCoverage: Array.from(muxRoleCounts.entries())
-          .map(([role, count]) => ({ role, count }))
-          .sort((left, right) => right.count - left.count || left.role.localeCompare(right.role)),
-        assessment: muxAssessment,
-        recommendation: muxAssessment === 'active-broker'
-          ? 'Mux is carrying live brokered execution and remains a first-class service.'
-          : muxAssessment === 'workspace-only'
-            ? 'Mux is currently acting as a workspace/session helper; simplify its operator surface unless brokered execution grows.'
-            : 'Mux is provisioned but idle in persisted run data; reduce its prominence unless future brokered execution justifies it.',
-      },
       policy: {
         status: policyStatus,
         summary: policyStatus === 'healthy'
-          ? 'Service availability, local coverage, and brokered execution signals are all within target.'
+          ? 'Local service availability and local-first coverage are within target.'
           : policyStatus === 'action-needed'
             ? 'Runtime health or local-first coverage is below the expected operating target.'
-            : 'Service usage is visible, but at least one target or service-value signal needs operator attention.',
+            : 'Local service usage is visible, but at least one target needs operator attention.',
         actions: policyActions,
       },
     };
@@ -1255,12 +1468,12 @@ export const listOperatorMessages = (): MessageRecord[] => {
   }
 };
 
-export const listRuns = (): RunSummary[] => {
+export const listRuns = (projectId = getProjectId()): RunSummary[] => {
   try {
     const database = getDatabase();
     const rows = database
       .prepare('SELECT * FROM runs WHERE project_id = ? ORDER BY updated_at DESC')
-      .all(getProjectId()) as Array<{
+      .all(projectId) as Array<{
         run_id: string;
         project_id: string;
         status: string;
@@ -1281,8 +1494,8 @@ export const listRuns = (): RunSummary[] => {
   }
 };
 
-export const getPreferredBoardRunId = (): string | undefined => {
-  const runs = listRuns();
+export const getPreferredBoardRunId = (projectId = getProjectId()): string | undefined => {
+  const runs = listRuns(projectId);
   if (runs.length === 0) {
     return undefined;
   }
@@ -1632,6 +1845,103 @@ export const listRunTimelineEvents = (runId?: string): RunTimelineEntry[] => {
     return rows.map((row) => mapExecutionEventRow(row, taskNames));
   } catch {
     return [];
+  }
+};
+
+export const getAuditTrail = (runId?: string): AuditTrailSummary => {
+  try {
+    const database = getDatabase();
+    const rows = readAuditRows(database, 25);
+    const latestEvents = rows
+      .map((row) => {
+        const payload = inflateAuditPayload(row.payload);
+        return {
+          row,
+          payload,
+        };
+      })
+      .filter((event) => {
+        if (!runId) {
+          return true;
+        }
+        const payloadRunId = typeof event.payload.runId === 'string'
+          ? event.payload.runId
+          : typeof event.payload.run_id === 'string'
+            ? event.payload.run_id
+            : undefined;
+        return payloadRunId === runId;
+      })
+      .slice(0, 12)
+      .map((event) => {
+        const payload = event.payload;
+        const detail = [
+          typeof payload.detail === 'string' ? payload.detail : undefined,
+          typeof payload.summary === 'string' ? payload.summary : undefined,
+          typeof payload.eventType === 'string' ? payload.eventType : undefined,
+        ].filter((value): value is string => typeof value === 'string' && value.length > 0).join(' · ') || event.row.event_type;
+
+        return {
+          id: event.row.id,
+          ts: event.row.ts,
+          eventType: event.row.event_type,
+          nodeId: event.row.node_id,
+          taskId: typeof payload.taskId === 'string'
+            ? payload.taskId
+            : typeof payload.task_id === 'string'
+              ? payload.task_id
+              : undefined,
+          runId: typeof payload.runId === 'string'
+            ? payload.runId
+            : typeof payload.run_id === 'string'
+              ? payload.run_id
+              : undefined,
+          detail,
+          hash: event.row.merkle_leaf,
+        };
+      });
+
+    const allRows = readAuditRows(database).reverse();
+    let previousHash = GENESIS_AUDIT_HASH;
+    let chainVerified = true;
+    for (const row of allRows) {
+      let payload: Record<string, unknown>;
+      try {
+        payload = inflateAuditPayload(row.payload);
+      } catch {
+        chainVerified = false;
+        break;
+      }
+      const expectedLeaf = computeAuditLeafHash({
+        ts: row.ts,
+        swarmId: row.swarm_id,
+        nodeId: row.node_id,
+        eventType: row.event_type,
+        payload,
+        prevHash: previousHash,
+        height: row.height,
+      });
+      if (
+        row.prev_hash !== previousHash
+        || row.merkle_leaf !== expectedLeaf
+        || !verifyAuditSignature(expectedLeaf, row.signature)
+      ) {
+        chainVerified = false;
+        break;
+      }
+      previousHash = row.merkle_leaf;
+    }
+
+    return {
+      merkleRoot: computeAuditMerkleRoot(allRows.map((row) => row.merkle_leaf)),
+      chainVerified,
+      latestEvents,
+    };
+  } catch {
+    return {
+      merkleRoot: 'unavailable',
+      chainVerified: false,
+      latestEvents: [],
+    };
   }
 };
 

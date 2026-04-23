@@ -12,6 +12,10 @@ const service = new RoutingService({
     apple: 'apple-intelligence/local',
     default: 'llama.cpp/default',
   },
+  appleIntelligence: {
+    enabled: true,
+    sdkAvailable: true,
+  },
   routingPolicy: {
     plannerRoles: ['plan', 'planner', 'research', 'review', 'orchestrator', 'checkpoint', 'compress'],
     appleRoles: ['apple', 'ios', 'macos', 'swift', 'swiftui', 'xcode', 'visionos'],
@@ -48,6 +52,48 @@ describe('RoutingService', () => {
     assert.equal(decision.engine, 'apple-intelligence');
     assert.equal(decision.modelTier, 'local-capable');
     assert.equal(decision.model, 'apple-intelligence/local');
+  });
+
+  it('falls back to standard local code routing when Apple Intelligence is unavailable', () => {
+    const unavailableService = new RoutingService({
+      modelRouting: {
+        planning: 'llama.cpp/planner',
+        verification: 'llama.cpp/verifier',
+        code: 'codex-cli/coder',
+        apple: 'apple-intelligence/local',
+        default: 'llama.cpp/default',
+      },
+      appleIntelligence: {
+        enabled: false,
+        sdkAvailable: false,
+      },
+      routingPolicy: {
+        plannerRoles: ['plan', 'planner', 'research', 'review', 'orchestrator', 'checkpoint', 'compress'],
+        appleRoles: ['apple', 'ios', 'macos', 'swift', 'swiftui', 'xcode', 'visionos'],
+        appleTaskHints: ['apple', 'ios', 'ipad', 'iphone', 'macos', 'osx', 'swift', 'swiftui', 'objective-c', 'uikit', 'appkit', 'xcode', 'testflight', 'visionos', 'watchos', 'tvos'],
+        codeHints: ['code', 'coder', 'dev', 'implementation', 'debug', 'refactor'],
+        cloudEscalationHints: ['refactor', 'debug', 'multi-file', 'migration', 'large-scale'],
+      },
+    });
+
+    const decision = unavailableService.decide({
+      taskId: 'task-apple-fallback',
+      runId: 'run-1',
+      name: 'iOS integration',
+      status: 'queued',
+      priority: 'high',
+      metadata: {
+        task_type: 'implementation',
+        description: 'Update the SwiftUI iOS app and Xcode project settings.',
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }, 'coder-ios');
+
+    assert.equal(decision.engine, 'codex-cli');
+    assert.equal(decision.model, 'codex-cli/coder');
+    assert.match(decision.reason, /Apple Intelligence unavailable/);
+    assert.equal(decision.cloudEscalated, false);
   });
 
   it('keeps cloud escalation explicit for non-Apple coding work', () => {

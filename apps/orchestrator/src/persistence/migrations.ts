@@ -526,4 +526,27 @@ export const migrations: SchemaMigration[] = [
       `);
     },
   },
+  {
+    version: 8,
+    description: 'Tamper-evident append-only audit logging',
+    apply: (database) => {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS audit_log (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          ts TEXT NOT NULL,
+          swarm_id TEXT NOT NULL,
+          node_id TEXT NOT NULL,
+          event_type TEXT NOT NULL,
+          payload BLOB NOT NULL,
+          prev_hash TEXT NOT NULL,
+          merkle_leaf TEXT NOT NULL,
+          signature TEXT,
+          height INTEGER NOT NULL
+        ) STRICT;
+
+        CREATE INDEX IF NOT EXISTS idx_audit_swarm_ts ON audit_log(swarm_id, ts);
+        CREATE INDEX IF NOT EXISTS idx_audit_height ON audit_log(height);
+      `);
+    },
+  },
 ];

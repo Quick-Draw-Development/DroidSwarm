@@ -66,8 +66,10 @@ Usage:
 
 Commands:
   setup       Initialize a project for DroidSwarm
+  project     Onboard and manage registered projects
   swarm       Start and register a managed DroidSwarm instance
-  blink       Inspect Blink integration state and mark Slack linking complete
+  federation  Inspect federation state and onboard peer devices
+  slack       Inspect or restart the optional Slack bot service
   orchestrator Inspect orchestrator state and send task-channel messages
   list        List tracked swarms running on this machine
   status      Show detailed status for one managed DroidSwarm instance
@@ -80,9 +82,9 @@ Commands:
 
 Examples:
   DroidSwarm setup --project-root "$PWD" --project-mode greenfield
+  DroidSwarm project onboard --project-root "$PWD"
   DroidSwarm swarm --project-root "$PWD" --env OPENAI_API_KEY=example --config mode=dev
-  DroidSwarm blink status
-  DroidSwarm blink linked --project-root "$PWD"
+  DroidSwarm federation status
   DroidSwarm orchestrator status
   DroidSwarm orchestrator status --task-id <task-id>
   DroidSwarm orchestrator message --task-id <task-id> --content "Need an update"
@@ -112,6 +114,11 @@ Options:
   --dashboard-port PORT
   --ws-port PORT
   --db-path PATH
+  --enable-federation
+  --enable-federation-adb
+  --enable-slack-bot
+  --federation-peer URL      Repeatable
+  --federation-remote-workers-file PATH
   --force
   --help
 EOF
@@ -125,6 +132,7 @@ Usage:
 Options:
   --swarm-id ID
   --project-root PATH
+  --project NAME|PATH|ID
   --project-name NAME
   --project-id ID
   --dashboard-port PORT
@@ -133,10 +141,18 @@ Options:
   --main-branch NAME
   --production-branch NAME
   --repo-url URL
-  --blink-port PORT
-  --mux-port PORT
   --llama-port PORT
   --llama-model PATH
+  --enable-federation
+  --enable-federation-adb
+  --enable-slack-bot
+  --federation-peer URL      Repeatable
+  --federation-remote-workers-file PATH
+  --federation-bus-port PORT
+  --federation-admin-port PORT
+  --federation-node-id ID
+  --adb-port PORT
+  --adb-bin PATH
   --env KEY=VALUE           Repeatable
   --config KEY=VALUE        Repeatable
   --debug
@@ -144,6 +160,25 @@ Options:
   --foreground
   --dry-run
   --help
+EOF
+}
+
+print_project_help() {
+  cat <<'EOF'
+Usage:
+  DroidSwarm project onboard [options]
+  DroidSwarm project list
+  DroidSwarm project status [options]
+  DroidSwarm project select [options]
+  DroidSwarm project remove [options]
+  DroidSwarm project migrate [options]
+
+Options:
+  --project-root PATH
+  --project NAME|PATH|ID
+  --project-id ID
+  --project-name NAME
+  --db-path PATH
 EOF
 }
 
@@ -216,28 +251,6 @@ print_version() {
   printf 'DroidSwarm %s\n' "${DROIDSWARM_VERSION:-0.0.0}"
 }
 
-print_blink_help() {
-  cat <<'EOF'
-Usage:
-  DroidSwarm blink status [options]
-  DroidSwarm blink linked [options]
-
-Status options:
-  --project-root PATH
-  --swarm-id ID
-
-Linked options:
-  --project-root PATH        Required
-  --workspace NAME
-
-Examples:
-  DroidSwarm blink status
-  DroidSwarm blink status --swarm-id <id>
-  DroidSwarm blink linked --project-root "$PWD"
-  DroidSwarm blink linked --project-root "$PWD" --workspace my-slack-workspace
-EOF
-}
-
 print_orchestrator_help() {
   cat <<'EOF'
 Usage:
@@ -259,6 +272,71 @@ Examples:
   DroidSwarm orchestrator status
   DroidSwarm orchestrator status --task-id <task-id>
   DroidSwarm orchestrator message --task-id <task-id> --content "What is blocked?"
+EOF
+}
+
+print_federation_help() {
+  cat <<'EOF'
+Usage:
+  DroidSwarm federation status [options]
+  DroidSwarm federation devices [options]
+  DroidSwarm federation onboard [options]
+
+Status options:
+  --swarm-id ID
+
+Devices options:
+  --swarm-id ID
+
+Onboard options:
+  --swarm-id ID
+  --serial SERIAL            Required
+  --output-dir PATH
+  --remote-dir PATH
+  --no-register
+  --skip-push
+
+Examples:
+  DroidSwarm federation status
+  DroidSwarm federation devices --swarm-id <id>
+  DroidSwarm federation onboard --swarm-id <id> --serial emulator-5554
+EOF
+}
+
+run_shared_projects_cli() {
+  node --import tsx "$ROOT_DIR/../shared-projects/src/cli.ts" "$@"
+}
+
+json_field() {
+  local field_path="${1:?field path required}"
+  node -e '
+const fs = require("node:fs");
+const path = process.argv[1];
+const payload = JSON.parse(fs.readFileSync(0, "utf8"));
+const value = path.split(".").reduce((cursor, key) => (cursor == null ? undefined : cursor[key]), payload);
+if (value == null) {
+  process.exit(1);
+}
+if (typeof value === "object") {
+  process.stdout.write(JSON.stringify(value));
+} else {
+  process.stdout.write(String(value));
+}
+' "$field_path"
+}
+
+print_slack_help() {
+  cat <<'EOF'
+Usage:
+  DroidSwarm slack status [options]
+  DroidSwarm slack restart [options]
+
+Options:
+  --swarm-id ID
+
+Examples:
+  DroidSwarm slack status
+  DroidSwarm slack restart --swarm-id <id>
 EOF
 }
 
@@ -361,12 +439,8 @@ service_runtime_config_is_valid() {
   env -i DROIDSWARM_SERVICE_CONFIG="$config_file" /bin/bash -lc '
     set -euo pipefail
     source "$DROIDSWARM_SERVICE_CONFIG"
-    [[ -n "${DROIDSWARM_BLINK_SERVER_BIN:-}" ]]
-    [[ -n "${DROIDSWARM_MUX_BIN:-}" ]]
     [[ -n "${DROIDSWARM_LLAMA_SERVER_BIN:-}" ]]
     [[ -n "${DROIDSWARM_LLAMA_MODEL:-}" ]]
-    [[ -x "${DROIDSWARM_BLINK_SERVER_BIN:-}" ]]
-    [[ -x "${DROIDSWARM_MUX_BIN:-}" ]]
     [[ -x "${DROIDSWARM_LLAMA_SERVER_BIN:-}" ]]
     [[ -f "${DROIDSWARM_LLAMA_MODEL:-}" ]]
   ' >/dev/null 2>&1
@@ -442,12 +516,6 @@ service_listener_is_adoptable() {
     fi
 
     case "$service_name" in
-      blink-server)
-        candidate_port="${DROIDSWARM_BLINK_SERVER_PORT:-}"
-        ;;
-      mux)
-        candidate_port="${DROIDSWARM_MUX_PORT:-}"
-        ;;
       llama.cpp)
         candidate_port="${DROIDSWARM_LLAMA_PORT:-}"
         ;;
@@ -566,9 +634,11 @@ write_project_setup_state() {
   local db_path="$9"
   local version="${10:-${DROIDSWARM_VERSION:-}}"
   local spec_dir="${11:-}"
-  local blink_slack_linked="${12:-0}"
-  local blink_slack_linked_at="${13:-}"
-  local blink_slack_workspace="${14:-}"
+  local federation_enabled="${12:-0}"
+  local federation_adb_enabled="${13:-0}"
+  local federation_peers="${14:-}"
+  local federation_remote_workers_file="${15:-}"
+  local slack_bot_enabled="${16:-0}"
 
   cat >"$(project_setup_file "$project_root")" <<EOF
 DROIDSWARM_PROJECT_ROOT=$(printf '%q' "$project_root")
@@ -582,9 +652,11 @@ DROIDSWARM_WS_PORT=$(printf '%q' "$ws_port")
 DROIDSWARM_DB_PATH=$(printf '%q' "$db_path")
 DROIDSWARM_VERSION=$(printf '%q' "$version")
 DROIDSWARM_SPECS_DIR=$(printf '%q' "$spec_dir")
-DROIDSWARM_BLINK_SLACK_LINKED=$(printf '%q' "$blink_slack_linked")
-DROIDSWARM_BLINK_SLACK_LINKED_AT=$(printf '%q' "$blink_slack_linked_at")
-DROIDSWARM_BLINK_SLACK_WORKSPACE=$(printf '%q' "$blink_slack_workspace")
+DROIDSWARM_ENABLE_FEDERATION=$(printf '%q' "$federation_enabled")
+DROIDSWARM_ENABLE_FEDERATION_ADB=$(printf '%q' "$federation_adb_enabled")
+DROIDSWARM_FEDERATION_PEERS=$(printf '%q' "$federation_peers")
+DROIDSWARM_FEDERATION_REMOTE_WORKERS_FILE=$(printf '%q' "$federation_remote_workers_file")
+DROIDSWARM_ENABLE_SLACK_BOT=$(printf '%q' "$slack_bot_enabled")
 DROIDSWARM_SETUP_COMPLETED_AT=$(printf '%q' "$(now_utc)")
 EOF
 }
@@ -606,6 +678,8 @@ cmd_setup() {
 
   local project_root project_name project_id project_mode main_branch production_branch
   local dashboard_port ws_port db_path force specs_dir
+  local federation_enabled federation_adb_enabled federation_peers federation_remote_workers_file
+  local slack_bot_enabled
   project_root="$(pwd)"
   project_name=""
   project_id=""
@@ -617,6 +691,11 @@ cmd_setup() {
   db_path=""
   force="0"
   specs_dir="$ROOT_DIR/specs"
+  federation_enabled="${DROIDSWARM_ENABLE_FEDERATION:-0}"
+  federation_adb_enabled="${DROIDSWARM_ENABLE_FEDERATION_ADB:-0}"
+  federation_peers="${DROIDSWARM_FEDERATION_PEERS:-}"
+  federation_remote_workers_file="${DROIDSWARM_FEDERATION_REMOTE_WORKERS_FILE:-}"
+  slack_bot_enabled="${DROIDSWARM_ENABLE_SLACK_BOT:-0}"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -664,6 +743,30 @@ cmd_setup() {
         shift
         require_value "--db-path" "${1:-}"
         db_path="$1"
+        ;;
+      --enable-federation)
+        federation_enabled="1"
+        ;;
+      --enable-federation-adb)
+        federation_enabled="1"
+        federation_adb_enabled="1"
+        ;;
+      --enable-slack-bot)
+        slack_bot_enabled="1"
+        ;;
+      --federation-peer)
+        shift
+        require_value "--federation-peer" "${1:-}"
+        if [[ -n "$federation_peers" ]]; then
+          federation_peers="${federation_peers},$1"
+        else
+          federation_peers="$1"
+        fi
+        ;;
+      --federation-remote-workers-file)
+        shift
+        require_value "--federation-remote-workers-file" "${1:-}"
+        federation_remote_workers_file="$1"
         ;;
       --force)
         force="1"
@@ -767,7 +870,18 @@ cmd_setup() {
     "$ws_port" \
     "$db_path" \
     "$DROIDSWARM_VERSION" \
-    "$specs_dir"
+    "$specs_dir" \
+    "$federation_enabled" \
+    "$federation_adb_enabled" \
+    "$federation_peers" \
+    "$federation_remote_workers_file" \
+    "$slack_bot_enabled"
+
+  run_shared_projects_cli onboard \
+    --project-root "$project_root" \
+    --project-id "$project_id" \
+    --project-name "$project_name" \
+    --db-path "$db_path" >/dev/null
 
   ensure_gitignore_entry "$project_root" ".droidswarm/*"
   ensure_gitignore_entry "$project_root" "!.droidswarm/.gitkeep"
@@ -781,28 +895,31 @@ cmd_setup() {
   info "Production branch: $production_branch"
   info "Metadata: $(project_meta_file "$project_root")"
   info "Database: $db_path"
-  info "Blink to Slack: pending"
-  info "After the swarm starts, open the Blink UI and link Slack, then run:"
-  info "  DroidSwarm blink linked --project-root \"$project_root\""
+  info "Federation: $( [[ "$federation_enabled" == "1" ]] && printf 'enabled' || printf 'disabled' )"
+  info "Slack bot: $( [[ "$slack_bot_enabled" == "1" ]] && printf 'enabled' || printf 'disabled' )"
+  info "Registered project in global registry."
 }
 
 cmd_swarm() {
   ensure_runtime_dirs
 
-  local project_root project_name project_id project_mode swarm_id dashboard_port ws_port db_path
+  local project_root project_name project_id project_mode project_lookup swarm_id dashboard_port ws_port db_path
   local agent_count main_branch production_branch repo_url foreground dry_run
   local debug_enabled debug_explicit
   local dashboard_port_explicit ws_port_explicit
-  local blink_port_explicit mux_port_explicit llama_port_explicit
+  local llama_port_explicit
   local node_bin operator_token socket_server_entry orchestrator_entry dashboard_server_entry
-  local blink_bridge_entry worker_host_entry
+  local worker_host_entry
+  local slack_bot_entry
   local dashboard_static_dir dashboard_public_dir dashboard_workdir
   local specs_dir
-  local blink_port mux_port llama_port llama_model
+  local llama_port llama_model
+  local enable_slack_bot slack_bot_explicit
   project_root="$(pwd)"
   project_name=""
   project_id=""
   project_mode=""
+  project_lookup=""
   swarm_id=""
   dashboard_port=""
   ws_port=""
@@ -817,21 +934,35 @@ cmd_swarm() {
   debug_explicit="0"
   dashboard_port_explicit="0"
   ws_port_explicit="0"
-  blink_port_explicit="0"
-  mux_port_explicit="0"
   llama_port_explicit="0"
   node_bin="${DROIDSWARM_NODE_BIN:-$(command -v node || true)}"
   operator_token="${DROIDSWARM_OPERATOR_TOKEN:-}"
+  enable_slack_bot="${DROIDSWARM_ENABLE_SLACK_BOT:-0}"
+  slack_bot_explicit="0"
+  enable_federation="${DROIDSWARM_ENABLE_FEDERATION:-0}"
+  federation_bus_port="${DROIDSWARM_FEDERATION_BUS_PORT:-}"
+  federation_admin_port="${DROIDSWARM_FEDERATION_ADMIN_PORT:-}"
+  federation_node_id="${DROIDSWARM_FEDERATION_NODE_ID:-}"
+  federation_host="${DROIDSWARM_FEDERATION_HOST:-127.0.0.1}"
+  federation_bus_url="${DROIDSWARM_FEDERATION_BUS_URL:-}"
+  federation_admin_url="${DROIDSWARM_FEDERATION_ADMIN_URL:-}"
+  federation_peers="${DROIDSWARM_FEDERATION_PEERS:-}"
+  federation_remote_workers_file="${DROIDSWARM_FEDERATION_REMOTE_WORKERS_FILE:-}"
+  federation_bus_entry="${DROIDSWARM_FEDERATION_BUS_ENTRY:-}"
+  federation_adb_enabled="${DROIDSWARM_ENABLE_FEDERATION_ADB:-0}"
+  federation_adb_port="${DROIDSWARM_FEDERATION_ADB_PORT:-}"
+  federation_adb_bin="${DROIDSWARM_FEDERATION_ADB_BIN:-adb}"
+  federation_adb_entry="${DROIDSWARM_FEDERATION_ADB_ENTRY:-}"
+  federation_adopt="0"
+  federation_adopt_pid=""
   socket_server_entry=""
   orchestrator_entry=""
   dashboard_server_entry=""
   dashboard_static_dir=""
   dashboard_public_dir=""
   dashboard_workdir=""
-  blink_bridge_entry=""
   worker_host_entry=""
-  blink_port=""
-  mux_port=""
+  slack_bot_entry=""
   llama_port=""
   llama_model="${DROIDSWARM_LLAMA_MODEL:-}"
 
@@ -849,6 +980,11 @@ cmd_swarm() {
         shift
         require_value "--project-root" "${1:-}"
         project_root="$1"
+        ;;
+      --project)
+        shift
+        require_value "--project" "${1:-}"
+        project_lookup="$1"
         ;;
       --project-name)
         shift
@@ -892,18 +1028,6 @@ cmd_swarm() {
         require_value "--repo-url" "${1:-}"
         repo_url="$1"
         ;;
-      --blink-port)
-        shift
-        require_value "--blink-port" "${1:-}"
-        blink_port="$1"
-        blink_port_explicit="1"
-        ;;
-      --mux-port)
-        shift
-        require_value "--mux-port" "${1:-}"
-        mux_port="$1"
-        mux_port_explicit="1"
-        ;;
       --llama-port)
         shift
         require_value "--llama-port" "${1:-}"
@@ -914,6 +1038,56 @@ cmd_swarm() {
         shift
         require_value "--llama-model" "${1:-}"
         llama_model="$1"
+        ;;
+      --enable-federation)
+        enable_federation="1"
+        ;;
+      --enable-federation-adb)
+        federation_adb_enabled="1"
+        enable_federation="1"
+        ;;
+      --enable-slack-bot)
+        enable_slack_bot="1"
+        slack_bot_explicit="1"
+        ;;
+      --federation-peer)
+        shift
+        require_value "--federation-peer" "${1:-}"
+        if [[ -n "$federation_peers" ]]; then
+          federation_peers="${federation_peers},$1"
+        else
+          federation_peers="$1"
+        fi
+        ;;
+      --federation-remote-workers-file)
+        shift
+        require_value "--federation-remote-workers-file" "${1:-}"
+        federation_remote_workers_file="$1"
+        ;;
+      --federation-bus-port)
+        shift
+        require_value "--federation-bus-port" "${1:-}"
+        federation_bus_port="$1"
+        ;;
+      --federation-admin-port)
+        shift
+        require_value "--federation-admin-port" "${1:-}"
+        federation_admin_port="$1"
+        ;;
+      --federation-node-id)
+        shift
+        require_value "--federation-node-id" "${1:-}"
+        federation_node_id="$1"
+        ;;
+      --adb-port)
+        shift
+        require_value "--adb-port" "${1:-}"
+        federation_adb_port="$1"
+        ;;
+      --adb-bin)
+        shift
+        require_value "--adb-bin" "${1:-}"
+        federation_adb_bin="$1"
         ;;
       --env)
         shift
@@ -952,6 +1126,40 @@ cmd_swarm() {
     shift
   done
 
+  if [[ -n "$project_lookup" ]]; then
+    local project_json
+    if ! project_json="$(run_shared_projects_cli status --project "$project_lookup" 2>/dev/null)"; then
+      err "Unknown registered project: $project_lookup"
+      return 1
+    fi
+    project_root="$(printf '%s' "$project_json" | json_field rootPath)"
+    if [[ -z "$project_name" ]]; then
+      project_name="$(printf '%s' "$project_json" | json_field name)"
+    fi
+    if [[ -z "$project_id" ]]; then
+      project_id="$(printf '%s' "$project_json" | json_field projectId)"
+    fi
+    if [[ -z "$db_path" ]]; then
+      db_path="$(printf '%s' "$project_json" | json_field dbPath)"
+    fi
+  fi
+
+  if [[ -z "$project_lookup" ]] && [[ "$project_root" == "$(pwd)" ]] && ! project_is_setup "$project_root"; then
+    local current_project_json
+    if current_project_json="$(run_shared_projects_cli status 2>/dev/null)" && [[ "$current_project_json" != "null" ]]; then
+      project_root="$(printf '%s' "$current_project_json" | json_field rootPath)"
+      if [[ -z "$project_name" ]]; then
+        project_name="$(printf '%s' "$current_project_json" | json_field name)"
+      fi
+      if [[ -z "$project_id" ]]; then
+        project_id="$(printf '%s' "$current_project_json" | json_field projectId)"
+      fi
+      if [[ -z "$db_path" ]]; then
+        db_path="$(printf '%s' "$current_project_json" | json_field dbPath)"
+      fi
+    fi
+  fi
+
   mkdir -p "$project_root"
   project_root="$(cd "$project_root" && pwd)"
 
@@ -972,6 +1180,9 @@ cmd_swarm() {
   fi
 
   project_mode="${DROIDSWARM_PROJECT_MODE:-}"
+  if [[ "$slack_bot_explicit" != "1" ]]; then
+    enable_slack_bot="${DROIDSWARM_ENABLE_SLACK_BOT:-0}"
+  fi
 
   if [[ -z "$main_branch" ]]; then
     main_branch="${DROIDSWARM_MAIN_BRANCH:-main}"
@@ -988,6 +1199,17 @@ cmd_swarm() {
   db_path="${DROIDSWARM_DB_PATH:-}"
   if [[ -z "$db_path" ]]; then
     db_path="$(project_db_file "$project_root")"
+  fi
+
+  if [[ -z "$federation_remote_workers_file" ]]; then
+    federation_remote_workers_file="${DROIDSWARM_FEDERATION_REMOTE_WORKERS_FILE:-}"
+  fi
+  if [[ -z "$federation_remote_workers_file" ]]; then
+    local candidate_remote_workers_file
+    candidate_remote_workers_file="$(project_federation_workers_file "$project_root")"
+    if [[ -f "$candidate_remote_workers_file" ]]; then
+      federation_remote_workers_file="$candidate_remote_workers_file"
+    fi
   fi
 
   if [[ -z "$swarm_id" ]]; then
@@ -1041,18 +1263,14 @@ cmd_swarm() {
   state_dir="$(swarm_dir "$swarm_id")"
   log_file="$(swarm_log_file "$swarm_id")"
   local workspace_root install_runtime_root install_models_root
-  local blink_adopt mux_adopt llama_adopt
-  local blink_adopt_pid mux_adopt_pid llama_adopt_pid
-  local blink_binding mux_binding llama_binding
+  local llama_adopt
+  local llama_adopt_pid
+  local llama_binding
   workspace_root="$(cd "$ROOT_DIR/../.." 2>/dev/null && pwd || true)"
   install_runtime_root="$ROOT_DIR/runtime"
   install_models_root="${DROIDSWARM_MODELS_DIR:-$DROIDSWARM_HOME/models}"
   specs_dir="$ROOT_DIR/specs"
-  blink_adopt="0"
-  mux_adopt="0"
   llama_adopt="0"
-  blink_adopt_pid=""
-  mux_adopt_pid=""
   llama_adopt_pid=""
 
   if [[ -z "$node_bin" || ! -x "$node_bin" ]]; then
@@ -1080,16 +1298,67 @@ cmd_swarm() {
     "$install_runtime_root/dashboard/public" \
     "$install_runtime_root/dashboard/apps/dashboard/public" \
     "$workspace_root/apps/dashboard/public" || true)"
-  blink_bridge_entry="$(resolve_runtime_value "${DROIDSWARM_BLINK_BRIDGE_ENTRY:-}" \
-    "${DROIDSWARM_DEFAULT_BLINK_BRIDGE_ENTRY:-$install_runtime_root/blink-bridge/main.js}" \
-    "$install_runtime_root/blink-bridge/main.js" \
-    "$workspace_root/dist/apps/blink-bridge/main.js" || true)"
   worker_host_entry="$(resolve_runtime_value "${DROIDSWARM_WORKER_HOST_ENTRY:-}" \
     "${DROIDSWARM_DEFAULT_WORKER_HOST_ENTRY:-$install_runtime_root/worker-host/main.js}" \
     "$install_runtime_root/worker-host/main.js" \
     "$install_runtime_root/worker-host/main.cjs" \
     "$workspace_root/dist/apps/worker-host/main.js" \
     "$workspace_root/dist/apps/worker-host/main.cjs" || true)"
+  slack_bot_entry="$(resolve_runtime_value "${DROIDSWARM_SLACK_BOT_ENTRY:-}" \
+    "$install_runtime_root/slack-bot/main.js" \
+    "$workspace_root/dist/apps/slack-bot/main.js" || true)"
+  federation_bus_entry="$(resolve_runtime_value "${DROIDSWARM_FEDERATION_BUS_ENTRY:-}" \
+    "$install_runtime_root/federation-bus/service.js" \
+    "$install_runtime_root/federation-bus/src/service.js" \
+    "$workspace_root/dist/packages/federation-bus/src/service.js" \
+    "$workspace_root/dist/packages/federation-bus/src/index.js" || true)"
+  federation_adb_entry="$(resolve_runtime_value "${DROIDSWARM_FEDERATION_ADB_ENTRY:-}" \
+    "$install_runtime_root/federation-adb/service.js" \
+    "$install_runtime_root/federation-adb/src/service.js" \
+    "$workspace_root/dist/packages/federation-adb/src/service.js" || true)"
+
+  if [[ "$enable_federation" == "1" ]]; then
+    if [[ -z "$federation_bus_entry" ]]; then
+      err "Missing federation-bus build artifact."
+      err "Expected dist/packages/federation-bus/src/service.js or an installed runtime copy."
+      err "Run: nx build federation-bus"
+      return 1
+    fi
+
+    if [[ -z "$federation_node_id" ]]; then
+      federation_node_id="$swarm_id"
+    fi
+
+    if [[ -z "$federation_bus_port" && -z "$federation_admin_port" ]]; then
+      federation_bus_port="$(next_available_port 4947)"
+      federation_admin_port="$((federation_bus_port + 3))"
+    elif [[ -z "$federation_bus_port" && -n "$federation_admin_port" ]]; then
+      federation_bus_port="$((federation_admin_port - 3))"
+    elif [[ -n "$federation_bus_port" && -z "$federation_admin_port" ]]; then
+      federation_admin_port="$((federation_bus_port + 3))"
+    fi
+
+    if [[ -n "$federation_bus_port" && -n "$federation_admin_port" ]]; then
+      if ! port_is_free "$federation_bus_port" || ! port_is_free "$federation_admin_port"; then
+        err "Federation ports are already in use: bus=$federation_bus_port admin=$federation_admin_port"
+        return 1
+      fi
+      federation_bus_url="http://${federation_host}:${federation_bus_port}"
+      federation_admin_url="http://${federation_host}:${federation_admin_port}"
+    fi
+
+    if [[ "$federation_adb_enabled" == "1" ]]; then
+      if [[ -z "$federation_adb_entry" ]]; then
+        err "Missing federation-adb build artifact."
+        err "Expected dist/packages/federation-adb/src/service.js or an installed runtime copy."
+        err "Run: nx build federation-adb"
+        return 1
+      fi
+      if [[ -z "$federation_adb_port" ]]; then
+        federation_adb_port="$(next_available_port 4961)"
+      fi
+    fi
+  fi
 
   if [[ -z "$socket_server_entry" ]]; then
     err "Missing socket-server build artifact."
@@ -1112,6 +1381,13 @@ cmd_swarm() {
     return 1
   fi
 
+  if [[ "$enable_slack_bot" == "1" && -z "$slack_bot_entry" ]]; then
+    err "Missing slack-bot build artifact."
+    err "Expected dist/apps/slack-bot/main.js or installed runtime copy."
+    err "Run: nx build slack-bot"
+    return 1
+  fi
+
   dashboard_workdir="$(cd "$(dirname "$dashboard_server_entry")" && pwd)"
 
   if [[ -z "$operator_token" ]]; then
@@ -1126,20 +1402,6 @@ cmd_swarm() {
     # shellcheck disable=SC1090
     source "$DROIDSWARM_SERVICE_CONFIG"
   fi
-
-  if [[ -z "$blink_port" ]]; then
-    blink_port="${DROIDSWARM_BLINK_SERVER_PORT:-8950}"
-  fi
-  blink_binding="$(resolve_service_binding "blink-server" "$blink_port" "$blink_port_explicit" 8950 "${DROIDSWARM_BLINK_SERVER_BIN:-}" "blink-server" "blink")" || return 1
-  IFS='|' read -r blink_binding_action blink_port blink_adopt_pid <<<"$blink_binding"
-  [[ "$blink_binding_action" == "adopt" ]] && blink_adopt="1"
-
-  if [[ -z "$mux_port" ]]; then
-    mux_port="${DROIDSWARM_MUX_PORT:-8960}"
-  fi
-  mux_binding="$(resolve_service_binding "mux" "$mux_port" "$mux_port_explicit" 8960 "${DROIDSWARM_MUX_BIN:-}" " mux " "/mux" "mux")" || return 1
-  IFS='|' read -r mux_binding_action mux_port mux_adopt_pid <<<"$mux_binding"
-  [[ "$mux_binding_action" == "adopt" ]] && mux_adopt="1"
 
   if [[ -z "$llama_port" ]]; then
     llama_port="${DROIDSWARM_LLAMA_PORT:-11434}"
@@ -1157,11 +1419,15 @@ cmd_swarm() {
   info "Project root: $project_root"
   info "Dashboard port: $dashboard_port"
   info "WebSocket port: $ws_port"
-  info "Blink UI port: $blink_port"
-  if [[ "${DROIDSWARM_BLINK_SLACK_LINKED:-0}" == "1" ]]; then
-    info "Blink to Slack: linked"
-  else
-    info "Blink to Slack: pending"
+  info "llama.cpp port: $llama_port"
+  info "Federation: $( [[ "$enable_federation" == "1" ]] && printf 'enabled' || printf 'disabled' )"
+  info "Slack bot: $( [[ "$enable_slack_bot" == "1" ]] && printf 'enabled' || printf 'disabled' )"
+  if [[ "$enable_federation" == "1" ]]; then
+    info "Federation bus port: ${federation_bus_port:-unknown}"
+    info "Federation admin port: ${federation_admin_port:-unknown}"
+    if [[ "$federation_adb_enabled" == "1" ]]; then
+      info "Federation ADB port: ${federation_adb_port:-unknown}"
+    fi
   fi
   info "Debug logging: $( [[ "$debug_enabled" == "1" ]] && printf 'on' || printf 'off' )"
 
@@ -1196,21 +1462,33 @@ DROIDSWARM_DASHBOARD_SERVER_ENTRY=$(printf '%q' "$dashboard_server_entry")
 DROIDSWARM_DASHBOARD_STATIC_DIR=$(printf '%q' "$dashboard_static_dir")
 DROIDSWARM_DASHBOARD_PUBLIC_DIR=$(printf '%q' "$dashboard_public_dir")
 DROIDSWARM_DASHBOARD_WORKDIR=$(printf '%q' "$dashboard_workdir")
-DROIDSWARM_BLINK_BRIDGE_ENTRY=$(printf '%q' "$blink_bridge_entry")
 DROIDSWARM_WORKER_HOST_ENTRY=$(printf '%q' "$worker_host_entry")
+DROIDSWARM_SLACK_BOT_ENTRY=$(printf '%q' "$slack_bot_entry")
 DROIDSWARM_VERSION=$(printf '%q' "$DROIDSWARM_VERSION")
 DROIDSWARM_SPECS_DIR=$(printf '%q' "$specs_dir")
-DROIDSWARM_BLINK_SERVER_PORT=$(printf '%q' "$blink_port")
-DROIDSWARM_MUX_PORT=$(printf '%q' "$mux_port")
 DROIDSWARM_LLAMA_PORT=$(printf '%q' "$llama_port")
-DROIDSWARM_ADOPT_BLINK_SERVER=$(printf '%q' "$blink_adopt")
-DROIDSWARM_ADOPT_BLINK_SERVER_PID=$(printf '%q' "$blink_adopt_pid")
-DROIDSWARM_ADOPT_MUX=$(printf '%q' "$mux_adopt")
-DROIDSWARM_ADOPT_MUX_PID=$(printf '%q' "$mux_adopt_pid")
 DROIDSWARM_ADOPT_LLAMA=$(printf '%q' "$llama_adopt")
 DROIDSWARM_ADOPT_LLAMA_PID=$(printf '%q' "$llama_adopt_pid")
 DROIDSWARM_LLAMA_MODEL=$(printf '%q' "$llama_model")
 DROIDSWARM_SERVICE_CONFIG=$(printf '%q' "$DROIDSWARM_SERVICE_CONFIG")
+DROIDSWARM_ENABLE_SLACK_BOT=$(printf '%q' "$enable_slack_bot")
+DROIDSWARM_SLACK_KEYCHAIN_SERVICE=$(printf '%q' "${DROIDSWARM_SLACK_KEYCHAIN_SERVICE:-DroidSwarm Slack}")
+DROIDSWARM_ENABLE_FEDERATION=$(printf '%q' "$enable_federation")
+DROIDSWARM_FEDERATION_NODE_ID=$(printf '%q' "$federation_node_id")
+DROIDSWARM_FEDERATION_HOST=$(printf '%q' "$federation_host")
+DROIDSWARM_FEDERATION_BUS_PORT=$(printf '%q' "$federation_bus_port")
+DROIDSWARM_FEDERATION_ADMIN_PORT=$(printf '%q' "$federation_admin_port")
+DROIDSWARM_FEDERATION_BUS_URL=$(printf '%q' "$federation_bus_url")
+DROIDSWARM_FEDERATION_ADMIN_URL=$(printf '%q' "$federation_admin_url")
+DROIDSWARM_FEDERATION_PEERS=$(printf '%q' "$federation_peers")
+DROIDSWARM_FEDERATION_REMOTE_WORKERS_FILE=$(printf '%q' "$federation_remote_workers_file")
+DROIDSWARM_FEDERATION_BUS_ENTRY=$(printf '%q' "$federation_bus_entry")
+DROIDSWARM_ENABLE_FEDERATION_ADB=$(printf '%q' "$federation_adb_enabled")
+DROIDSWARM_FEDERATION_ADB_PORT=$(printf '%q' "$federation_adb_port")
+DROIDSWARM_FEDERATION_ADB_BIN=$(printf '%q' "$federation_adb_bin")
+DROIDSWARM_FEDERATION_ADB_ENTRY=$(printf '%q' "$federation_adb_entry")
+DROIDSWARM_ADOPT_FEDERATION=$(printf '%q' "$federation_adopt")
+DROIDSWARM_ADOPT_FEDERATION_PID=$(printf '%q' "$federation_adopt_pid")
 EOF
 
   write_env_assignment_file "$state_dir/env.list" "${env_pairs[@]-}"
@@ -1237,9 +1515,11 @@ EOF
     "$db_path" \
     "$DROIDSWARM_VERSION" \
     "$specs_dir" \
-    "${DROIDSWARM_BLINK_SLACK_LINKED:-0}" \
-    "${DROIDSWARM_BLINK_SLACK_LINKED_AT:-}" \
-    "${DROIDSWARM_BLINK_SLACK_WORKSPACE:-}"
+    "$enable_federation" \
+    "$federation_adb_enabled" \
+    "$federation_peers" \
+    "$federation_remote_workers_file" \
+    "$enable_slack_bot"
 
   if [[ "$foreground" == "1" ]]; then
     "$ROOT_DIR/libexec/droidswarm-daemon.sh" "$swarm_id" "$state_dir"
@@ -1250,12 +1530,6 @@ EOF
     info "Started DroidSwarm '$swarm_id' (pid $pid)"
     sleep 2
     print_swarm_runtime_status "$swarm_id"
-    if [[ "${DROIDSWARM_BLINK_SLACK_LINKED:-0}" != "1" ]]; then
-      info "Blink/Slack link is still pending for this project."
-      info "Open Blink UI: $(format_local_http_url "$blink_port")"
-      info "After linking Slack in Blink, run:"
-      info "  DroidSwarm blink linked --project-root \"$project_root\""
-    fi
   fi
 }
 
@@ -1269,10 +1543,12 @@ print_swarm_runtime_status() {
   fi
 
   local pid status uptime
-  local socket_component_status dashboard_component_status orch_component_status bridge_component_status
-  local blink_component_status mux_component_status llama_component_status
-  local dashboard_url ws_url blink_url blink_link_status blink_link_detail
-  local health_file blink_health mux_health llama_health inventory_health exports_health health_updated_at
+  local socket_component_status dashboard_component_status orch_component_status
+  local slack_component_status
+  local llama_component_status federation_component_status federation_adb_component_status
+  local dashboard_url ws_url federation_bus_url federation_admin_url
+  local health_file federation_file llama_health inventory_health exports_health health_updated_at
+  local federation_state federation_peer_count federation_recent_event_count
 
   pid="-"
   status="stopped"
@@ -1280,21 +1556,21 @@ print_swarm_runtime_status() {
   socket_component_status="-"
   dashboard_component_status="-"
   orch_component_status="-"
-  bridge_component_status="disabled"
-  blink_component_status="-"
-  mux_component_status="-"
+  slack_component_status="-"
   llama_component_status="-"
+  federation_component_status="-"
+  federation_adb_component_status="-"
   dashboard_url="-"
   ws_url="-"
-  blink_url="-"
-  blink_link_status="unknown"
-  blink_link_detail=""
-  blink_health="unknown"
-  mux_health="unknown"
+  federation_bus_url="-"
+  federation_admin_url="-"
   llama_health="unknown"
   inventory_health="unknown"
   exports_health="unknown"
   health_updated_at=""
+  federation_state="disabled"
+  federation_peer_count="-"
+  federation_recent_event_count="-"
 
   if [[ -f "$(swarm_status_file "$swarm_id")" ]]; then
     status="$(<"$(swarm_status_file "$swarm_id")")"
@@ -1317,96 +1593,105 @@ print_swarm_runtime_status() {
   if [[ -f "$(component_status_file "orchestrator" "$(swarm_dir "$swarm_id")")" ]]; then
     orch_component_status="$(<"$(component_status_file "orchestrator" "$(swarm_dir "$swarm_id")")")"
   fi
-  if [[ -f "$(component_status_file "blink-bridge" "$(swarm_dir "$swarm_id")")" ]]; then
-    bridge_component_status="$(<"$(component_status_file "blink-bridge" "$(swarm_dir "$swarm_id")")")"
-  fi
-  if [[ -f "$(service_status_file "blink-server" "$(swarm_dir "$swarm_id")")" ]]; then
-    blink_component_status="$(<"$(service_status_file "blink-server" "$(swarm_dir "$swarm_id")")")"
-  fi
-  if [[ -f "$(service_status_file "mux" "$(swarm_dir "$swarm_id")")" ]]; then
-    mux_component_status="$(<"$(service_status_file "mux" "$(swarm_dir "$swarm_id")")")"
+  if [[ -f "$(component_status_file "slack-bot" "$(swarm_dir "$swarm_id")")" ]]; then
+    slack_component_status="$(<"$(component_status_file "slack-bot" "$(swarm_dir "$swarm_id")")")"
   fi
   if [[ -f "$(service_status_file "llama.cpp" "$(swarm_dir "$swarm_id")")" ]]; then
     llama_component_status="$(<"$(service_status_file "llama.cpp" "$(swarm_dir "$swarm_id")")")"
+  fi
+  if [[ -f "$(service_status_file "federation-bus" "$(swarm_dir "$swarm_id")")" ]]; then
+    federation_component_status="$(<"$(service_status_file "federation-bus" "$(swarm_dir "$swarm_id")")")"
+  fi
+  if [[ -f "$(service_status_file "federation-adb" "$(swarm_dir "$swarm_id")")" ]]; then
+    federation_adb_component_status="$(<"$(service_status_file "federation-adb" "$(swarm_dir "$swarm_id")")")"
   fi
 
   dashboard_url="$(format_local_http_url "${DROIDSWARM_DASHBOARD_PORT:-"-"}")"
   if [[ -n "${DROIDSWARM_WS_PORT:-}" ]]; then
     ws_url="ws://127.0.0.1:${DROIDSWARM_WS_PORT}"
   fi
-  blink_url="$(format_local_http_url "${DROIDSWARM_BLINK_SERVER_PORT:-"-"}")"
-  if load_project_setup "${DROIDSWARM_PROJECT_ROOT:-}"; then
-    if [[ "${DROIDSWARM_BLINK_SLACK_LINKED:-0}" == "1" ]]; then
-      blink_link_status="linked"
-      if [[ -n "${DROIDSWARM_BLINK_SLACK_WORKSPACE:-}" ]]; then
-        blink_link_detail="${DROIDSWARM_BLINK_SLACK_WORKSPACE}"
-      elif [[ -n "${DROIDSWARM_BLINK_SLACK_LINKED_AT:-}" ]]; then
-        blink_link_detail="${DROIDSWARM_BLINK_SLACK_LINKED_AT}"
-      fi
-    else
-      blink_link_status="pending"
-    fi
+  if [[ -n "${DROIDSWARM_FEDERATION_BUS_URL:-}" ]]; then
+    federation_bus_url="${DROIDSWARM_FEDERATION_BUS_URL}"
   fi
-
+  if [[ -n "${DROIDSWARM_FEDERATION_ADMIN_URL:-}" ]]; then
+    federation_admin_url="${DROIDSWARM_FEDERATION_ADMIN_URL}"
+  fi
   health_file="$(swarm_service_health_file "$swarm_id")"
   if [[ -f "$health_file" ]]; then
     # shellcheck disable=SC1090
     source "$health_file"
-    [[ "${DROIDSWARM_HEALTH_BLINK_REACHABLE:-0}" == "1" ]] && blink_health="ok" || blink_health="unreachable"
-    [[ "${DROIDSWARM_HEALTH_MUX_REACHABLE:-0}" == "1" ]] && mux_health="ok" || mux_health="unreachable"
     [[ "${DROIDSWARM_HEALTH_LLAMA_REACHABLE:-0}" == "1" ]] && llama_health="ok" || llama_health="unreachable"
     if [[ "${DROIDSWARM_HEALTH_LLAMA_MODEL_PRESENT:-0}" == "1" && "${DROIDSWARM_HEALTH_LLAMA_INVENTORY_HAS_SELECTED:-0}" == "1" ]]; then
       inventory_health="ok"
     else
       inventory_health="missing"
     fi
-    if [[ -n "${DROIDSWARM_HEALTH_BLINK_URL:-}" && -n "${DROIDSWARM_HEALTH_MUX_URL:-}" && -n "${DROIDSWARM_HEALTH_LLAMA_URL:-}" ]]; then
+    if [[ -n "${DROIDSWARM_HEALTH_LLAMA_URL:-}" ]]; then
       exports_health="ready"
     else
       exports_health="incomplete"
     fi
     health_updated_at="${DROIDSWARM_HEALTH_UPDATED_AT:-}"
   fi
+  federation_file="$(swarm_federation_status_file "$swarm_id")"
+  if [[ -f "$federation_file" ]] && command -v python3 >/dev/null 2>&1; then
+    read -r federation_state federation_peer_count federation_recent_event_count federation_bus_url federation_admin_url < <(
+      python3 - "$federation_file" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], 'r', encoding='utf-8') as handle:
+    payload = json.load(handle)
+
+print(
+    payload.get('state', 'disabled'),
+    payload.get('peerCount', 0),
+    payload.get('recentEventCount', 0),
+    payload.get('busUrl') or '-',
+    payload.get('adminUrl') or '-',
+)
+PY
+    )
+  fi
 
   if [[ "$include_header" == "1" ]]; then
-    printf '%-28s %-18s %-10s %-8s %-8s %-8s %-8s %-12s\n' \
-      "SWARM_ID" "PROJECT_ID" "STATUS" "PID" "DASH" "WS" "BLINK" "UPTIME"
+    printf '%-28s %-18s %-10s %-8s %-8s %-8s %-8s %-8s %-12s\n' \
+      "SWARM_ID" "PROJECT_ID" "STATUS" "PID" "DASH" "WS" "LLAMA" "FED" "UPTIME"
   fi
-  printf '%-28s %-18s %-10s %-8s %-8s %-8s %-8s %-12s\n' \
+  printf '%-28s %-18s %-10s %-8s %-8s %-8s %-8s %-8s %-12s\n' \
     "$swarm_id" \
     "${DROIDSWARM_PROJECT_ID:-unknown}" \
     "$status" \
     "$pid" \
     "${DROIDSWARM_DASHBOARD_PORT:-"-"}" \
     "${DROIDSWARM_WS_PORT:-"-"}" \
-    "${DROIDSWARM_BLINK_SERVER_PORT:-"-"}" \
+    "${DROIDSWARM_LLAMA_PORT:-"-"}" \
+    "${DROIDSWARM_FEDERATION_BUS_PORT:-"-"}" \
     "$uptime"
-  printf '  components: socket=%s dashboard=%s orchestrator=%s blink-bridge=%s\n' \
+  printf '  components: socket=%s dashboard=%s orchestrator=%s slack=%s\n' \
     "$socket_component_status" \
     "$dashboard_component_status" \
     "$orch_component_status" \
-    "$bridge_component_status"
-  printf '  services: blink=%s mux=%s llama=%s\n' \
-    "$blink_component_status" \
-    "$mux_component_status" \
-    "$llama_component_status"
-  printf '  urls: dashboard=%s ws=%s blink=%s\n' \
+    "$slack_component_status"
+  printf '  services: llama=%s federation-bus=%s federation-adb=%s\n' \
+    "$llama_component_status" \
+    "$federation_component_status" \
+    "$federation_adb_component_status"
+  printf '  urls: dashboard=%s ws=%s federation-bus=%s federation-admin=%s\n' \
     "$dashboard_url" \
     "$ws_url" \
-    "$blink_url"
-  printf '  health: blink=%s mux=%s llama=%s inventory=%s exports=%s\n' \
-    "$blink_health" \
-    "$mux_health" \
+    "$federation_bus_url" \
+    "$federation_admin_url"
+  printf '  federation: state=%s peers=%s recent-events=%s\n' \
+    "$federation_state" \
+    "$federation_peer_count" \
+    "$federation_recent_event_count"
+  printf '  health: llama=%s inventory=%s exports=%s\n' \
     "$llama_health" \
     "$inventory_health" \
     "$exports_health"
   if [[ -n "$health_updated_at" ]]; then
     printf '  health-updated: %s\n' "$health_updated_at"
-  fi
-  if [[ -n "$blink_link_detail" ]]; then
-    printf '  blink-slack: %s (%s)\n' "$blink_link_status" "$blink_link_detail"
-  else
-    printf '  blink-slack: %s\n' "$blink_link_status"
   fi
 }
 
@@ -1506,8 +1791,8 @@ EOF
     shift
   done
 
-  printf '%-28s %-18s %-10s %-8s %-8s %-8s %-8s %-12s\n' \
-    "SWARM_ID" "PROJECT_ID" "STATUS" "PID" "DASH" "WS" "BLINK" "UPTIME"
+  printf '%-28s %-18s %-10s %-8s %-8s %-8s %-8s %-8s %-12s\n' \
+    "SWARM_ID" "PROJECT_ID" "STATUS" "PID" "DASH" "WS" "LLAMA" "FED" "UPTIME"
 
   local swarm_id pid status uptime
   local found="0"
@@ -1577,168 +1862,411 @@ cmd_status() {
   print_swarm_runtime_status "$swarm_id"
 }
 
-cmd_blink_status() {
+cmd_federation_status() {
   ensure_runtime_dirs
 
   local swarm_id=""
-  local project_root=""
-
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --project-root)
-        shift
-        require_value "--project-root" "${1:-}"
-        project_root="$1"
-        ;;
       --swarm-id)
         shift
         require_value "--swarm-id" "${1:-}"
         swarm_id="$1"
         ;;
       --help|-h)
-        print_blink_help
+        print_federation_help
         return 0
         ;;
       *)
-        err "Unknown blink status option: $1"
-        print_blink_help
+        err "Unknown federation status option: $1"
+        print_federation_help
         return 1
         ;;
     esac
     shift
   done
 
-  if [[ -n "$swarm_id" ]]; then
-    if ! swarm_id="$(resolve_swarm_id "$swarm_id")"; then
-      return 1
-    fi
-    load_swarm_env "$swarm_id" || return 1
-    project_root="${DROIDSWARM_PROJECT_ROOT:-$project_root}"
-    info "Swarm: $swarm_id"
-    info "Blink UI: $(format_local_http_url "${DROIDSWARM_BLINK_SERVER_PORT:-"-"}")"
-  fi
+  swarm_id="$(resolve_swarm_id "$swarm_id")" || return 1
+  load_swarm_env "$swarm_id" || return 1
 
-  if [[ -z "$project_root" ]]; then
-    project_root="$(pwd)"
-  fi
-  project_root="$(cd "$project_root" 2>/dev/null && pwd || printf '%s\n' "$project_root")"
+  local snapshot_file
+  snapshot_file="$(swarm_federation_status_file "$swarm_id")"
 
-  if ! project_is_setup "$project_root"; then
-    err "Project is not set up: $project_root"
-    return 1
-  fi
+  info "Swarm: $swarm_id"
+  info "Federation: $( [[ "${DROIDSWARM_ENABLE_FEDERATION:-0}" == "1" ]] && printf 'enabled' || printf 'disabled' )"
+  info "Bus URL: ${DROIDSWARM_FEDERATION_BUS_URL:-unset}"
+  info "Admin URL: ${DROIDSWARM_FEDERATION_ADMIN_URL:-unset}"
+  info "ADB supervisor: $( [[ "${DROIDSWARM_ENABLE_FEDERATION_ADB:-0}" == "1" ]] && printf 'enabled' || printf 'disabled' )"
 
-  load_project_setup "$project_root" || return 1
-
-  info "Project root: $project_root"
-  info "Project: ${DROIDSWARM_PROJECT_NAME:-unknown} (${DROIDSWARM_PROJECT_ID:-unknown})"
-  if [[ "${DROIDSWARM_BLINK_SLACK_LINKED:-0}" == "1" ]]; then
-    info "Blink to Slack: linked"
-    if [[ -n "${DROIDSWARM_BLINK_SLACK_WORKSPACE:-}" ]]; then
-      info "Slack workspace: ${DROIDSWARM_BLINK_SLACK_WORKSPACE}"
-    fi
-    if [[ -n "${DROIDSWARM_BLINK_SLACK_LINKED_AT:-}" ]]; then
-      info "Linked at: ${DROIDSWARM_BLINK_SLACK_LINKED_AT}"
-    fi
+  if [[ -f "$snapshot_file" ]]; then
+    cat "$snapshot_file"
   else
-    info "Blink to Slack: pending"
-    if [[ -n "$swarm_id" ]]; then
-      info "Open the Blink UI above, link Slack there, then run:"
-    else
-      info "Start a swarm, open the Blink UI, link Slack there, then run:"
-    fi
-    info "  DroidSwarm blink linked --project-root \"$project_root\""
+    info "No federation snapshot captured yet."
   fi
 }
 
-cmd_blink_linked() {
+cmd_federation_devices() {
   ensure_runtime_dirs
 
-  local project_root=""
-  local workspace_name=""
+  local swarm_id=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --swarm-id)
+        shift
+        require_value "--swarm-id" "${1:-}"
+        swarm_id="$1"
+        ;;
+      --help|-h)
+        print_federation_help
+        return 0
+        ;;
+      *)
+        err "Unknown federation devices option: $1"
+        print_federation_help
+        return 1
+        ;;
+    esac
+    shift
+  done
+
+  swarm_id="$(resolve_swarm_id "$swarm_id")" || return 1
+  load_swarm_env "$swarm_id" || return 1
+
+  if [[ "${DROIDSWARM_ENABLE_FEDERATION_ADB:-0}" == "1" ]] && command -v curl >/dev/null 2>&1; then
+    curl -fsS "http://127.0.0.1:${DROIDSWARM_FEDERATION_ADB_PORT}/" && printf '\n'
+    return 0
+  fi
+
+  if [[ -x "${DROIDSWARM_FEDERATION_ADB_BIN:-}" ]] || command -v "${DROIDSWARM_FEDERATION_ADB_BIN:-adb}" >/dev/null 2>&1; then
+    "${DROIDSWARM_FEDERATION_ADB_BIN:-adb}" devices -l
+    return 0
+  fi
+
+  err "No federation ADB supervisor or adb binary available."
+  return 1
+}
+
+cmd_federation_onboard() {
+  ensure_runtime_dirs
+
+  local swarm_id=""
+  local serial=""
+  local output_dir=""
+  local skip_push="0"
+  local remote_dir="/sdcard/Android/data/com.droidswarm/files/federation"
+  local register_worker="1"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --project-root)
+      --swarm-id)
         shift
-        require_value "--project-root" "${1:-}"
-        project_root="$1"
+        require_value "--swarm-id" "${1:-}"
+        swarm_id="$1"
         ;;
-      --workspace)
+      --serial)
         shift
-        require_value "--workspace" "${1:-}"
-        workspace_name="$1"
+        require_value "--serial" "${1:-}"
+        serial="$1"
+        ;;
+      --output-dir)
+        shift
+        require_value "--output-dir" "${1:-}"
+        output_dir="$1"
+        ;;
+      --remote-dir)
+        shift
+        require_value "--remote-dir" "${1:-}"
+        remote_dir="$1"
+        ;;
+      --no-register)
+        register_worker="0"
+        ;;
+      --skip-push)
+        skip_push="1"
         ;;
       --help|-h)
-        print_blink_help
+        print_federation_help
         return 0
         ;;
       *)
-        err "Unknown blink linked option: $1"
-        print_blink_help
+        err "Unknown federation onboard option: $1"
+        print_federation_help
         return 1
         ;;
     esac
     shift
   done
 
-  if [[ -z "$project_root" ]]; then
-    err "Missing required option: --project-root"
-    print_blink_help
+  if [[ -z "$serial" ]]; then
+    err "Missing required option: --serial"
     return 1
   fi
 
-  mkdir -p "$project_root"
-  project_root="$(cd "$project_root" && pwd)"
+  swarm_id="$(resolve_swarm_id "$swarm_id")" || return 1
+  load_swarm_env "$swarm_id" || return 1
 
-  if ! project_is_setup "$project_root"; then
-    err "Project is not set up: $project_root"
+  if [[ -z "$output_dir" ]]; then
+    output_dir="$(swarm_dir "$swarm_id")/federation-onboarding/$serial"
+  fi
+  mkdir -p "$output_dir"
+
+  local manifest_path runtime_archive
+  manifest_path="$output_dir/manifest.json"
+  runtime_archive="$output_dir/runtime.tgz"
+
+  local install_root="${DROIDSWARM_INSTALL_DIR:-$DROIDSWARM_HOME/install}"
+  tar -czf "$runtime_archive" -C "$install_root" runtime bin lib libexec specs VERSION >/dev/null 2>&1 || {
+    err "Failed to create federation runtime bundle."
     return 1
-  fi
+  }
 
-  load_project_setup "$project_root" || return 1
+  cat >"$manifest_path" <<EOF
+{
+  "version": 1,
+  "projectId": "$(json_escape "${DROIDSWARM_PROJECT_ID:-}")",
+  "swarmId": "$(json_escape "$swarm_id")",
+  "generatedAt": "$(json_escape "$(now_utc)")",
+  "nodeId": "$(json_escape "${DROIDSWARM_FEDERATION_NODE_ID:-$swarm_id}")",
+  "busUrl": "$(json_escape "${DROIDSWARM_FEDERATION_BUS_URL:-}")",
+  "adminUrl": "$(json_escape "${DROIDSWARM_FEDERATION_ADMIN_URL:-}")",
+  "runtimeArchivePath": "$(json_escape "$runtime_archive")"
+}
+EOF
 
-  write_project_setup_state \
-    "$project_root" \
-    "${DROIDSWARM_PROJECT_NAME:-}" \
-    "${DROIDSWARM_PROJECT_ID:-}" \
-    "${DROIDSWARM_PROJECT_MODE:-}" \
-    "${DROIDSWARM_MAIN_BRANCH:-main}" \
-    "${DROIDSWARM_PRODUCTION_BRANCH:-production}" \
-    "${DROIDSWARM_DASHBOARD_PORT:-3000}" \
-    "${DROIDSWARM_WS_PORT:-8765}" \
-    "${DROIDSWARM_DB_PATH:-$(project_db_file "$project_root")}" \
-    "${DROIDSWARM_VERSION:-$DROIDSWARM_VERSION}" \
-    "${DROIDSWARM_SPECS_DIR:-}" \
-    "1" \
-    "$(now_utc)" \
-    "$workspace_name"
+  info "Wrote federation bundle:"
+  info "  manifest: $manifest_path"
+  info "  runtime:  $runtime_archive"
 
-  info "Marked Blink to Slack as linked for project '$project_root'."
-  if [[ -n "$workspace_name" ]]; then
-    info "Slack workspace: $workspace_name"
-  fi
+  if [[ "$register_worker" == "1" ]]; then
+    local workers_file
+    workers_file="$(project_federation_workers_file "${DROIDSWARM_PROJECT_ROOT:-}")"
+    mkdir -p "$(dirname "$workers_file")"
+    if command -v python3 >/dev/null 2>&1; then
+      python3 - "$workers_file" "$serial" "$remote_dir" "${DROIDSWARM_FEDERATION_NODE_ID:-$swarm_id}" <<'PY'
+import json
+import os
+import sys
+
+workers_file, serial, remote_dir, node_id = sys.argv[1:5]
+record = {
+    "targetId": f"adb-{serial}",
+    "serial": serial,
+    "remoteDir": remote_dir,
+    "remoteEntry": f"{remote_dir}/runtime/orchestrator/main.js",
+    "remoteCommand": "node",
+    "nodeId": node_id,
+    "engines": ["codex-cli"],
 }
 
-cmd_blink() {
-  local subcommand="${1:-status}"
+try:
+    with open(workers_file, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+except Exception:
+    payload = []
+
+if not isinstance(payload, list):
+    payload = []
+
+payload = [item for item in payload if isinstance(item, dict) and item.get("targetId") != record["targetId"]]
+payload.append(record)
+
+with open(workers_file, "w", encoding="utf-8") as handle:
+    json.dump(payload, handle, indent=2)
+    handle.write("\n")
+PY
+    else
+      cat >"$workers_file" <<EOF
+[
+  {
+    "targetId": "adb-$(json_escape "$serial")",
+    "serial": "$(json_escape "$serial")",
+    "remoteDir": "$(json_escape "$remote_dir")",
+    "remoteEntry": "$(json_escape "$remote_dir")/runtime/orchestrator/main.js",
+    "remoteCommand": "node",
+    "nodeId": "$(json_escape "${DROIDSWARM_FEDERATION_NODE_ID:-$swarm_id}")",
+    "engines": ["codex-cli"]
+  }
+]
+EOF
+    fi
+    info "Registered federated worker target: $workers_file"
+  fi
+
+  if [[ "$skip_push" == "1" ]]; then
+    return 0
+  fi
+
+  local adb_bin="${DROIDSWARM_FEDERATION_ADB_BIN:-adb}"
+  if ! command -v "$adb_bin" >/dev/null 2>&1; then
+    err "adb binary not available: $adb_bin"
+    return 1
+  fi
+
+  "$adb_bin" -s "$serial" shell mkdir -p "$remote_dir"
+  "$adb_bin" -s "$serial" push "$manifest_path" "$remote_dir/manifest.json" >/dev/null
+  "$adb_bin" -s "$serial" push "$runtime_archive" "$remote_dir/runtime.tgz" >/dev/null
+  "$adb_bin" -s "$serial" shell tar -xzf "$remote_dir/runtime.tgz" -C "$remote_dir"
+  info "Pushed federation bundle to device: $serial"
+}
+
+cmd_federation() {
+  ensure_runtime_dirs
+
+  local action="${1:-status}"
   if [[ $# -gt 0 ]]; then
     shift
   fi
 
-  case "$subcommand" in
+  case "$action" in
     status)
-      cmd_blink_status "$@"
+      cmd_federation_status "$@"
       ;;
-    linked)
-      cmd_blink_linked "$@"
+    devices)
+      cmd_federation_devices "$@"
+      ;;
+    onboard)
+      cmd_federation_onboard "$@"
       ;;
     help|--help|-h)
-      print_blink_help
+      print_federation_help
       ;;
     *)
-      err "Unknown blink command: $subcommand"
-      print_blink_help
+      err "Unknown federation command: $action"
+      print_federation_help
+      return 1
+      ;;
+  esac
+}
+
+slack_token_source_status() {
+  local service_name="${DROIDSWARM_SLACK_KEYCHAIN_SERVICE:-DroidSwarm Slack}"
+
+  if [[ -n "${DROIDSWARM_SLACK_BOT_TOKEN:-}" && -n "${DROIDSWARM_SLACK_APP_TOKEN:-}" ]]; then
+    printf 'env\n'
+    return 0
+  fi
+
+  if command -v security >/dev/null 2>&1; then
+    if security find-generic-password -w -s "$service_name" -a droidswarm-slack-bot-token >/dev/null 2>&1 && \
+       security find-generic-password -w -s "$service_name" -a droidswarm-slack-app-token >/dev/null 2>&1; then
+      printf 'keychain\n'
+      return 0
+    fi
+  fi
+
+  printf 'missing\n'
+}
+
+cmd_slack_status() {
+  ensure_runtime_dirs
+
+  local swarm_id=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --swarm-id)
+        shift
+        require_value "--swarm-id" "${1:-}"
+        swarm_id="$1"
+        ;;
+      --help|-h)
+        print_slack_help
+        return 0
+        ;;
+      *)
+        err "Unknown slack status option: $1"
+        print_slack_help
+        return 1
+        ;;
+    esac
+    shift
+  done
+
+  swarm_id="$(resolve_swarm_id "$swarm_id")" || return 1
+  load_swarm_env "$swarm_id" || return 1
+
+  local component_status token_source
+  component_status="-"
+  token_source="$(slack_token_source_status)"
+  if [[ -f "$(component_status_file "slack-bot" "$(swarm_dir "$swarm_id")")" ]]; then
+    component_status="$(<"$(component_status_file "slack-bot" "$(swarm_dir "$swarm_id")")")"
+  fi
+
+  info "Swarm: $swarm_id"
+  info "Slack bot: $( [[ "${DROIDSWARM_ENABLE_SLACK_BOT:-0}" == "1" ]] && printf 'enabled' || printf 'disabled' )"
+  info "Component status: $component_status"
+  info "Token source: $token_source"
+  info "Keychain service: ${DROIDSWARM_SLACK_KEYCHAIN_SERVICE:-DroidSwarm Slack}"
+  info "Entry: ${DROIDSWARM_SLACK_BOT_ENTRY:-unset}"
+}
+
+cmd_slack_restart() {
+  ensure_runtime_dirs
+
+  local swarm_id=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --swarm-id)
+        shift
+        require_value "--swarm-id" "${1:-}"
+        swarm_id="$1"
+        ;;
+      --help|-h)
+        print_slack_help
+        return 0
+        ;;
+      *)
+        err "Unknown slack restart option: $1"
+        print_slack_help
+        return 1
+        ;;
+    esac
+    shift
+  done
+
+  swarm_id="$(resolve_swarm_id "$swarm_id")" || return 1
+  load_swarm_env "$swarm_id" || return 1
+
+  if [[ "${DROIDSWARM_ENABLE_SLACK_BOT:-0}" != "1" ]]; then
+    err "Slack bot is not enabled for swarm: $swarm_id"
+    return 1
+  fi
+
+  local pid_file pid
+  pid_file="$(component_pid_file "slack-bot" "$(swarm_dir "$swarm_id")")"
+  if [[ ! -f "$pid_file" ]]; then
+    err "No managed Slack bot process found for swarm: $swarm_id"
+    return 1
+  fi
+
+  pid="$(<"$pid_file")"
+  if [[ -z "$pid" || "$pid" == "-" ]] || ! is_pid_running "$pid"; then
+    err "Slack bot process is not currently running for swarm: $swarm_id"
+    return 1
+  fi
+
+  kill "$pid" 2>/dev/null || true
+  info "Requested Slack bot restart for swarm '$swarm_id' (pid $pid)"
+}
+
+cmd_slack() {
+  local action="${1:-status}"
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
+
+  case "$action" in
+    status)
+      cmd_slack_status "$@"
+      ;;
+    restart)
+      cmd_slack_restart "$@"
+      ;;
+    help|-h|--help)
+      print_slack_help
+      ;;
+    *)
+      err "Unknown slack command: $action"
+      print_slack_help
       return 1
       ;;
   esac
@@ -2097,10 +2625,7 @@ remove_swarm_artifacts() {
     "$(component_log_file "$swarm_id" "socket-server")" \
     "$(component_log_file "$swarm_id" "dashboard")" \
     "$(component_log_file "$swarm_id" "orchestrator")" \
-    "$(component_log_file "$swarm_id" "blink-bridge")" \
     "$(component_log_file "$swarm_id" "worker-host")" \
-    "$(component_log_file "$swarm_id" "blink-server")" \
-    "$(component_log_file "$swarm_id" "mux")" \
     "$(component_log_file "$swarm_id" "llama.cpp")"
 }
 
@@ -2231,7 +2756,7 @@ shutdown_one() {
     fi
   fi
 
-  for component in orchestrator dashboard socket-server; do
+  for component in orchestrator dashboard socket-server slack-bot; do
     local component_pid_path
     component_pid_path="$(component_pid_file "$component" "$state_dir")"
     if [[ ! -f "$component_pid_path" ]]; then
@@ -2248,7 +2773,7 @@ shutdown_one() {
     fi
   done
 
-  for service in blink-server mux llama.cpp; do
+  for service in llama.cpp; do
     local service_pid_path
     service_pid_path="$(service_pid_file "$service" "$state_dir")"
     if [[ ! -f "$service_pid_path" ]]; then
@@ -2316,15 +2841,60 @@ EOF
   fi
 }
 
+cmd_project() {
+  local subcommand="${1:-status}"
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
+
+  case "$subcommand" in
+    onboard)
+      run_shared_projects_cli onboard "$@"
+      ;;
+    list)
+      run_shared_projects_cli list "$@"
+      ;;
+    status)
+      run_shared_projects_cli status "$@"
+      ;;
+    select)
+      run_shared_projects_cli select "$@"
+      ;;
+    remove)
+      run_shared_projects_cli remove "$@"
+      ;;
+    migrate)
+      run_shared_projects_cli migrate "$@"
+      ;;
+    current)
+      run_shared_projects_cli current "$@"
+      ;;
+    help|-h|--help)
+      print_project_help
+      ;;
+    *)
+      err "Unknown project subcommand: $subcommand"
+      print_project_help
+      return 1
+      ;;
+  esac
+}
+
 case "$COMMAND" in
   setup)
     cmd_setup "$@"
     ;;
+  project)
+    cmd_project "$@"
+    ;;
   swarm)
     cmd_swarm "$@"
     ;;
-  blink)
-    cmd_blink "$@"
+  federation)
+    cmd_federation "$@"
+    ;;
+  slack)
+    cmd_slack "$@"
     ;;
   orchestrator)
     cmd_orchestrator "$@"

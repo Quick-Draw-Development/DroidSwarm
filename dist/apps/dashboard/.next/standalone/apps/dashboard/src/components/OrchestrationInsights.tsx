@@ -1,9 +1,11 @@
 import type {
   AgentAssignmentSummary,
   ArtifactSummary,
+  AuditTrailSummary,
   BudgetEventSummary,
   CheckpointSummary,
   DependencySummary,
+  FederationStatusSummary,
   OrchestrationInsightsData,
   RunSummary,
   RunTimelineEntry,
@@ -136,6 +138,26 @@ const renderDependencyEntry = (entry: DependencySummary, index: number) => (
   </li>
 );
 
+const renderFederationPeerEntry = (peer: FederationStatusSummary['peers'][number], index: number) => (
+  <li key={`${peer.peerId}-${index}`} className="insight-item">
+    <strong>{peer.peerId}</strong>
+    <span>
+      {peer.busUrl}
+      {peer.adminUrl ? ` · admin ${peer.adminUrl}` : ''}
+      {peer.capabilities.length > 0 ? ` · ${peer.capabilities.join(', ')}` : ''}
+    </span>
+  </li>
+);
+
+const renderAuditEntry = (entry: AuditTrailSummary['latestEvents'][number], index: number) => (
+  <li key={`${entry.id}-${index}`} className="insight-item">
+    <strong>{entry.eventType}</strong>
+    <span>
+      {entry.detail} · {entry.nodeId} · {displayDate(entry.ts)}
+    </span>
+  </li>
+);
+
 const schedulerEventTypes = new Set([
   'run_started',
   'run_recovered',
@@ -167,6 +189,8 @@ export function OrchestrationInsights({ data }: { data: OrchestrationInsightsDat
   const allocatorPolicy = data.allocatorPolicy;
   const topology = data.topology;
   const serviceUsage = data.serviceUsage;
+  const federation = data.federation;
+  const auditTrail = data.auditTrail;
   const runSummary = (() => {
     if (!latestRun?.metadata) {
       return undefined;
@@ -344,7 +368,7 @@ export function OrchestrationInsights({ data }: { data: OrchestrationInsightsDat
                   <li className="insight-item">
                     <strong>Service reachability</strong>
                     <span>
-                      blink {serviceUsage.health.blink.reachable ? 'ok' : 'down'} · mux {serviceUsage.health.mux.reachable ? 'ok' : 'down'} · llama {serviceUsage.health.llama.reachable ? 'ok' : 'down'}
+                      llama {serviceUsage.health.llama.reachable ? 'ok' : 'down'}
                     </span>
                   </li>
                   <li className="insight-item">
@@ -355,15 +379,6 @@ export function OrchestrationInsights({ data }: { data: OrchestrationInsightsDat
                   </li>
                 </>
               ) : null}
-              <li className="insight-item">
-                <strong>Blink / Slack</strong>
-                <span>
-                  mirrored {serviceUsage.blink.mirroredMessages} · pending {serviceUsage.blink.pendingMessages} · failures {serviceUsage.blink.failureCount} · retries {serviceUsage.blink.retryCount}
-                  {serviceUsage.blink.providerBreakdown.length > 0
-                    ? ` · ${serviceUsage.blink.providerBreakdown.map((entry) => `${entry.provider} ${entry.count}`).join(' · ')}`
-                    : ''}
-                </span>
-              </li>
               <li className="insight-item">
                 <strong>llama.cpp</strong>
                 <span>
@@ -386,19 +401,6 @@ export function OrchestrationInsights({ data }: { data: OrchestrationInsightsDat
                 </span>
               </li>
               <li className="insight-item">
-                <strong>Mux</strong>
-                <span>
-                  {serviceUsage.mux.assessment} · leases {serviceUsage.mux.workspaceLeaseCount} · brokered exec {serviceUsage.mux.brokeredExecutionCount}
-                  {serviceUsage.mux.activeRoleCoverage.length > 0
-                    ? ` · ${serviceUsage.mux.activeRoleCoverage.map((entry) => `${entry.role} ${entry.count}`).join(' · ')}`
-                    : ''}
-                </span>
-              </li>
-              <li className="insight-item">
-                <strong>Mux recommendation</strong>
-                <span>{serviceUsage.mux.recommendation}</span>
-              </li>
-              <li className="insight-item">
                 <strong>Service policy</strong>
                 <span>{serviceUsage.policy.status} · {serviceUsage.policy.summary}</span>
               </li>
@@ -411,6 +413,68 @@ export function OrchestrationInsights({ data }: { data: OrchestrationInsightsDat
             </ul>
           ) : (
             <p className="empty-copy">No service usage captured yet.</p>
+          )}
+        </article>
+        <article className="insight-card">
+          <p className="section-title">Federation status</p>
+          {federation ? (
+            <ul className="insight-list">
+              <li className="insight-item">
+                <strong>Enabled</strong>
+                <span>
+                  {federation.enabled ? 'yes' : 'no'} · state {federation.state}
+                  {federation.updatedAt ? ` · updated ${displayDate(federation.updatedAt)}` : ''}
+                </span>
+              </li>
+              <li className="insight-item">
+                <strong>Bus / admin</strong>
+                <span>
+                  {federation.busUrl ?? 'bus unset'}
+                  {federation.adminUrl ? ` · ${federation.adminUrl}` : ' · admin unset'}
+                </span>
+              </li>
+              <li className="insight-item">
+                <strong>Peer count</strong>
+                <span>
+                  {federation.peerCount ?? federation.peers.length} peers
+                  {federation.recentEventCount != null ? ` · ${federation.recentEventCount} recent events` : ''}
+                </span>
+              </li>
+              {federation.nodeId || federation.host || federation.busPort || federation.adminPort ? (
+                <li className="insight-item">
+                  <strong>Node</strong>
+                  <span>
+                    {federation.nodeId ?? 'node unset'}
+                    {federation.host ? ` · ${federation.host}` : ''}
+                    {federation.busPort ? ` · bus ${federation.busPort}` : ''}
+                    {federation.adminPort ? ` · admin ${federation.adminPort}` : ''}
+                  </span>
+                </li>
+              ) : null}
+              {federation.peers.length > 0 ? federation.peers.slice(0, 5).map(renderFederationPeerEntry) : null}
+            </ul>
+          ) : (
+            <p className="empty-copy">No federation snapshot captured yet.</p>
+          )}
+        </article>
+        <article className="insight-card">
+          <p className="section-title">Audit Trail</p>
+          {auditTrail ? (
+            <ul className="insight-list">
+              <li className="insight-item">
+                <strong>Merkle root</strong>
+                <span>{auditTrail.merkleRoot}</span>
+              </li>
+              <li className="insight-item">
+                <strong>Chain verification</strong>
+                <span>{auditTrail.chainVerified ? 'verified' : 'failed'}</span>
+              </li>
+              {auditTrail.latestEvents.length > 0
+                ? auditTrail.latestEvents.slice(0, 5).map(renderAuditEntry)
+                : <li className="insight-empty">No audit events captured yet.</li>}
+            </ul>
+          ) : (
+            <p className="empty-copy">Audit trail unavailable.</p>
           )}
         </article>
         <article className="insight-card">

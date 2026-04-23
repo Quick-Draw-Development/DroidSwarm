@@ -47,8 +47,6 @@ const TEST_CONFIG = {
   llamaBaseUrl: "http://127.0.0.1:11434",
   llamaModel: "llama",
   llamaTimeoutMs: 1e3,
-  muxBaseUrl: "http://127.0.0.1:8960",
-  muxToken: "mux-token",
   prAutomationEnabled: false,
   prRemoteName: "origin",
   gitPolicy: {
@@ -104,7 +102,9 @@ const toolServiceStub = {
     const persistenceService = {
       recordExecutionEvent: (eventType) => {
         recordedEvents.push(eventType);
-      }
+      },
+      getLatestTaskStateDigest: () => void 0,
+      getLatestHandoffPacket: () => void 0
     };
     const schedulerCalls = [];
     const scheduler = {
@@ -167,5 +167,77 @@ const toolServiceStub = {
     import_strict.default.equal(schedulerCalls[0].taskId, "task-1");
     import_strict.default.equal(schedulerCalls[0].role, "coder");
     import_strict.default.equal(schedulerCalls[0].result.summary, "done");
+  });
+  (0, import_node_test.it)("records drift detection when federated hashes do not match persisted continuity state", async () => {
+    const recordedEvents = [];
+    const persistenceService = {
+      recordExecutionEvent: (eventType, _detail, _metadata, transport) => {
+        recordedEvents.push({ eventType, transportBody: transport?.transportBody });
+      },
+      getLatestTaskStateDigest: () => ({ federationHash: "digest-expected" }),
+      getLatestHandoffPacket: () => ({ federationHash: "handoff-expected" })
+    };
+    const scheduler = {
+      handleAgentResult: () => void 0
+    };
+    const engine = new import_OrchestratorEngine.OrchestratorEngine({
+      config: TEST_CONFIG,
+      persistenceService,
+      scheduler,
+      supervisor: {},
+      gateway: {
+        send: () => void 0,
+        watchTaskChannel: () => void 0,
+        setMessageHandler: () => void 0
+      },
+      chatResponder: {},
+      controlService: {},
+      registry: new import_worker_registry.WorkerRegistry(),
+      runLifecycle: {},
+      toolService: toolServiceStub
+    });
+    engine.handleAgentAssignment("task-2", [{
+      agentName: "Agent-2",
+      taskId: "task-2",
+      role: "planner",
+      attemptId: "attempt-2"
+    }]);
+    const message = {
+      message_id: "msg-drift-1",
+      project_id: TEST_CONFIG.projectId,
+      room_id: "task-2",
+      task_id: "task-2",
+      type: "status_update",
+      from: {
+        actor_type: "agent",
+        actor_id: "Agent-2",
+        actor_name: "Agent-2"
+      },
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      payload: {
+        phase: "execution",
+        status_code: "agent_completed",
+        content: "done",
+        metadata: {
+          federationNodeId: "node-remote",
+          digestHash: "digest-remote",
+          handoffHash: "handoff-remote"
+        },
+        result: {
+          status: "completed",
+          summary: "done",
+          requested_agents: [],
+          artifacts: [],
+          doc_updates: [],
+          branch_actions: []
+        }
+      }
+    };
+    await engine.handleMessage(message, "task");
+    import_strict.default.equal(recordedEvents[0]?.eventType, "agent_result");
+    import_strict.default.equal(recordedEvents[0]?.transportBody?.reportedDigestHash, "digest-remote");
+    import_strict.default.equal(recordedEvents[0]?.transportBody?.expectedDigestHash, "digest-expected");
+    import_strict.default.equal(recordedEvents[0]?.transportBody?.reportedHandoffHash, "handoff-remote");
+    import_strict.default.equal(recordedEvents[0]?.transportBody?.expectedHandoffHash, "handoff-expected");
   });
 });

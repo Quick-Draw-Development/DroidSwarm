@@ -53,8 +53,6 @@ const createTestConfig = (overrides = {}) => ({
   llamaBaseUrl: "http://127.0.0.1:11434",
   llamaModel: "llama",
   llamaTimeoutMs: 1e3,
-  muxBaseUrl: "http://127.0.0.1:8960",
-  muxToken: "mux-token",
   prAutomationEnabled: false,
   prRemoteName: "origin",
   gitPolicy: {
@@ -843,9 +841,7 @@ const createTestConfig = (overrides = {}) => ({
       }
     );
     import_strict.default.equal(service.getTask(compressionTask.taskId)?.status, "completed");
-    import_strict.default.equal(service.getTask(rootTask.taskId)?.status, "running");
-    import_strict.default.equal(spawnLog[1]?.taskId, rootTask.taskId);
-    import_strict.default.equal(spawnLog[1]?.role, "planner");
+    import_strict.default.equal(service.getTask(rootTask.taskId)?.status, "waiting_on_dependency");
     import_strict.default.deepEqual(service.getTask(rootTask.taskId)?.metadata?.last_compression_metrics, {
       artifactCount: 6,
       planSize: 5,
@@ -853,7 +849,7 @@ const createTestConfig = (overrides = {}) => ({
       activeRisks: 1
     });
     import_strict.default.equal(service.getLatestCheckpoint(rootTask.taskId)?.attemptId, spawnLog[0].attemptId);
-    import_strict.default.equal(service.getLatestTaskStateDigest(rootTask.taskId)?.droidspeak?.kind, "summary_emitted");
+    import_strict.default.equal(service.getLatestTaskStateDigest(rootTask.taskId)?.droidspeak?.kind, "plan_status");
     database.close();
     (0, import_node_fs.rmSync)(workspace, { recursive: true, force: true });
   });

@@ -1,4 +1,5 @@
 import type { RoutingDecision } from '@shared-types';
+import { tracer } from '@shared-tracing';
 import { getSwarmRoleDefinition } from './role-catalog';
 
 export type { SwarmRole, SwarmRoleDefinition } from './role-catalog';
@@ -18,6 +19,7 @@ export interface RoutingContext {
   planningHints?: string[];
   appleHints?: string[];
   appleRoles?: string[];
+  appleEnabled?: boolean;
   codeHints?: string[];
   cloudEscalationHints?: string[];
 }
@@ -37,6 +39,7 @@ export class RoutingService {
     const planningHints = context.planningHints ?? defaultPlanningHints;
     const appleRoles = context.appleRoles ?? defaultAppleRoles;
     const appleHints = context.appleHints ?? defaultAppleHints;
+    const appleEnabled = context.appleEnabled ?? true;
     const codeHints = context.codeHints ?? defaultCodeHints;
     const cloudEscalationHints = context.cloudEscalationHints ?? defaultCloudEscalationHints;
     const complexity = this.inferComplexity(role, taskType, context.summary, codeHints, cloudEscalationHints);
@@ -48,9 +51,17 @@ export class RoutingService {
     const localFirst = true;
     const localSaturated = queueDepth >= localQueueTolerance || fallbackCount >= 2;
     const combined = `${role} ${taskType} ${context.summary ?? ''}`.toLowerCase();
+    const appleMatched =
+      roleDefinition.id === 'apple-specialist'
+      || appleRoles.some((hint) => role.includes(hint))
+      || appleHints.some((hint) => combined.includes(hint));
+    const withAppleFallbackReason = (reason: string): string =>
+      appleMatched && !appleEnabled
+        ? `Apple Intelligence unavailable; fell back to standard local-first routing. ${reason}`
+        : reason;
 
-    if (roleDefinition.id === 'apple-specialist' || appleRoles.some((hint) => role.includes(hint)) || appleHints.some((hint) => combined.includes(hint))) {
-      return {
+    if (appleMatched && appleEnabled) {
+      return this.auditDecision(context, {
         engine: 'apple-intelligence',
         model: 'apple-intelligence/local',
         modelTier: roleDefinition.defaultModelTier,
@@ -67,7 +78,7 @@ export class RoutingService {
         fallbackCount,
         localFirst,
         cloudEscalated: false,
-      };
+      });
     }
 
     if (
@@ -79,17 +90,17 @@ export class RoutingService {
       || roleDefinition.id === 'checkpoint-compressor'
       || roleDefinition.id === 'arbiter'
       || stage === 'verification'
-      || stage === 'review'
-      || planningHints.some((hint) => role.includes(hint))
+        || stage === 'review'
+        || planningHints.some((hint) => role.includes(hint))
     ) {
-      return {
+      return this.auditDecision(context, {
         engine: 'local-llama',
         model: 'llama.cpp/planner',
         modelTier: roleDefinition.defaultModelTier,
         routeKind: localSaturated ? 'planner-local-saturated' : 'planner-local',
-        reason: localSaturated
+        reason: withAppleFallbackReason(localSaturated
           ? 'Local-first planning, review, and compression roles stay local even when llama capacity is saturated'
-          : 'Local-first planning, review, and orchestration policy',
+          : 'Local-first planning, review, and orchestration policy'),
         role: context.role,
         readOnly,
         complexity,
@@ -99,7 +110,7 @@ export class RoutingService {
         fallbackCount,
         localFirst,
         cloudEscalated: false,
-      };
+      });
     }
 
     if (
@@ -112,7 +123,7 @@ export class RoutingService {
         || (localSaturated && priorityBias !== 'cost')
         || (priorityBias === 'time' && complexity === 'medium')
       );
-      return {
+      return this.auditDecision(context, {
         engine: shouldEscalate ? 'codex-cloud' : 'codex-cli',
         model: shouldEscalate ? 'codex-cloud/coder' : 'codex-cli/coder',
         modelTier: shouldEscalate ? 'cloud' : roleDefinition.defaultModelTier,
@@ -122,13 +133,13 @@ export class RoutingService {
         escalationReason: shouldEscalate
           ? (localSaturated ? 'local_saturated_and_cloud_allowed' : 'explicit_cloud_policy_with_high_complexity')
           : (localSaturated ? 'local_queue_retained_due_to_local_first' : undefined),
-        reason: shouldEscalate
+        reason: withAppleFallbackReason(shouldEscalate
           ? (localSaturated
             ? 'Cloud escalation allowed because local-first coding capacity is saturated'
             : 'Explicit cloud escalation approved after local-first complexity check')
           : (localSaturated
             ? 'Local-first coding helper retained locally and should queue until capacity clears'
-            : 'Local-first coding helper selected by default'),
+            : 'Local-first coding helper selected by default')),
         role: context.role,
         readOnly,
         complexity,
@@ -138,17 +149,17 @@ export class RoutingService {
         fallbackCount,
         localFirst,
         cloudEscalated: shouldEscalate,
-      };
+      });
     }
 
-    return {
+    return this.auditDecision(context, {
       engine: 'local-llama',
       model: 'llama.cpp/default',
       modelTier: roleDefinition.defaultModelTier,
       routeKind: localSaturated ? 'default-local-saturated' : 'default-local',
-      reason: localSaturated
+      reason: withAppleFallbackReason(localSaturated
         ? 'Default local-first execution retained locally while the local tier is saturated'
-        : 'Default local-first execution policy',
+        : 'Default local-first execution policy'),
       role: context.role,
       readOnly,
       complexity,
@@ -158,7 +169,29 @@ export class RoutingService {
       fallbackCount,
       localFirst,
       cloudEscalated: false,
-    };
+    });
+  }
+
+  private auditDecision(context: RoutingContext, decision: RoutingDecision): RoutingDecision {
+    tracer.audit('ROUTING_DECISION', {
+      role: context.role,
+      taskType: context.taskType,
+      stage: context.stage,
+      queueDepth: context.queueDepth,
+      fallbackCount: context.fallbackCount,
+      allowCloud: context.allowCloud,
+      priorityBias: context.priorityBias,
+      appleEnabled: context.appleEnabled,
+      engine: decision.engine,
+      model: decision.model,
+      modelTier: decision.modelTier,
+      routeKind: decision.routeKind,
+      escalationReason: decision.escalationReason,
+      complexity: decision.complexity,
+      localFirst: decision.localFirst,
+      cloudEscalated: decision.cloudEscalated,
+    });
+    return decision;
   }
 
   private inferComplexity(

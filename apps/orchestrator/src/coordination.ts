@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import type { ArtifactRecord, HandoffPacket, PersistedTask, TaskStateDigest } from './types';
 
@@ -54,26 +54,42 @@ export const buildTaskDigest = (input: {
   currentPlan?: string[];
   verificationState?: string;
   droidspeak?: TaskStateDigest['droidspeak'];
-}): TaskStateDigest => ({
-  id: randomUUID(),
-  taskId: input.task.taskId,
-  runId: input.task.runId,
-  projectId: input.task.projectId ?? 'droidswarm',
-  objective: input.task.name,
-  currentPlan: input.currentPlan ?? [input.summary],
-  decisions: input.decisions ?? [],
-  openQuestions: input.openQuestions ?? [],
-  activeRisks: input.activeRisks ?? [],
-  artifactIndex: input.artifacts.map((artifact) => ({
-    artifactId: artifact.artifactId,
-    kind: artifact.kind,
-    summary: artifact.summary,
-  })),
-  verificationState: input.verificationState ?? input.task.status,
-  lastUpdatedBy: input.lastUpdatedBy,
-  ts: new Date().toISOString(),
-  droidspeak: input.droidspeak,
-});
+}): TaskStateDigest => {
+  const digest: TaskStateDigest = {
+    id: randomUUID(),
+    taskId: input.task.taskId,
+    runId: input.task.runId,
+    projectId: input.task.projectId ?? 'droidswarm',
+    objective: input.task.name,
+    currentPlan: input.currentPlan ?? [input.summary],
+    decisions: input.decisions ?? [],
+    openQuestions: input.openQuestions ?? [],
+    activeRisks: input.activeRisks ?? [],
+    artifactIndex: input.artifacts.map((artifact) => ({
+      artifactId: artifact.artifactId,
+      kind: artifact.kind,
+      summary: artifact.summary,
+    })),
+    verificationState: input.verificationState ?? input.task.status,
+    lastUpdatedBy: input.lastUpdatedBy,
+    ts: new Date().toISOString(),
+    droidspeak: input.droidspeak,
+  };
+  digest.federationHash = createHash('sha256')
+    .update(JSON.stringify({
+      taskId: digest.taskId,
+      runId: digest.runId,
+      objective: digest.objective,
+      currentPlan: digest.currentPlan,
+      decisions: digest.decisions,
+      openQuestions: digest.openQuestions,
+      activeRisks: digest.activeRisks,
+      verificationState: digest.verificationState,
+      artifactIndex: digest.artifactIndex,
+    }))
+    .digest('hex');
+  return digest;
+};
 
 export const buildHandoffPacket = (input: {
   task: PersistedTask;
@@ -84,17 +100,32 @@ export const buildHandoffPacket = (input: {
   requiredReads: string[];
   summary: string;
   droidspeak?: HandoffPacket['droidspeak'];
-}): HandoffPacket => ({
-  id: randomUUID(),
-  taskId: input.task.taskId,
-  runId: input.task.runId,
-  projectId: input.task.projectId ?? 'droidswarm',
-  fromTaskId: input.fromTaskId,
-  toTaskId: input.toTaskId,
-  toRole: input.toRole,
-  digestId: input.digest.id,
-  requiredReads: input.requiredReads,
-  summary: input.summary,
-  ts: new Date().toISOString(),
-  droidspeak: input.droidspeak,
-});
+}): HandoffPacket => {
+  const handoff: HandoffPacket = {
+    id: randomUUID(),
+    taskId: input.task.taskId,
+    runId: input.task.runId,
+    projectId: input.task.projectId ?? 'droidswarm',
+    fromTaskId: input.fromTaskId,
+    toTaskId: input.toTaskId,
+    toRole: input.toRole,
+    digestId: input.digest.id,
+    requiredReads: input.requiredReads,
+    summary: input.summary,
+    ts: new Date().toISOString(),
+    droidspeak: input.droidspeak,
+  };
+  handoff.federationHash = createHash('sha256')
+    .update(JSON.stringify({
+      taskId: handoff.taskId,
+      fromTaskId: handoff.fromTaskId,
+      toTaskId: handoff.toTaskId,
+      toRole: handoff.toRole,
+      digestId: handoff.digestId,
+      digestHash: input.digest.federationHash,
+      requiredReads: handoff.requiredReads,
+      summary: handoff.summary,
+    }))
+    .digest('hex');
+  return handoff;
+};

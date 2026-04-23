@@ -10,7 +10,11 @@ export class AuthenticationError extends Error {
 }
 
 export const authenticateClient = (config: ServerConfig, message: AuthMessage): AuthResult => {
-  if (message.project_id !== config.projectId) {
+  const allowedProjectIds = new Set([
+    config.projectId,
+    ...(config.allowedProjectIds ?? []),
+  ]);
+  if (!allowedProjectIds.has(message.project_id)) {
     throw new AuthenticationError('Project mismatch', 'project_mismatch');
   }
 

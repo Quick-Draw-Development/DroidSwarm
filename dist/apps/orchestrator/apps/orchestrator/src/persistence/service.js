@@ -21,6 +21,7 @@ __export(service_exports, {
 });
 module.exports = __toCommonJS(service_exports);
 var import_node_crypto = require("node:crypto");
+var import_shared_tracing = require("@shared-tracing");
 var import_embeddings = require("../utils/embeddings");
 const nowIso = () => (/* @__PURE__ */ new Date()).toISOString();
 class OrchestratorPersistenceService {
@@ -113,6 +114,12 @@ class OrchestratorPersistenceService {
       updatedAt: nowIso()
     };
     this.persistence.tasks.create(updated);
+    import_shared_tracing.tracer.audit("TASK_STATE_CHANGE", {
+      runId: this.run.runId,
+      taskId,
+      previousStatus: existing.status,
+      status
+    });
   }
   updateTaskPriority(taskId, priority) {
     const existing = this.persistence.tasks.get(taskId);
@@ -299,6 +306,15 @@ class OrchestratorPersistenceService {
   }
   recordExecutionEvent(eventType, detail, metadata, options) {
     this.persistence.recordExecutionEvent(this.run.runId, eventType, detail, metadata, options);
+    import_shared_tracing.tracer.audit("STATE_CHANGE", {
+      runId: this.run.runId,
+      eventType,
+      detail,
+      metadata: metadata ?? {},
+      taskId: options?.taskId,
+      normalizedVerb: options?.normalizedVerb,
+      transportBody: options?.transportBody
+    });
   }
   updateTaskMetadata(taskId, metadata) {
     const existing = this.persistence.tasks.get(taskId);
@@ -357,6 +373,15 @@ class OrchestratorPersistenceService {
     return this.persistence.chat.listByTask(taskId);
   }
   recordTaskStateDigest(digest) {
+    const audit = import_shared_tracing.tracer.audit("TASK_STATE_DIGEST", {
+      runId: digest.runId,
+      projectId: digest.projectId,
+      taskId: digest.taskId,
+      digestId: digest.id,
+      verificationState: digest.verificationState,
+      federationHash: digest.federationHash
+    });
+    digest.auditHash = audit.hash;
     this.persistence.digests.record(digest);
   }
   getLatestTaskStateDigest(taskId) {
@@ -366,6 +391,18 @@ class OrchestratorPersistenceService {
     return this.persistence.digests.listByTask(taskId);
   }
   recordHandoffPacket(packet) {
+    const audit = import_shared_tracing.tracer.audit("TASK_HANDOFF", {
+      runId: packet.runId,
+      projectId: packet.projectId,
+      taskId: packet.taskId,
+      handoffId: packet.id,
+      fromTaskId: packet.fromTaskId,
+      toTaskId: packet.toTaskId,
+      toRole: packet.toRole,
+      digestId: packet.digestId,
+      federationHash: packet.federationHash
+    });
+    packet.auditHash = audit.hash;
     this.persistence.handoffs.record(packet);
   }
   listHandoffPackets(taskId) {
@@ -399,6 +436,15 @@ class OrchestratorPersistenceService {
       summary: result.summary,
       payloadJson: JSON.stringify(result),
       createdAt: nowIso()
+    });
+    import_shared_tracing.tracer.audit("CODE_EXEC_RESULT", {
+      runId: this.run.runId,
+      taskId,
+      attemptId,
+      engine: result.engine,
+      model: result.model,
+      success: result.success,
+      summary: result.summary
     });
   }
   recordWorkerHeartbeat(heartbeat) {

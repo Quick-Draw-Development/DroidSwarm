@@ -381,9 +381,9 @@ export class RunRepository {
   }
 
   listByProject(projectId: string): RunRecord[] {
-    return this.database
+    return (this.database
       .prepare('SELECT * FROM runs WHERE project_id = ? ORDER BY updated_at DESC')
-      .all(projectId)
+      .all(projectId) as RunRow[])
       .map((row: RunRow) => ({
         runId: row.run_id,
         projectId: row.project_id,
@@ -425,9 +425,9 @@ export class RunRepository {
   }
 
   listActiveRuns(): RunRecord[] {
-    return this.database
+    return (this.database
       .prepare('SELECT * FROM runs WHERE status NOT IN (?, ?, ?) ORDER BY updated_at DESC')
-      .all('completed', 'failed', 'cancelled')
+      .all('completed', 'failed', 'cancelled') as RunRow[])
       .map((row: RunRow) => ({
         runId: row.run_id,
         projectId: row.project_id,
@@ -500,9 +500,9 @@ export class TaskRepository {
   }
 
   listByRun(runId: string): PersistedTask[] {
-    return this.database
+    return (this.database
       .prepare('SELECT * FROM tasks WHERE run_id = ? ORDER BY created_at ASC')
-      .all(runId)
+      .all(runId) as TaskRow[])
       .map((row: TaskRow) => ({
         taskId: row.task_id,
         runId: row.run_id,
@@ -611,9 +611,9 @@ export class TaskAttemptRepository {
   }
 
   listByTask(taskId: string): TaskAttemptRecord[] {
-    return this.database
+    return (this.database
       .prepare('SELECT * FROM task_attempts WHERE task_id = ? ORDER BY created_at ASC')
-      .all(taskId)
+      .all(taskId) as TaskAttemptRow[])
       .map((row: TaskAttemptRow) => ({
         attemptId: row.attempt_id,
         taskId: row.task_id,
@@ -657,9 +657,9 @@ export class TaskAttemptRepository {
   }
 
   listByRun(runId: string): TaskAttemptRecord[] {
-    return this.database
+    return (this.database
       .prepare('SELECT * FROM task_attempts WHERE run_id = ? ORDER BY created_at ASC')
-      .all(runId)
+      .all(runId) as TaskAttemptRow[])
       .map((row: TaskAttemptRow) => ({
         attemptId: row.attempt_id,
         taskId: row.task_id,
@@ -703,9 +703,9 @@ export class AgentAssignmentRepository {
       return [];
     }
     const placeholders = attemptIds.map(() => '?').join(', ');
-    return this.database
+    return (this.database
       .prepare(`SELECT * FROM agent_assignments WHERE attempt_id IN (${placeholders}) ORDER BY assigned_at ASC`)
-      .all(...attemptIds)
+      .all(...attemptIds) as Array<{ assignment_id: string; attempt_id: string; agent_name: string; assigned_at: string }>)
       .map((row: { assignment_id: string; attempt_id: string; agent_name: string; assigned_at: string }) => ({
         assignmentId: row.assignment_id,
         attemptId: row.attempt_id,
@@ -746,9 +746,9 @@ export class ArtifactRepository {
   }
 
   listByTask(taskId: string): ArtifactRecord[] {
-    return this.database
+    return (this.database
       .prepare('SELECT * FROM artifacts WHERE task_id = ? ORDER BY created_at ASC')
-      .all(taskId)
+      .all(taskId) as ArtifactRow[])
       .map((row: ArtifactRow) => ({
         artifactId: row.artifact_id,
         attemptId: row.attempt_id,
@@ -929,9 +929,9 @@ export class BudgetEventRepository {
   }
 
   listByTask(taskId: string): BudgetEventRecord[] {
-    return this.database
+    return (this.database
       .prepare('SELECT * FROM budget_events WHERE task_id = ? ORDER BY created_at ASC')
-      .all(taskId)
+      .all(taskId) as BudgetEventRow[])
       .map((row: BudgetEventRow) => ({
         eventId: row.event_id,
         runId: row.run_id,
@@ -948,9 +948,9 @@ export class BudgetEventRepository {
   }
 
   listByRun(runId: string): BudgetEventRecord[] {
-    return this.database
+    return (this.database
       .prepare('SELECT * FROM budget_events WHERE run_id = ? ORDER BY created_at ASC')
-      .all(runId)
+      .all(runId) as BudgetEventRow[])
       .map((row: BudgetEventRow) => ({
         eventId: row.event_id,
         runId: row.run_id,
@@ -991,9 +991,9 @@ export class OperatorActionRepository {
   }
 
   listByTask(taskId: string): OperatorControlActionRecord[] {
-    return this.database
+    return (this.database
       .prepare('SELECT * FROM operator_actions WHERE task_id = ? ORDER BY created_at ASC')
-      .all(taskId)
+      .all(taskId) as OperatorActionRow[])
       .map((row: OperatorActionRow) => ({
         actionId: row.action_id,
         runId: row.run_id,
@@ -1027,9 +1027,9 @@ export class TaskDependencyRepository {
   }
 
   listDependencies(taskId: string): TaskDependencyRecord[] {
-    return this.database
+    return (this.database
       .prepare('SELECT * FROM task_dependencies WHERE task_id = ? ORDER BY created_at ASC')
-      .all(taskId)
+      .all(taskId) as TaskDependencyRow[])
       .map((row: TaskDependencyRow) => ({
         dependencyId: row.dependency_id,
         taskId: row.task_id,
@@ -1039,9 +1039,9 @@ export class TaskDependencyRepository {
   }
 
   listDependents(taskId: string): TaskDependencyRecord[] {
-    return this.database
+    return (this.database
       .prepare('SELECT * FROM task_dependencies WHERE depends_on_task_id = ? ORDER BY created_at ASC')
-      .all(taskId)
+      .all(taskId) as TaskDependencyRow[])
       .map((row: TaskDependencyRow) => ({
         dependencyId: row.dependency_id,
         taskId: row.task_id,
@@ -1078,9 +1078,9 @@ export class VerificationOutcomeRepository {
   }
 
   listByTask(taskId: string): VerificationOutcomeRecord[] {
-    return this.database
+    return (this.database
       .prepare('SELECT * FROM verification_reviews WHERE task_id = ? ORDER BY created_at ASC')
-      .all(taskId)
+      .all(taskId) as VerificationOutcomeRow[])
       .map((row: VerificationOutcomeRow) => ({
         reviewId: row.review_id,
         runId: row.run_id,
@@ -1119,7 +1119,7 @@ export class ProjectRepository {
   }
 
   list(): Array<{ projectId: string; name: string; description?: string; metadata?: Record<string, unknown>; createdAt: string; updatedAt: string }> {
-    return this.database.prepare('SELECT * FROM projects ORDER BY updated_at DESC').all().map((row: ProjectRow) => ({
+    return (this.database.prepare('SELECT * FROM projects ORDER BY updated_at DESC').all() as ProjectRow[]).map((row: ProjectRow) => ({
       projectId: row.project_id,
       name: row.name,
       description: row.description ?? undefined,
@@ -1165,7 +1165,7 @@ export class ProjectRepoRepository {
   }
 
   listByProject(projectId: string): RepoTarget[] {
-    return this.database.prepare('SELECT * FROM project_repos WHERE project_id = ? ORDER BY updated_at DESC').all(projectId).map((row: ProjectRepoRow) => ({
+    return (this.database.prepare('SELECT * FROM project_repos WHERE project_id = ? ORDER BY updated_at DESC').all(projectId) as ProjectRepoRow[]).map((row: ProjectRepoRow) => ({
       id: row.repo_id,
       repoId: row.repo_id,
       projectId: row.project_id,
@@ -1248,7 +1248,7 @@ export class MemoryRepository {
   }
 
   listFacts(projectId: string): ProjectFact[] {
-    return this.database.prepare('SELECT * FROM project_facts WHERE project_id = ? ORDER BY created_at DESC').all(projectId).map((row: ProjectFactRow) => ({
+    return (this.database.prepare('SELECT * FROM project_facts WHERE project_id = ? ORDER BY created_at DESC').all(projectId) as ProjectFactRow[]).map((row: ProjectFactRow) => ({
       id: row.fact_id,
       projectId: row.project_id,
       repoId: row.repo_id,
@@ -1262,7 +1262,7 @@ export class MemoryRepository {
   }
 
   listDecisions(projectId: string): ProjectDecision[] {
-    return this.database.prepare('SELECT * FROM project_decisions WHERE project_id = ? ORDER BY created_at DESC').all(projectId).map((row: ProjectDecisionRow) => ({
+    return (this.database.prepare('SELECT * FROM project_decisions WHERE project_id = ? ORDER BY created_at DESC').all(projectId) as ProjectDecisionRow[]).map((row: ProjectDecisionRow) => ({
       id: row.decision_id,
       projectId: row.project_id,
       repoId: row.repo_id,
@@ -1275,7 +1275,7 @@ export class MemoryRepository {
   }
 
   listCheckpoints(projectId: string): ProjectCheckpoint[] {
-    return this.database.prepare('SELECT * FROM project_checkpoints WHERE project_id = ? ORDER BY created_at DESC').all(projectId).map((row: ProjectCheckpointRow) => ({
+    return (this.database.prepare('SELECT * FROM project_checkpoints WHERE project_id = ? ORDER BY created_at DESC').all(projectId) as ProjectCheckpointRow[]).map((row: ProjectCheckpointRow) => ({
       id: row.project_checkpoint_id,
       projectId: row.project_id,
       repoId: row.repo_id,
@@ -1315,7 +1315,7 @@ export class ChatRepository {
   }
 
   listByTask(taskId: string): TaskChatMessage[] {
-    return this.database.prepare('SELECT * FROM task_chat_messages WHERE task_id = ? ORDER BY created_at ASC').all(taskId).map((row: TaskChatMessageRow) => ({
+    return (this.database.prepare('SELECT * FROM task_chat_messages WHERE task_id = ? ORDER BY created_at ASC').all(taskId) as TaskChatMessageRow[]).map((row: TaskChatMessageRow) => ({
       id: row.message_id,
       taskId: row.task_id,
       runId: row.run_id,
@@ -1356,7 +1356,7 @@ export class WorkerRepository {
   }
 
   listResultsByTask(taskId: string): WorkerResultRecord[] {
-    return this.database.prepare('SELECT * FROM worker_results WHERE task_id = ? ORDER BY created_at DESC').all(taskId).map((row: WorkerResultRow) => ({
+    return (this.database.prepare('SELECT * FROM worker_results WHERE task_id = ? ORDER BY created_at DESC').all(taskId) as WorkerResultRow[]).map((row: WorkerResultRow) => ({
       workerResultId: row.worker_result_id,
       runId: row.run_id,
       taskId: row.task_id,
@@ -1409,7 +1409,7 @@ export class WorkerRepository {
   }
 
   listHeartbeatsByAttempt(attemptId: string): WorkerHeartbeat[] {
-    return this.database.prepare('SELECT * FROM worker_heartbeats WHERE attempt_id = ? ORDER BY created_at DESC').all(attemptId).map((row: WorkerHeartbeatRow) => ({
+    return (this.database.prepare('SELECT * FROM worker_heartbeats WHERE attempt_id = ? ORDER BY created_at DESC').all(attemptId) as WorkerHeartbeatRow[]).map((row: WorkerHeartbeatRow) => ({
       runId: row.run_id,
       taskId: row.task_id,
       attemptId: row.attempt_id,
@@ -1460,11 +1460,11 @@ export class TaskStateDigestRepository {
   }
 
   listByTask(taskId: string): TaskStateDigest[] {
-    return this.database.prepare(`
+    return (this.database.prepare(`
       SELECT * FROM task_state_digests
       WHERE task_id = ?
       ORDER BY created_at DESC
-    `).all(taskId).flatMap((row: TaskStateDigestRow) => {
+    `).all(taskId) as TaskStateDigestRow[]).flatMap((row: TaskStateDigestRow) => {
       const parsed = parseJson<TaskStateDigest>(row.payload_json);
       return parsed ? [parsed] : [];
     });
@@ -1490,11 +1490,11 @@ export class HandoffPacketRepository {
   }
 
   listByTask(taskId: string): HandoffPacket[] {
-    return this.database.prepare(`
+    return (this.database.prepare(`
       SELECT * FROM handoff_packets
       WHERE task_id = ? OR from_task_id = ? OR to_task_id = ?
       ORDER BY created_at DESC
-    `).all(taskId, taskId, taskId).flatMap((row: HandoffPacketRow) => {
+    `).all(taskId, taskId, taskId) as HandoffPacketRow[]).flatMap((row: HandoffPacketRow) => {
       const parsed = parseJson<HandoffPacket>(row.payload_json);
       return parsed ? [parsed] : [];
     });
@@ -1552,11 +1552,11 @@ export class ArtifactMemoryIndexRepository {
   }
 
   listByTask(taskId: string): ArtifactMemoryIndexEntry[] {
-    return this.database.prepare(`
+    return (this.database.prepare(`
       SELECT * FROM task_artifact_memory
       WHERE task_id = ?
       ORDER BY updated_at DESC
-    `).all(taskId).map((row: ArtifactMemoryIndexRow) => ({
+    `).all(taskId) as ArtifactMemoryIndexRow[]).map((row: ArtifactMemoryIndexRow) => ({
       id: row.artifact_memory_id,
       taskId: row.task_id,
       runId: row.run_id,

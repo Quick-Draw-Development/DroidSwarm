@@ -29,7 +29,11 @@ class AuthenticationError extends Error {
   }
 }
 const authenticateClient = (config, message) => {
-  if (message.project_id !== config.projectId) {
+  const allowedProjectIds = /* @__PURE__ */ new Set([
+    config.projectId,
+    ...config.allowedProjectIds ?? []
+  ]);
+  if (!allowedProjectIds.has(message.project_id)) {
     throw new AuthenticationError("Project mismatch", "project_mismatch");
   }
   const roomId = message.payload.room_id;

@@ -133,8 +133,6 @@ restart_captured_swarms() {
       DROIDSWARM_PRODUCTION_BRANCH \
       DROIDSWARM_REPO_URL \
       DROIDSWARM_PROJECT_MODE \
-      DROIDSWARM_BLINK_SERVER_PORT \
-      DROIDSWARM_MUX_PORT \
       DROIDSWARM_LLAMA_PORT \
       DROIDSWARM_LLAMA_MODEL
 
@@ -156,8 +154,6 @@ restart_captured_swarms() {
     [[ -n "${DROIDSWARM_MAIN_BRANCH:-}" ]] && RESTART_CMD+=(--main-branch "$DROIDSWARM_MAIN_BRANCH")
     [[ -n "${DROIDSWARM_PRODUCTION_BRANCH:-}" ]] && RESTART_CMD+=(--production-branch "$DROIDSWARM_PRODUCTION_BRANCH")
     [[ -n "${DROIDSWARM_REPO_URL:-}" ]] && RESTART_CMD+=(--repo-url "$DROIDSWARM_REPO_URL")
-    [[ -n "${DROIDSWARM_BLINK_SERVER_PORT:-}" ]] && RESTART_CMD+=(--blink-port "$DROIDSWARM_BLINK_SERVER_PORT")
-    [[ -n "${DROIDSWARM_MUX_PORT:-}" ]] && RESTART_CMD+=(--mux-port "$DROIDSWARM_MUX_PORT")
     [[ -n "${DROIDSWARM_LLAMA_PORT:-}" ]] && RESTART_CMD+=(--llama-port "$DROIDSWARM_LLAMA_PORT")
     [[ -n "${DROIDSWARM_LLAMA_MODEL:-}" ]] && RESTART_CMD+=(--llama-model "$DROIDSWARM_LLAMA_MODEL")
     append_assignment_args "$swarm_snapshot_dir/env.list" --env

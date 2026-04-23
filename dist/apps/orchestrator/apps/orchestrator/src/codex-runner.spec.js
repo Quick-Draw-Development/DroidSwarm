@@ -76,8 +76,6 @@ EOF
       llamaBaseUrl: "http://127.0.0.1:11434",
       llamaModel: "llama",
       llamaTimeoutMs: 1e3,
-      muxBaseUrl: "http://127.0.0.1:8960",
-      muxToken: "mux-token",
       prAutomationEnabled: false,
       prRemoteName: "origin",
       gitPolicy: {

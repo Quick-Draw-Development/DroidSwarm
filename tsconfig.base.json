@@ -51,6 +51,9 @@
     "@shared-projects": [
       "packages/shared-projects/src/index.ts"
     ],
+    "@model-router": [
+      "packages/model-router/src/index.ts"
+    ],
     "@shared-chat": [
       "packages/shared-chat/src/index.ts"
     ],
@@ -66,17 +69,23 @@
     "@shared-tracing": [
       "packages/shared-tracing/src/index.ts"
     ],
-    "@shared-mux": [
-      "packages/shared-mux/src/index.ts"
-    ],
     "@shared-llm": [
       "packages/shared-llm/src/index.ts"
     ],
     "@shared-codex": [
       "packages/shared-codex/src/index.ts"
     ],
-    "@shared-blink": [
-      "packages/shared-blink/src/index.ts"
+    "@federation-bus": [
+      "packages/federation-bus/src/index.ts"
+    ],
+    "@federation-bus/*": [
+      "packages/federation-bus/src/*"
+    ],
+    "@federation-adb": [
+      "packages/federation-adb/src/index.ts"
+    ],
+    "@federation-adb/*": [
+      "packages/federation-adb/src/*"
     ]
     }
   },

@@ -41,6 +41,7 @@ const typeByVerb: Record<EnvelopeV2['verb'], MessageType> = {
   'handoff.ready': 'handoff_event',
   'summary.emitted': 'guardrail_event',
   'memory.pinned': 'checkpoint_event',
+  'drift.detected': 'trace_event',
   'status.updated': 'status_update',
   'tool.request': 'tool_request',
   'tool.response': 'tool_response',

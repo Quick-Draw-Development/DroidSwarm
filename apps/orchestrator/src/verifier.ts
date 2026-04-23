@@ -178,7 +178,7 @@ export const runVerifier = async (): Promise<void> => {
   const statusCode = failedCommands.length === 0 ? 'agent_completed' : 'agent_failed';
   const finalResult: WorkerResult = {
     success: failedCommands.length === 0,
-    engine: 'mux-local',
+    engine: 'codex-cli',
     summary,
     timedOut: false,
     durationMs: 0,

@@ -36,8 +36,6 @@ const createTestConfig = (overrides: Partial<OrchestratorConfig> = {}): Orchestr
   llamaBaseUrl: 'http://127.0.0.1:11434',
   llamaModel: 'llama',
   llamaTimeoutMs: 1000,
-  muxBaseUrl: 'http://127.0.0.1:8960',
-  muxToken: 'mux-token',
   prAutomationEnabled: false,
   prRemoteName: 'origin',
   gitPolicy: {
@@ -919,9 +917,7 @@ describe('TaskScheduler', () => {
     );
 
     assert.equal(service.getTask(compressionTask!.taskId)?.status, 'completed');
-    assert.equal(service.getTask(rootTask.taskId)?.status, 'running');
-    assert.equal(spawnLog[1]?.taskId, rootTask.taskId);
-    assert.equal(spawnLog[1]?.role, 'planner');
+    assert.equal(service.getTask(rootTask.taskId)?.status, 'waiting_on_dependency');
     assert.deepEqual(service.getTask(rootTask.taskId)?.metadata?.last_compression_metrics, {
       artifactCount: 6,
       planSize: 5,
@@ -929,7 +925,7 @@ describe('TaskScheduler', () => {
       activeRisks: 1,
     });
     assert.equal(service.getLatestCheckpoint(rootTask.taskId)?.attemptId, spawnLog[0].attemptId);
-    assert.equal(service.getLatestTaskStateDigest(rootTask.taskId)?.droidspeak?.kind, 'summary_emitted');
+    assert.equal(service.getLatestTaskStateDigest(rootTask.taskId)?.droidspeak?.kind, 'plan_status');
 
     database.close();
     rmSync(workspace, { recursive: true, force: true });

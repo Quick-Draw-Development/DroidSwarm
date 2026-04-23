@@ -46,14 +46,23 @@ export interface ServerConfig {
   host: string;
   port: number;
   projectId: string;
+  allowedProjectIds?: string[];
   projectName: string;
   dbPath: string;
   debug: boolean;
+  swarmId?: string;
   operatorToken?: string;
   authTimeoutMs: number;
   heartbeatTimeoutMs: number;
   maxMessagesPerWindow: number;
   messageWindowMs: number;
+  federationEnabled: boolean;
+  federationNodeId: string;
+  federationBusUrl?: string;
+  federationAdminUrl?: string;
+  federationPollMs: number;
+  federationSigningKeyId?: string;
+  federationSigningPrivateKey?: string;
   environment: 'development' | 'test' | 'production';
 }
 

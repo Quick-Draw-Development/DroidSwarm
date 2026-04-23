@@ -302,8 +302,11 @@
       ]
     },
     "transpilePackages": [
+      "@shared-tracing",
+      "@federation-bus",
       "@protocol-alias",
-      "@protocol"
+      "@protocol",
+      "@shared-projects"
     ],
     "turbopack": {
       "root": "/Users/bcbirk/workspace/DroidSwarm"

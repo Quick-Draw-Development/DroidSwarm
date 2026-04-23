@@ -6,7 +6,7 @@ const path = require('node:path');
 
 const repoRoot = path.resolve(__dirname, '..');
 const versionFile = path.join(repoRoot, 'VERSION');
-const buildProjects = ['orchestrator', 'socket-server', 'dashboard', 'blink-bridge', 'worker-host'];
+const buildProjects = ['orchestrator', 'socket-server', 'dashboard', 'worker-host'];
 
 function readVersion() {
   return readFileSync(versionFile, 'utf8').trim();

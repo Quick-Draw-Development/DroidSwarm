@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.shared-packages.json",
+  "compilerOptions": {
+    "outDir": "../../dist/packages/shared-tracing"
+  },
+  "include": [
+    "src/**/*.ts"
+  ]
+}

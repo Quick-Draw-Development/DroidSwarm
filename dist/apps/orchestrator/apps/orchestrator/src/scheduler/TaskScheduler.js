@@ -412,7 +412,7 @@ class TaskScheduler {
         skill_packs: skillPackNames,
         skill_texts: skillTexts,
         read_only: routingDecision.readOnly,
-        mux_session_id: workspace.muxSessionId
+        execution_target: spawned.executionTarget
       },
       {
         projectId: task.projectId ?? this.config.projectId,
@@ -428,7 +428,8 @@ class TaskScheduler {
       branch,
       repo_id: repoId,
       root_path: workspace.path,
-      routing_decision: routingDecision
+      routing_decision: routingDecision,
+      execution_target: spawned.executionTarget
     });
     this.persistenceService.recordAssignment(spawned.agentName, attemptId);
     this.persistenceService.updateAttemptMetadata(attemptId, {
@@ -436,7 +437,8 @@ class TaskScheduler {
       routing_decision: routingDecision,
       model_tier: routingDecision.modelTier,
       queue_depth: routingDecision.queueDepth ?? 0,
-      fallback_count: routingDecision.fallbackCount ?? 0
+      fallback_count: routingDecision.fallbackCount ?? 0,
+      execution_target: spawned.executionTarget
     });
     this.persistenceService.setTaskStatus(task.taskId, "running");
     this.recordTopologySnapshot();
@@ -507,13 +509,19 @@ class TaskScheduler {
       this.persistenceService.recordExecutionEvent("handoff_ready", `Handoff packet ready for ${request.role}`, {
         taskId: childId,
         fromTaskId: task.taskId,
-        digestId: digest.id
+        digestId: digest.id,
+        digestHash: digest.federationHash,
+        handoffHash: handoff.federationHash,
+        auditHash: handoff.auditHash
       }, {
         taskId: childId,
         normalizedVerb: "handoff.ready",
         transportBody: {
           handoffId: handoff.id,
           digestId: digest.id,
+          digestHash: digest.federationHash,
+          handoffHash: handoff.federationHash,
+          auditHash: handoff.auditHash,
           requiredReads: handoff.requiredReads,
           toRole: request.role
         }
@@ -983,6 +991,9 @@ class TaskScheduler {
     if (!digest || !this.needsCheckpointCompression(task, digest)) {
       return false;
     }
+    if (typeof task.metadata?.last_compression_completed_at === "string" && digest.droidspeak?.kind === "summary_emitted") {
+      return false;
+    }
     const child = this.createStageTask(
       task,
       "checkpoint_compression",
@@ -1367,12 +1378,16 @@ Parallel focus ${index + 1}/${cappedTotalCount}: produce an independent ${canoni
     this.persistenceService.recordExecutionEvent("memory_pinned", `Task digest updated for ${task.taskId}`, {
       taskId: task.taskId,
       digestId: digest.id,
+      digestHash: digest.federationHash,
+      auditHash: digest.auditHash,
       verificationState: digest.verificationState
     }, {
       taskId: task.taskId,
       normalizedVerb: "memory.pinned",
       transportBody: {
         digestId: digest.id,
+        digestHash: digest.federationHash,
+        auditHash: digest.auditHash,
         verificationState: digest.verificationState,
         droidspeak: digest.droidspeak
       }

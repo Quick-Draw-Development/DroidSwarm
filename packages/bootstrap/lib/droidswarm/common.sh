@@ -11,12 +11,11 @@ DROIDSWARM_SERVICE_CONFIG="${DROIDSWARM_SERVICE_CONFIG:-$DROIDSWARM_HOME/service
 DROIDSWARM_RUNTIME_DIR="${DROIDSWARM_RUNTIME_DIR:-$DROIDSWARM_INSTALL_DIR/runtime}"
 DROIDSWARM_BIN_INSTALL_DIR="${DROIDSWARM_BIN_INSTALL_DIR:-$DROIDSWARM_INSTALL_DIR/bin}"
 DROIDSWARM_MODELS_DIR="${DROIDSWARM_MODELS_DIR:-$DROIDSWARM_HOME/models}"
-DROIDSWARM_DEFAULT_BLINK_SERVER_BIN="${DROIDSWARM_DEFAULT_BLINK_SERVER_BIN:-$DROIDSWARM_BIN_INSTALL_DIR/blink-server}"
-DROIDSWARM_DEFAULT_MUX_BIN="${DROIDSWARM_DEFAULT_MUX_BIN:-$DROIDSWARM_BIN_INSTALL_DIR/mux}"
 DROIDSWARM_DEFAULT_LLAMA_SERVER_BIN="${DROIDSWARM_DEFAULT_LLAMA_SERVER_BIN:-$DROIDSWARM_BIN_INSTALL_DIR/llama-server}"
 DROIDSWARM_DEFAULT_LLAMA_MODEL="${DROIDSWARM_DEFAULT_LLAMA_MODEL:-$DROIDSWARM_MODELS_DIR/default.gguf}"
-DROIDSWARM_DEFAULT_BLINK_BRIDGE_ENTRY="${DROIDSWARM_DEFAULT_BLINK_BRIDGE_ENTRY:-$DROIDSWARM_RUNTIME_DIR/blink-bridge/main.js}"
 DROIDSWARM_DEFAULT_WORKER_HOST_ENTRY="${DROIDSWARM_DEFAULT_WORKER_HOST_ENTRY:-$DROIDSWARM_RUNTIME_DIR/worker-host/main.js}"
+DROIDSWARM_DEFAULT_FEDERATION_BUS_ENTRY="${DROIDSWARM_DEFAULT_FEDERATION_BUS_ENTRY:-$DROIDSWARM_RUNTIME_DIR/federation-bus/src/service.js}"
+DROIDSWARM_DEFAULT_FEDERATION_ADB_ENTRY="${DROIDSWARM_DEFAULT_FEDERATION_ADB_ENTRY:-$DROIDSWARM_RUNTIME_DIR/federation-adb/src/service.js}"
 
 now_utc() {
   date -u +"%Y-%m-%dT%H:%M:%SZ"
@@ -89,6 +88,10 @@ project_meta_file() {
 
 project_setup_file() {
   printf '%s/setup.env\n' "$(project_meta_dir "$1")"
+}
+
+project_federation_workers_file() {
+  printf '%s/federation-workers.json\n' "$(project_meta_dir "$1")"
 }
 
 project_db_file() {
@@ -177,6 +180,10 @@ swarm_service_health_file() {
 
 swarm_service_health_json_file() {
   printf '%s/service-health.json\n' "$(swarm_dir "$1")"
+}
+
+swarm_federation_status_file() {
+  printf '%s/federation-status.json\n' "$(swarm_dir "$1")"
 }
 
 swarm_log_file() {

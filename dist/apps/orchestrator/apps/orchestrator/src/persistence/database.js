@@ -31,13 +31,13 @@ __export(database_exports, {
 });
 module.exports = __toCommonJS(database_exports);
 var import_better_sqlite3 = __toESM(require("better-sqlite3"));
-var import_node_fs = __toESM(require("node:fs"));
-var import_node_path = __toESM(require("node:path"));
+var fs = __toESM(require("node:fs"));
+var path = __toESM(require("node:path"));
 var import_schema = require("./schema");
 const openPersistenceDatabase = (dbPath) => {
-  const directory = import_node_path.default.dirname(dbPath);
-  if (!import_node_fs.default.existsSync(directory)) {
-    import_node_fs.default.mkdirSync(directory, { recursive: true });
+  const directory = path.dirname(dbPath);
+  if (!fs.existsSync(directory)) {
+    fs.mkdirSync(directory, { recursive: true });
   }
   const database = new import_better_sqlite3.default(dbPath);
   (0, import_schema.applyPersistenceSchema)(database);

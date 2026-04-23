@@ -80,6 +80,14 @@ const parseBooleanFlag = (value, fallback = false) => {
   }
   return ["1", "true", "yes", "on"].includes(value.toLowerCase());
 };
+const hasAppleIntelligenceSdk = () => {
+  try {
+    require.resolve("@apple-intelligence/sdk");
+    return true;
+  } catch {
+    return false;
+  }
+};
 const resolveFirstExistingPath = (candidates) => {
   for (const candidate of candidates) {
     if (!candidate) {
@@ -148,6 +156,7 @@ const envSchema = import_zod.z.object({
   DROIDSWARM_MODEL_CODE: import_zod.z.string().optional(),
   DROIDSWARM_MODEL_APPLE: import_zod.z.string().optional(),
   DROIDSWARM_MODEL_DEFAULT: import_zod.z.string().optional(),
+  DROIDSWARM_APPLE_INTELLIGENCE_ENABLED: import_zod.z.string().optional(),
   DROIDSWARM_ROUTING_PLANNER_ROLES: import_zod.z.string().optional(),
   DROIDSWARM_ROUTING_APPLE_ROLES: import_zod.z.string().optional(),
   DROIDSWARM_ROUTING_APPLE_HINTS: import_zod.z.string().optional(),
@@ -158,12 +167,6 @@ const envSchema = import_zod.z.object({
   DROIDSWARM_LLAMA_MODEL_NAME: import_zod.z.string().optional(),
   DROIDSWARM_LLAMA_MODELS_FILE: import_zod.z.string().optional(),
   DROIDSWARM_LLAMA_TIMEOUT_MS: import_zod.z.string().optional(),
-  DROIDSWARM_MUX_BASE_URL: import_zod.z.string().optional(),
-  DROIDSWARM_MUX_TOKEN: import_zod.z.string().optional(),
-  DROIDSWARM_SLACK_BOT_TOKEN: import_zod.z.string().optional(),
-  DROIDSWARM_SLACK_API_BASE_URL: import_zod.z.string().optional(),
-  DROIDSWARM_BLINK_API_BASE_URL: import_zod.z.string().optional(),
-  DROIDSWARM_BLINK_API_TOKEN: import_zod.z.string().optional(),
   DROIDSWARM_PR_AUTOMATION_ENABLED: import_zod.z.string().optional(),
   DROIDSWARM_PR_REMOTE_NAME: import_zod.z.string().optional(),
   DROIDSWARM_PR_BASE_URL: import_zod.z.string().optional(),
@@ -173,7 +176,15 @@ const envSchema = import_zod.z.object({
   DROIDSWARM_GIT_HOTFIX_PREFIX: import_zod.z.string().optional(),
   DROIDSWARM_GIT_RELEASE_PREFIX: import_zod.z.string().optional(),
   DROIDSWARM_GIT_SUPPORT_PREFIX: import_zod.z.string().optional(),
-  DROIDSWARM_BUDGET_MAX_CONSUMED: import_zod.z.string().optional()
+  DROIDSWARM_BUDGET_MAX_CONSUMED: import_zod.z.string().optional(),
+  DROIDSWARM_ENABLE_FEDERATION: import_zod.z.string().optional(),
+  DROIDSWARM_FEDERATION_NODE_ID: import_zod.z.string().optional(),
+  DROIDSWARM_FEDERATION_BUS_URL: import_zod.z.string().optional(),
+  DROIDSWARM_FEDERATION_ADMIN_URL: import_zod.z.string().optional(),
+  DROIDSWARM_FEDERATION_SIGNING_KEY_ID: import_zod.z.string().optional(),
+  DROIDSWARM_FEDERATION_SIGNING_PRIVATE_KEY: import_zod.z.string().optional(),
+  DROIDSWARM_FEDERATION_REMOTE_WORKERS_FILE: import_zod.z.string().optional(),
+  DROIDSWARM_FEDERATION_REMOTE_WORKERS: import_zod.z.string().optional()
 });
 const loadConfig = () => {
   const env = envSchema.parse(process.env);
@@ -205,6 +216,9 @@ const loadConfig = () => {
   const codeModel = env.DROIDSWARM_MODEL_CODE ?? "claude-3.5-sonnet";
   const appleModel = env.DROIDSWARM_MODEL_APPLE ?? "apple-intelligence/local";
   const defaultModel = env.DROIDSWARM_MODEL_DEFAULT ?? env.DROIDSWARM_CODEX_MODEL ?? "o1-preview";
+  const appleSdkAvailable = hasAppleIntelligenceSdk();
+  const appleIntelligenceConfigured = env.DROIDSWARM_APPLE_INTELLIGENCE_ENABLED == null ? true : parseBooleanFlag(env.DROIDSWARM_APPLE_INTELLIGENCE_ENABLED, true);
+  const appleIntelligenceEnabled = appleIntelligenceConfigured && appleSdkAvailable;
   const budgetMaxConsumed = toPositiveIntOrUndefined(env.DROIDSWARM_BUDGET_MAX_CONSUMED);
   const allowedTools = parseCommaList(env.DROIDSWARM_ALLOWED_TOOLS);
   const policyAllowedTools = parseOptionalCommaList(env.DROIDSWARM_POLICY_ALLOWED_TOOLS) ?? (allowedTools.length > 0 ? allowedTools : void 0);
@@ -220,6 +234,52 @@ const loadConfig = () => {
     import_node_path.default.resolve(process.cwd(), "dist", "apps", "worker-host", "main.cjs")
   ]) ?? import_node_path.default.resolve(runtimeDir, "worker-host", "main.js");
   const allowedRepoRoots = parseCommaList(env.DROIDSWARM_ALLOWED_REPO_ROOTS);
+  const federationRemoteWorkers = (() => {
+    const parseJson = (raw) => {
+      if (!raw) {
+        return void 0;
+      }
+      try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : void 0;
+      } catch {
+        return void 0;
+      }
+    };
+    const fileTargets = (() => {
+      const file = env.DROIDSWARM_FEDERATION_REMOTE_WORKERS_FILE;
+      if (!file || !import_node_fs.default.existsSync(file)) {
+        return void 0;
+      }
+      return parseJson(import_node_fs.default.readFileSync(file, "utf8"));
+    })();
+    const rawTargets = parseJson(env.DROIDSWARM_FEDERATION_REMOTE_WORKERS) ?? fileTargets;
+    if (!rawTargets) {
+      return void 0;
+    }
+    const normalized = rawTargets.flatMap((target) => {
+      if (!target || typeof target !== "object") {
+        return [];
+      }
+      const record = target;
+      if (typeof record.targetId !== "string" || typeof record.serial !== "string" || typeof record.remoteEntry !== "string") {
+        return [];
+      }
+      const modelTier = record.modelTier === "local-cheap" || record.modelTier === "local-capable" || record.modelTier === "cloud" ? record.modelTier : void 0;
+      return [{
+        targetId: record.targetId,
+        serial: record.serial,
+        remoteEntry: record.remoteEntry,
+        remoteCommand: typeof record.remoteCommand === "string" ? record.remoteCommand : void 0,
+        roles: Array.isArray(record.roles) ? record.roles.filter((value) => typeof value === "string") : void 0,
+        engines: Array.isArray(record.engines) ? record.engines.filter((value) => value === "local-llama" || value === "apple-intelligence" || value === "codex-cloud" || value === "codex-cli") : void 0,
+        modelTier,
+        workspaceRoot: typeof record.workspaceRoot === "string" ? record.workspaceRoot : void 0,
+        nodeId: typeof record.nodeId === "string" ? record.nodeId : void 0
+      }];
+    });
+    return normalized.length > 0 ? normalized : void 0;
+  })();
   const gitPolicy = {
     mainBranch: env.DROIDSWARM_GIT_MAIN_BRANCH ?? import_shared_git.defaultGitPolicy.mainBranch,
     developBranch: env.DROIDSWARM_GIT_DEVELOP_BRANCH ?? import_shared_git.defaultGitPolicy.developBranch,
@@ -260,12 +320,6 @@ const loadConfig = () => {
     llamaModelsFile,
     availableLlamaModels,
     llamaTimeoutMs: toPositiveInt(env.DROIDSWARM_LLAMA_TIMEOUT_MS, 6e4),
-    muxBaseUrl: env.DROIDSWARM_MUX_BASE_URL,
-    muxToken: env.DROIDSWARM_MUX_TOKEN,
-    slackBotToken: env.DROIDSWARM_SLACK_BOT_TOKEN,
-    slackApiBaseUrl: env.DROIDSWARM_SLACK_API_BASE_URL ?? "https://slack.com/api",
-    blinkApiBaseUrl: env.DROIDSWARM_BLINK_API_BASE_URL,
-    blinkApiToken: env.DROIDSWARM_BLINK_API_TOKEN,
     prAutomationEnabled: env.DROIDSWARM_PR_AUTOMATION_ENABLED === "1" || env.DROIDSWARM_PR_AUTOMATION_ENABLED === "true",
     prRemoteName: env.DROIDSWARM_PR_REMOTE_NAME ?? "origin",
     prBaseUrl: env.DROIDSWARM_PR_BASE_URL,
@@ -294,6 +348,10 @@ const loadConfig = () => {
       apple: appleModel,
       default: defaultModel
     },
+    appleIntelligence: {
+      enabled: appleIntelligenceEnabled,
+      sdkAvailable: appleSdkAvailable
+    },
     routingPolicy: {
       plannerRoles: parseCommaList(env.DROIDSWARM_ROUTING_PLANNER_ROLES ?? "plan,planner,research,review,orchestrator,checkpoint,compress"),
       appleRoles: parseCommaList(env.DROIDSWARM_ROUTING_APPLE_ROLES ?? "apple,ios,macos,swift,swiftui,xcode,visionos"),
@@ -303,6 +361,14 @@ const loadConfig = () => {
     },
     budgetMaxConsumed,
     allowedTools,
+    federationEnabled: parseBooleanFlag(env.DROIDSWARM_ENABLE_FEDERATION, false),
+    federationNodeId: env.DROIDSWARM_FEDERATION_NODE_ID,
+    federationBusUrl: env.DROIDSWARM_FEDERATION_BUS_URL,
+    federationAdminUrl: env.DROIDSWARM_FEDERATION_ADMIN_URL,
+    federationSigningKeyId: env.DROIDSWARM_FEDERATION_SIGNING_KEY_ID,
+    federationSigningPrivateKey: env.DROIDSWARM_FEDERATION_SIGNING_PRIVATE_KEY,
+    federationRemoteWorkersFile: env.DROIDSWARM_FEDERATION_REMOTE_WORKERS_FILE,
+    federationRemoteWorkers,
     policyDefaults: {
       maxDepth: toPositiveIntOrUndefined(env.DROIDSWARM_POLICY_MAX_DEPTH),
       maxChildren: toPositiveIntOrUndefined(env.DROIDSWARM_POLICY_MAX_CHILDREN),

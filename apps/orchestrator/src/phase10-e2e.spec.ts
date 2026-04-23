@@ -41,8 +41,6 @@ const DEFAULT_CONFIG: OrchestratorConfig = {
   llamaBaseUrl: 'http://127.0.0.1:11434',
   llamaModel: 'llama',
   llamaTimeoutMs: 1000,
-  muxBaseUrl: 'http://127.0.0.1:8960',
-  muxToken: 'mux-token',
   prAutomationEnabled: false,
   prRemoteName: 'origin',
   gitPolicy: {

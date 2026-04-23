@@ -40,7 +40,6 @@ var import_protocol = require("./protocol");
 var import_local_llama = require("./adapters/worker/local-llama.adapter");
 var import_codex_cloud = require("./adapters/worker/codex-cloud.adapter");
 var import_codex_cli = require("./adapters/worker/codex-cli.adapter");
-var import_mux_worker = require("./adapters/worker/mux-worker.adapter");
 const parseOptions = () => {
   const raw = process.argv[3];
   if (!raw) {
@@ -92,7 +91,10 @@ const getAdapter = (config, engine, workspacePath) => {
       return new import_local_llama.LocalLlamaAdapter({ baseUrl: config.llamaBaseUrl, timeoutMs: config.llamaTimeoutMs });
     case "apple-intelligence": {
       const { AppleIntelligenceWorkerAdapter } = require("./adapters/worker/apple-intelligence.adapter");
-      return new AppleIntelligenceWorkerAdapter({ model: config.modelRouting.apple });
+      return new AppleIntelligenceWorkerAdapter({
+        model: config.modelRouting.apple,
+        sdkEnabled: config.appleIntelligence?.enabled
+      });
     }
     case "codex-cloud":
       return new import_codex_cloud.CodexCloudAdapter({
@@ -104,12 +106,6 @@ const getAdapter = (config, engine, workspacePath) => {
       return new import_codex_cli.CodexCliAdapter({
         config,
         projectRoot: workspacePath
-      });
-    case "mux-local":
-      return new import_mux_worker.MuxWorkerAdapter({
-        command: process.env.DROIDSWARM_MUX_WORKER_CMD ?? process.execPath,
-        args: process.env.DROIDSWARM_MUX_WORKER_ARGS ? process.env.DROIDSWARM_MUX_WORKER_ARGS.split(" ") : ["-e", 'console.log(process.argv.slice(1).join(" "))'],
-        cwd: workspacePath
       });
     default:
       return new import_local_llama.LocalLlamaAdapter({ baseUrl: config.llamaBaseUrl, timeoutMs: config.llamaTimeoutMs });
@@ -140,7 +136,15 @@ const runWorker = async () => {
       options.agentName,
       "execution",
       "agent_started",
-      `${options.agentName} started ${options.role} work.`
+      `${options.agentName} started ${options.role} work.`,
+      void 0,
+      {
+        metadata: {
+          federationNodeId: config.federationNodeId,
+          digestHash: options.taskDigest?.federationHash,
+          handoffHash: options.handoffPacket?.federationHash
+        }
+      }
     )
   );
   console.log(`[Worker ${options.agentName}] notifying orchestrator of start`);
@@ -197,7 +201,14 @@ const runWorker = async () => {
         "agent_heartbeat",
         `Heartbeat from ${options.agentName}`,
         void 0,
-        buildHeartbeatPayload(heartbeat)
+        {
+          ...buildHeartbeatPayload(heartbeat),
+          metadata: {
+            federationNodeId: config.federationNodeId,
+            digestHash: options.taskDigest?.federationHash,
+            handoffHash: options.handoffPacket?.federationHash
+          }
+        }
       )
     );
   }, Math.max(1e3, Math.floor(config.heartbeatMs / 2)));
@@ -290,7 +301,14 @@ const runWorker = async () => {
         "agent_failed",
         error instanceof Error ? error.message : "Codex execution failed.",
         void 0,
-        { result: errorResult }
+        {
+          result: errorResult,
+          metadata: {
+            federationNodeId: config.federationNodeId,
+            digestHash: options.taskDigest?.federationHash,
+            handoffHash: options.handoffPacket?.federationHash
+          }
+        }
       )
     );
     socket.close();
@@ -365,7 +383,14 @@ const runWorker = async () => {
       result.success ? "agent_completed" : "agent_blocked",
       result.summary,
       compression,
-      { result }
+      {
+        result,
+        metadata: {
+          federationNodeId: config.federationNodeId,
+          digestHash: options.taskDigest?.federationHash,
+          handoffHash: options.handoffPacket?.federationHash
+        }
+      }
     )
   );
   socket.close();

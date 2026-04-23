@@ -72,12 +72,6 @@ export interface OrchestratorConfig {
     url?: string;
   }>;
   llamaTimeoutMs: number;
-  muxBaseUrl?: string;
-  muxToken?: string;
-  slackBotToken?: string;
-  slackApiBaseUrl?: string;
-  blinkApiBaseUrl?: string;
-  blinkApiToken?: string;
   prAutomationEnabled: boolean;
   prRemoteName: string;
   prBaseUrl?: string;
@@ -99,8 +93,29 @@ export interface OrchestratorConfig {
   allowedTools: string[];
   modelRouting: ModelRoutingConfig;
   routingPolicy: RoutingPolicyConfig;
+  appleIntelligence?: AppleIntelligenceConfig;
   budgetMaxConsumed?: number;
   policyDefaults?: TaskPolicy;
+  federationEnabled?: boolean;
+  federationNodeId?: string;
+  federationBusUrl?: string;
+  federationAdminUrl?: string;
+  federationSigningKeyId?: string;
+  federationSigningPrivateKey?: string;
+  federationRemoteWorkersFile?: string;
+  federationRemoteWorkers?: FederationRemoteWorkerTarget[];
+}
+
+export interface FederationRemoteWorkerTarget {
+  targetId: string;
+  serial: string;
+  remoteEntry: string;
+  remoteCommand?: string;
+  roles?: string[];
+  engines?: import('@shared-types').WorkerEngine[];
+  modelTier?: import('@shared-types').ModelTier;
+  workspaceRoot?: string;
+  nodeId?: string;
 }
 
 export interface ModelRoutingConfig {
@@ -109,6 +124,11 @@ export interface ModelRoutingConfig {
   code: string;
   apple: string;
   default: string;
+}
+
+export interface AppleIntelligenceConfig {
+  enabled: boolean;
+  sdkAvailable: boolean;
 }
 
 export interface RoutingPolicyConfig {
@@ -189,6 +209,12 @@ export interface SpawnedAgent {
   taskId: string;
   role: string;
   attemptId: string;
+  executionTarget?: {
+    mode: 'local' | 'federated-adb';
+    targetId?: string;
+    serial?: string;
+    nodeId?: string;
+  };
 }
 
 export interface RunRecord {

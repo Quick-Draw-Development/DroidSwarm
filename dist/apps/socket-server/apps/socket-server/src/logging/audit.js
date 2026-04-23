@@ -21,7 +21,19 @@ __export(audit_exports, {
 });
 module.exports = __toCommonJS(audit_exports);
 var import_node_crypto = require("node:crypto");
+var import_shared_tracing = require("@shared-tracing");
 const writeAuditEvent = (persistence, input) => {
+  import_shared_tracing.tracer.audit("SOCKET_AUDIT_EVENT", {
+    projectId: input.projectId,
+    taskId: input.taskId,
+    channelId: input.channelId,
+    connectionId: input.connectionId,
+    traceId: input.traceId,
+    eventType: input.eventType,
+    actorType: input.actorType,
+    actorId: input.actorId,
+    details: input.details
+  });
   persistence.recordAuditEvent({
     auditEventId: (0, import_node_crypto.randomUUID)(),
     projectId: input.projectId,

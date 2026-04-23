@@ -1,0 +1,33 @@
+{
+  "name": "shared-projects",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "root": "packages/shared-projects",
+  "sourceRoot": "packages/shared-projects/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc -p packages/shared-projects/tsconfig.json"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc --noEmit -p packages/shared-projects/tsconfig.json"
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc --noEmit -p packages/shared-projects/tsconfig.json"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node --import tsx --test packages/shared-projects/src/**/*.spec.ts"
+      }
+    }
+  }
+}

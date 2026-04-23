@@ -3,6 +3,12 @@ import { createServer } from 'node:http';
 
 import type { Logger } from 'pino';
 import WebSocket, { WebSocketServer } from 'ws';
+import type { EnvelopeV2 } from '@shared-types';
+import {
+  fetchBusEvents,
+  fetchBusStatus,
+  postToBus,
+} from '@federation-bus';
 
 import { authenticateClient, AuthenticationError } from './auth/authenticate';
 import { createDatabase } from './db/client';
@@ -34,6 +40,8 @@ export class DroidSwarmSocketServer {
   private readonly logger: Logger;
   private readonly socketStates = new WeakMap<WebSocket, SocketState>();
   private heartbeatSweep?: NodeJS.Timeout;
+  private federationPoller?: NodeJS.Timeout;
+  private federationLastSequence = 0;
 
   constructor(private readonly config: ServerConfig) {
     const database = createDatabase(config.dbPath);
@@ -63,15 +71,25 @@ export class DroidSwarmSocketServer {
         projectId: this.config.projectId,
         dbPath: this.config.dbPath,
         debug: this.config.debug,
+        federationEnabled: this.config.federationEnabled,
+        federationBusUrl: this.config.federationBusUrl,
       },
       'Socket server started',
     );
+
+    if (this.config.federationEnabled && this.config.federationBusUrl) {
+      await this.startFederationPolling();
+    }
   }
 
   async stop(): Promise<void> {
     if (this.heartbeatSweep) {
       clearInterval(this.heartbeatSweep);
       this.heartbeatSweep = undefined;
+    }
+    if (this.federationPoller) {
+      clearInterval(this.federationPoller);
+      this.federationPoller = undefined;
     }
 
     for (const client of this.webSocketServer.clients) {
@@ -247,6 +265,7 @@ export class DroidSwarmSocketServer {
     this.handleRoutingSideEffects(normalizedMessage);
     this.persistence.recordMessage(normalizedMessage);
     this.roomManager.broadcast(client.roomId, normalizedMessage);
+    void this.publishToFederation(normalizedMessage);
     if (this.config.debug) {
       this.logger.info(
         {
@@ -259,6 +278,180 @@ export class DroidSwarmSocketServer {
         'Persisted and broadcast room message',
       );
     }
+  }
+
+  private async startFederationPolling(): Promise<void> {
+    try {
+      const status = this.config.federationAdminUrl
+        ? await fetchBusStatus(this.config.federationAdminUrl)
+        : undefined;
+      this.federationLastSequence = status?.recentEventCount ?? 0;
+    } catch (error) {
+      this.logger.warn(
+        { error: error instanceof Error ? error.message : String(error) },
+        'Failed to initialize federation bus status',
+      );
+    }
+
+    this.federationPoller = setInterval(() => {
+      void this.pollFederationBus();
+    }, this.config.federationPollMs);
+    this.federationPoller.unref?.();
+  }
+
+  private async pollFederationBus(): Promise<void> {
+    if (!this.config.federationEnabled || !this.config.federationBusUrl) {
+      return;
+    }
+
+    try {
+      const result = await fetchBusEvents(this.config.federationBusUrl, this.federationLastSequence, 50);
+      this.federationLastSequence = result.latestSequence;
+      for (const event of result.events) {
+        if (event.sourceNodeId === this.config.federationNodeId) {
+          continue;
+        }
+        this.relayFederatedEnvelope(event.envelope);
+      }
+    } catch (error) {
+      if (this.config.debug) {
+        this.logger.warn(
+          { error: error instanceof Error ? error.message : String(error) },
+          'Failed to poll federation bus',
+        );
+      }
+    }
+  }
+
+  private async publishToFederation(message: MessageEnvelope): Promise<void> {
+    if (!this.config.federationEnabled || !this.config.federationBusUrl) {
+      return;
+    }
+
+    try {
+      await postToBus(this.config.federationBusUrl, {
+        sourceNodeId: this.config.federationNodeId,
+        envelope: this.messageToEnvelopeV2(message),
+      }, this.config.federationSigningKeyId && this.config.federationSigningPrivateKey
+        ? {
+          keyId: this.config.federationSigningKeyId,
+          privateKeyPem: this.config.federationSigningPrivateKey,
+        }
+        : undefined);
+    } catch (error) {
+      if (this.config.debug) {
+        this.logger.warn(
+          { error: error instanceof Error ? error.message : String(error), messageId: message.message_id },
+          'Failed to publish envelope to federation bus',
+        );
+      }
+    }
+  }
+
+  private relayFederatedEnvelope(envelope: EnvelopeV2): void {
+    const message = this.envelopeToMessage(envelope);
+    try {
+      this.persistence.ensureChannel({
+        channelId: message.room_id,
+        projectId: this.config.projectId,
+        taskId: message.task_id,
+        channelType: message.room_id === 'operator' ? 'operator' : 'task',
+        name: message.room_id,
+        status: 'active',
+        createdAt: message.timestamp,
+        updatedAt: message.timestamp,
+      });
+      this.handleRoutingSideEffects(message);
+      this.persistence.recordMessage(message);
+      this.roomManager.broadcast(message.room_id, message);
+      if (this.config.debug) {
+        this.logger.info(
+          { messageId: message.message_id, verb: message.verb, roomId: message.room_id, taskId: message.task_id },
+          'Relayed federated envelope into local rooms',
+        );
+      }
+    } catch (error) {
+      if (this.config.debug) {
+        this.logger.warn(
+          { error: error instanceof Error ? error.message : String(error), messageId: envelope.id },
+          'Failed to relay federated envelope',
+        );
+      }
+    }
+  }
+
+  private messageToEnvelopeV2(message: MessageEnvelope): EnvelopeV2 {
+    return {
+      id: message.id ?? message.message_id,
+      ts: message.ts ?? message.timestamp,
+      project_id: message.project_id,
+      swarm_id: message.swarm_id ?? this.config.swarmId,
+      run_id: message.run_id,
+      task_id: message.task_id,
+      room_id: message.room_id,
+      agent_id: message.agent_id ?? message.from.actor_id,
+      role: message.role,
+      verb: message.verb,
+      depends_on: message.depends_on,
+      artifact_refs: message.artifact_refs,
+      memory_refs: message.memory_refs,
+      risk: message.risk,
+      body: message.body ?? (message.payload as Record<string, unknown>),
+    };
+  }
+
+  private envelopeToMessage(envelope: EnvelopeV2): MessageEnvelope {
+    const typeByVerb: Record<EnvelopeV2['verb'], MessageEnvelope['type']> = {
+      'task.create': 'task_created',
+      'task.accept': 'task_intake_accepted',
+      'task.ready': 'task_assigned',
+      'task.blocked': 'clarification_request',
+      'plan.proposed': 'plan_proposed',
+      'spawn.requested': 'spawn_requested',
+      'spawn.approved': 'spawn_approved',
+      'spawn.denied': 'spawn_denied',
+      'artifact.created': 'artifact_created',
+      'checkpoint.created': 'checkpoint_created',
+      'verification.requested': 'verification_requested',
+      'verification.completed': 'verification_completed',
+      'run.completed': 'run_completed',
+      'handoff.ready': 'handoff_event',
+      'summary.emitted': 'guardrail_event',
+      'memory.pinned': 'checkpoint_event',
+      'drift.detected': 'trace_event',
+      'status.updated': 'status_update',
+      'tool.request': 'tool_request',
+      'tool.response': 'tool_response',
+      'chat.message': 'chat',
+      heartbeat: 'heartbeat',
+    };
+
+    return {
+      id: envelope.id,
+      message_id: envelope.id,
+      ts: envelope.ts,
+      timestamp: envelope.ts,
+      project_id: envelope.project_id,
+      swarm_id: envelope.swarm_id,
+      run_id: envelope.run_id,
+      room_id: envelope.room_id,
+      task_id: envelope.task_id,
+      agent_id: envelope.agent_id,
+      role: envelope.role,
+      verb: envelope.verb,
+      depends_on: envelope.depends_on,
+      artifact_refs: envelope.artifact_refs,
+      memory_refs: envelope.memory_refs,
+      risk: envelope.risk,
+      body: envelope.body,
+      type: typeByVerb[envelope.verb],
+      from: {
+        actor_type: 'agent',
+        actor_id: envelope.agent_id ?? envelope.role ?? 'federated-peer',
+        actor_name: envelope.role ?? envelope.agent_id ?? 'federated-peer',
+      },
+      payload: envelope.body as MessageEnvelope['payload'],
+    } as MessageEnvelope;
   }
 
   private handleRoutingSideEffects(message: MessageEnvelope): void {

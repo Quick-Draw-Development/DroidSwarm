@@ -3,7 +3,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import { createServer as createNetServer } from 'node:net';
 import { afterEach, describe, it } from 'node:test';
 
-import { fetchBusEvents, fetchBusStatus, kickPeer, postToBus, sendHeartbeat, signFederationRequest, startFederationBus, verifyFederationRequest } from './index';
+import { fetchBusEvents, fetchBusStatus, kickPeer, onboardPeer, postToBus, sendHeartbeat, signFederationRequest, startFederationBus, verifyFederationRequest } from './index';
 
 const services: Array<{ close(): Promise<void> }> = [];
 
@@ -90,9 +90,14 @@ describe('federation bus', () => {
     assert.equal(postResult.accepted, true);
 
     const status = await fetchBusStatus('http://127.0.0.1:49501');
+    assert.equal(status.latestSequence, 1);
     assert.equal(status.peerCount, 1);
+    assert.equal(status.projectCount, 1);
     assert.equal(status.recentEventCount, 1);
     assert.equal(status.peers[0]?.peerId, 'node-b');
+    assert.deepEqual(status.peers[0]?.projectIds, ['project-1']);
+    assert.equal(status.projects[0]?.projectId, 'project-1');
+    assert.deepEqual(status.projects[0]?.peers, ['node-b']);
 
     const events = await fetchBusEvents('http://127.0.0.1:49471');
     assert.equal(events.events.length, 1);
@@ -130,5 +135,80 @@ describe('federation bus', () => {
     const status = await fetchBusStatus('http://127.0.0.1:49502');
     assert.equal(status.peerCount, 1);
     assert.equal(status.peers[0]?.peerId, 'node-a');
+  });
+
+  it('supports explicit onboarding and records continuity drift in status', async (t) => {
+    if (!await canBindLocalPort()) {
+      t.skip('Local port binding is not permitted in this environment.');
+      return;
+    }
+
+    const service = startFederationBus({
+      nodeId: 'node-a',
+      host: '127.0.0.1',
+      busPort: 49474,
+      adminPort: 49504,
+      projectIds: ['project-a'],
+      debug: false,
+    });
+    services.push(service);
+
+    const onboard = await onboardPeer('http://127.0.0.1:49504', {
+      peerId: 'node-b',
+      busUrl: 'http://10.0.0.3:4947',
+      adminUrl: 'http://10.0.0.3:4950',
+      projectId: 'project-a',
+      capabilities: ['envelope-v2', 'orchestrator'],
+    });
+    assert.equal(onboard.accepted, true);
+
+    await postToBus('http://127.0.0.1:49474', {
+      sourceNodeId: 'node-b',
+      envelope: {
+        id: 'env-drift-1',
+        ts: new Date().toISOString(),
+        project_id: 'project-a',
+        task_id: 'task-1',
+        room_id: 'task-1',
+        verb: 'status.updated',
+        body: {
+          metadata: {
+            digestHash: 'digest-a',
+            handoffHash: 'handoff-a',
+          },
+        },
+      },
+    });
+
+    await postToBus('http://127.0.0.1:49474', {
+      sourceNodeId: 'node-c',
+      envelope: {
+        id: 'env-drift-2',
+        ts: new Date().toISOString(),
+        project_id: 'project-a',
+        task_id: 'task-1',
+        room_id: 'task-1',
+        verb: 'status.updated',
+        body: {
+          metadata: {
+            digestHash: 'digest-b',
+            handoffHash: 'handoff-b',
+          },
+        },
+      },
+    });
+
+    const status = await fetchBusStatus('http://127.0.0.1:49504');
+    assert.equal(status.peerCount, 1);
+    assert.equal(status.peers[0]?.peerId, 'node-b');
+    assert.equal(status.projectCount, 1);
+    assert.equal(status.projects[0]?.projectId, 'project-a');
+    assert.equal(status.recentDriftCount, 1);
+    assert.equal(status.counters.onboardingsReceived, 1);
+    assert.equal(status.counters.driftsDetected, 1);
+    assert.equal(status.recentDrifts[0]?.taskId, 'task-1');
+    assert.equal(status.recentDrifts[0]?.projectId, 'project-a');
+    assert.equal(status.recentDrifts[0]?.reportedDigestHash, 'digest-b');
+    assert.equal(status.recentDrifts[0]?.expectedDigestHash, 'digest-a');
   });
 });

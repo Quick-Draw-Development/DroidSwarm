@@ -5,7 +5,7 @@ export class RoutingService {
   private readonly routing = new SharedRoutingService();
 
   constructor(
-    private readonly config: Pick<OrchestratorConfig, 'routingPolicy' | 'modelRouting' | 'appleIntelligence'>,
+    private readonly config: Pick<OrchestratorConfig, 'routingPolicy' | 'modelRouting' | 'appleIntelligence' | 'mlx'>,
   ) {}
 
   decide(task: PersistedTask, role: string, policy?: TaskPolicy): RoutingDecision {
@@ -31,6 +31,10 @@ export class RoutingService {
       localQueueTolerance: policy?.localQueueTolerance,
       priorityBias: policy?.priorityBias,
       appleEnabled: this.config.appleIntelligence?.enabled ?? true,
+      preferAppleIntelligence: this.config.appleIntelligence?.preferredByHost,
+      platform: process.platform,
+      arch: process.arch,
+      mlxAvailable: this.config.mlx?.available ?? false,
       planningHints: this.config.routingPolicy.plannerRoles,
       appleRoles: this.config.routingPolicy.appleRoles,
       appleHints: this.config.routingPolicy.appleTaskHints,
@@ -41,6 +45,12 @@ export class RoutingService {
       return {
         ...decision,
         model: this.config.modelRouting.apple,
+      };
+    }
+    if (decision.engine === 'mlx') {
+      return {
+        ...decision,
+        model: this.config.modelRouting.mlx ?? 'mlx/local',
       };
     }
     return decision;

@@ -66,13 +66,13 @@ const createConfig = async (overrides: Partial<ServerConfig> = {}): Promise<Serv
 };
 
 const createFakePersistence = () => {
-  const ensuredChannels: Array<{ channelId: string; taskId?: string }> = [];
+  const ensuredChannels: Array<{ channelId: string; projectId: string; taskId?: string }> = [];
   const recordedMessages: MessageEnvelope[] = [];
 
   const persistence: PersistencePort = {
     migrate: () => undefined,
     ensureChannel: (input) => {
-      ensuredChannels.push({ channelId: input.channelId, taskId: input.taskId });
+      ensuredChannels.push({ channelId: input.channelId, projectId: input.projectId, taskId: input.taskId });
     },
     recordConnectionOpened: () => undefined,
     recordConnectionAuth: () => undefined,
@@ -251,5 +251,5 @@ test('socket server relays remote direct federation envelopes into local rooms o
     fakeRoomManager.broadcasts.map(({ roomId, message }) => [roomId, message.message_id]),
     [['task-99', 'fed-remote-1']],
   );
-  assert.deepEqual(fakePersistence.ensuredChannels, [{ channelId: 'task-99', taskId: undefined }]);
+  assert.deepEqual(fakePersistence.ensuredChannels, [{ channelId: 'task-99', projectId: 'project-direct', taskId: undefined }]);
 });

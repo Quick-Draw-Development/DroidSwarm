@@ -33,10 +33,16 @@ test('loads env-backed credentials when enabled', () => {
   process.env.DROIDSWARM_SLACK_BOT_TOKEN = 'xoxb-test';
   process.env.DROIDSWARM_SLACK_APP_TOKEN = 'xapp-test';
   process.env.DROIDSWARM_SLACK_LOG_LEVEL = 'debug';
+  process.env.DROIDSWARM_OPERATOR_TOKEN = 'operator-secret';
+  process.env.DROIDSWARM_PROJECT_ID = 'demo-project';
+  process.env.DROIDSWARM_MLX_ENABLED = '1';
 
   const config = loadSlackBotRuntimeConfig();
   assert.equal(config.botToken, 'xoxb-test');
   assert.equal(config.appToken, 'xapp-test');
+  assert.equal(config.operatorToken, 'operator-secret');
   assert.equal(config.logLevel, 'debug');
+  assert.equal(config.defaultProjectId, 'demo-project');
+  assert.equal(config.mlxAvailable, true);
   assert.equal(config.missingReason, null);
 });

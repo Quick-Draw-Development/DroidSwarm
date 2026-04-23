@@ -1,6 +1,6 @@
 import { App, LogLevel } from '@slack/bolt';
 import { loadSlackBotRuntimeConfig } from './config';
-import { parseSlackCommand, renderSlackCommandResponse } from './commands';
+import { handleSlackInput } from './service';
 
 const toBoltLogLevel = (level: 'debug' | 'info' | 'warn' | 'error'): LogLevel => {
   switch (level) {
@@ -23,6 +23,20 @@ const extractMessageText = (message: Record<string, unknown>): string => {
 const isDirectMessage = (message: Record<string, unknown>): boolean =>
   typeof message.channel_type === 'string' && message.channel_type === 'im';
 
+const isBotEvent = (message: Record<string, unknown>): boolean =>
+  typeof message.bot_id === 'string'
+  || message.subtype === 'bot_message';
+
+const extractUserId = (message: Record<string, unknown>): string =>
+  typeof message.user === 'string'
+    ? message.user
+    : typeof message.user_id === 'string'
+      ? message.user_id
+      : 'unknown-user';
+
+const sanitizeSlackText = (text: string): string =>
+  text.replace(/<@[^>]+>/g, '').trim();
+
 export const startSlackBot = async (): Promise<App | null> => {
   const config = loadSlackBotRuntimeConfig();
   if (!config.enabled) {
@@ -44,20 +58,44 @@ export const startSlackBot = async (): Promise<App | null> => {
 
   app.command('/droid', async ({ command, ack, respond }) => {
     await ack();
-    const parsed = parseSlackCommand(command.text ?? '');
-    const response = renderSlackCommandResponse(parsed);
+    const response = await handleSlackInput({
+      text: sanitizeSlackText(command.text ?? ''),
+      userId: command.user_id,
+      username: command.user_name ?? command.user_id,
+      channelId: command.channel_id,
+    }, config);
     await respond({ text: response.text, response_type: 'ephemeral' });
   });
 
   app.message(async ({ message, say }) => {
     const event = message as unknown as Record<string, unknown>;
-    if (!isDirectMessage(event)) {
+    if (!isDirectMessage(event) || isBotEvent(event)) {
       return;
     }
 
-    const parsed = parseSlackCommand(extractMessageText(event));
-    const response = renderSlackCommandResponse(parsed);
-    await say(response.text);
+    const response = await handleSlackInput({
+      text: sanitizeSlackText(extractMessageText(event)),
+      userId: extractUserId(event),
+      username: extractUserId(event),
+      channelId: typeof event.channel === 'string' ? event.channel : undefined,
+      threadTs: typeof event.thread_ts === 'string' ? event.thread_ts : typeof event.ts === 'string' ? event.ts : undefined,
+    }, config);
+    await say(`Forwarded. ${response.text}`);
+  });
+
+  app.event('app_mention', async ({ event, say }) => {
+    const mentionEvent = event as unknown as Record<string, unknown>;
+    if (isBotEvent(mentionEvent)) {
+      return;
+    }
+    const response = await handleSlackInput({
+      text: sanitizeSlackText(extractMessageText(mentionEvent)),
+      userId: extractUserId(mentionEvent),
+      username: extractUserId(mentionEvent),
+      channelId: typeof mentionEvent.channel === 'string' ? mentionEvent.channel : undefined,
+      threadTs: typeof mentionEvent.thread_ts === 'string' ? mentionEvent.thread_ts : typeof mentionEvent.ts === 'string' ? mentionEvent.ts : undefined,
+    }, config);
+    await say(`Forwarded. ${response.text}`);
   });
 
   await app.start();

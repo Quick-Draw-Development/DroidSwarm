@@ -1,7 +1,7 @@
 DroidSwarm Slack Bot Implementation Plan
 For Codex Agent Execution
 Objective
-Replace the passive Blink bridge with a clean, secure, interactive Slack bot (apps/slack-bot) that allows remote management of multiple DroidSwarm projects and tasks. The bot will be fully aware of all registered projects, active swarms, and agent states, support both slash commands and natural-language DMs, and leverage Apple Intelligence (via the model-router) for intent parsing on Mac.
+Replace the old Blink-era chat bridge concept with a clean, secure, interactive Slack bot (`apps/slack-bot`) that allows remote management of multiple DroidSwarm projects and tasks. The bot will be fully aware of all registered projects, active swarms, and agent states, support both slash commands and natural-language DMs, and leverage Apple Intelligence (via the model-router) for intent parsing on Mac.
 Key Goals
 
 Active control (start/pause tasks, query status, launch swarms)
@@ -10,23 +10,15 @@ Zero public exposure (Socket Mode only)
 Secure token storage (macOS Keychain)
 Full audit logging via shared-tracing
 Optional feature (--enable-slack-bot)
-Minimal footprint and no Docker/Blink dependency
+Minimal footprint and no legacy Blink/Mux dependency
 
 Prerequisites (Must Be Completed First)
 
 Shared-tracing tamper-evident audit logging (from previous plan)
 Model-router with strong Apple Intelligence preference on Mac (from Apple Intelligence plan)
-Removal of apps/blink-bridge, packages/shared-blink, and all Blink-related code/provisioning
 Secure config/token helpers in packages/shared-config (Keychain support)
 
-Phase 0: Cleanup & Setup
-
-Delete apps/blink-bridge and packages/shared-blink entirely.
-Remove all references to Blink from:
-packages/bootstrap
-Installer scripts
-CLI commands
-services.env provisioning
+Phase 0: Setup
 
 Add minimal dependency: @slack/bolt (only new package).
 Extend packages/shared-config with secure token functions:TypeScriptgetSecureSlackToken(), setSecureSlackToken(token), getSecureAppToken()(Use macOS Keychain / @electron/remote or keytar equivalent if needed; prefer native APIs.)

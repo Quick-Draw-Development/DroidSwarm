@@ -18,6 +18,7 @@ import { finalizeRunOnShutdown } from './run-shutdown';
 import { ToolService } from './tools/ToolService';
 import { ProjectRegistryService } from './services/project-registry.service';
 import type { PersistedTask, TaskRecord } from './types';
+import { onboardPeer } from '@federation-bus';
 
 export class DroidSwarmOrchestratorClient {
   private readonly registry = new WorkerRegistry();
@@ -128,6 +129,7 @@ export class DroidSwarmOrchestratorClient {
 
     this.gateway.setMessageHandler(this.engine.handleMessage.bind(this.engine));
     this.gateway.start();
+    void this.announceFederationPresence();
 
     this.hydrateExistingTasks();
     this.persistenceService.recordSwarmTopologySnapshot();
@@ -196,5 +198,35 @@ export class DroidSwarmOrchestratorClient {
 
   private shouldWatchTaskChannel(task: PersistedTask): boolean {
     return !['completed', 'failed', 'cancelled', 'verified'].includes(task.status);
+  }
+
+  private async announceFederationPresence(): Promise<void> {
+    if (!this.config.federationEnabled || !this.config.federationAdminUrl || !this.config.federationBusUrl) {
+      return;
+    }
+
+    try {
+      await onboardPeer(this.config.federationAdminUrl, {
+        peerId: this.config.federationNodeId ?? this.config.projectId,
+        busUrl: this.config.federationBusUrl,
+        adminUrl: this.config.federationAdminUrl,
+        capabilities: ['envelope-v2', 'orchestrator', 'drift-detection'],
+        projectIds: [this.config.projectId],
+        ts: new Date().toISOString(),
+      }, this.config.federationSigningKeyId && this.config.federationSigningPrivateKey
+        ? {
+          keyId: this.config.federationSigningKeyId,
+          privateKeyPem: this.config.federationSigningPrivateKey,
+        }
+        : undefined);
+      this.log('federation onboarded', {
+        nodeId: this.config.federationNodeId,
+        projectId: this.config.projectId,
+      });
+    } catch (error) {
+      this.log('federation onboard failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 }

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const WORKER_ENGINES = ['local-llama', 'apple-intelligence', 'codex-cloud', 'codex-cli'] as const;
+export const WORKER_ENGINES = ['local-llama', 'mlx', 'apple-intelligence', 'codex-cloud', 'codex-cli'] as const;
 export type WorkerEngine = (typeof WORKER_ENGINES)[number];
 export const MODEL_TIERS = ['local-cheap', 'local-capable', 'cloud'] as const;
 export type ModelTier = (typeof MODEL_TIERS)[number];
@@ -320,7 +320,7 @@ export const normalizeToEnvelopeV2 = (input: unknown): EnvelopeV2 => {
   return envelopeV2Schema.parse({
     id: asString(record.id) ?? asString(record.message_id) ?? asString(record.event_id) ?? syntheticEnvelopeId(),
     ts: asIsoTimestamp(record.ts) ?? asIsoTimestamp(record.timestamp) ?? asIsoTimestamp(record.created_at) ?? new Date().toISOString(),
-    project_id: asString(record.project_id) ?? asString(record.projectId) ?? asString(payload.project_id) ?? 'droidswarm',
+    project_id: asString(record.project_id) ?? asString(record.projectId) ?? asString(payload.project_id) ?? asString(payload.projectId) ?? 'droidswarm',
     swarm_id: asString(record.swarm_id),
     run_id: asString(record.run_id) ?? asString(payload.run_id) ?? asString(record.trace_id),
     task_id: taskId,

@@ -1,5 +1,6 @@
 import type { RoutingDecision } from '@shared-types';
 import { tracer } from '@shared-tracing';
+import { chooseBackendDecision, type ModelRouteDecision } from '@model-router';
 import { getSwarmRoleDefinition } from './role-catalog';
 
 export type { SwarmRole, SwarmRoleDefinition } from './role-catalog';
@@ -20,6 +21,10 @@ export interface RoutingContext {
   appleHints?: string[];
   appleRoles?: string[];
   appleEnabled?: boolean;
+  preferAppleIntelligence?: boolean;
+  platform?: string;
+  arch?: string;
+  mlxAvailable?: boolean;
   codeHints?: string[];
   cloudEscalationHints?: string[];
 }
@@ -40,6 +45,17 @@ export class RoutingService {
     const appleRoles = context.appleRoles ?? defaultAppleRoles;
     const appleHints = context.appleHints ?? defaultAppleHints;
     const appleEnabled = context.appleEnabled ?? true;
+    const localModelDecision = chooseBackendDecision({
+      preferAppleIntelligence: context.preferAppleIntelligence,
+      platform: context.platform,
+      arch: context.arch,
+      taskType,
+      stage,
+      summary: context.summary,
+      contextLength: context.summary?.length,
+      appleRuntimeAvailable: appleEnabled,
+      mlxAvailable: context.mlxAvailable,
+    });
     const codeHints = context.codeHints ?? defaultCodeHints;
     const cloudEscalationHints = context.cloudEscalationHints ?? defaultCloudEscalationHints;
     const complexity = this.inferComplexity(role, taskType, context.summary, codeHints, cloudEscalationHints);
@@ -60,7 +76,7 @@ export class RoutingService {
         ? `Apple Intelligence unavailable; fell back to standard local-first routing. ${reason}`
         : reason;
 
-    if (appleMatched && appleEnabled) {
+    if (appleMatched && localModelDecision.backend === 'apple-intelligence') {
       return this.auditDecision(context, {
         engine: 'apple-intelligence',
         model: 'apple-intelligence/local',
@@ -68,7 +84,7 @@ export class RoutingService {
         routeKind: localSaturated ? 'apple-local-saturated' : 'apple-local',
         reason: localSaturated
           ? 'Apple-local route retained despite local saturation because Apple-specialist work stays local-first'
-          : 'First-class local Apple Intelligence rule matched Apple ecosystem task scope',
+          : `First-class local Apple Intelligence rule matched Apple ecosystem task scope. ${localModelDecision.reason}`,
         role: context.role,
         readOnly,
         complexity,
@@ -80,6 +96,41 @@ export class RoutingService {
         cloudEscalated: false,
       });
     }
+
+    const resolveLocalBackendDecision = (
+      routeKind: RoutingDecision['routeKind'],
+      reasonPrefix: string,
+      confidence: number,
+    ): RoutingDecision => {
+      const engine = localModelDecision.backend === 'mlx'
+        ? 'mlx'
+        : localModelDecision.backend === 'apple-intelligence'
+          ? 'apple-intelligence'
+          : 'local-llama';
+      const model = localModelDecision.backend === 'mlx'
+        ? 'mlx/local'
+        : localModelDecision.backend === 'apple-intelligence'
+          ? 'apple-intelligence/local'
+          : routeKind === 'planner-local' || routeKind === 'planner-local-saturated'
+            ? 'llama.cpp/planner'
+            : 'llama.cpp/default';
+      return this.auditDecision(context, {
+        engine,
+        model,
+        modelTier: roleDefinition.defaultModelTier,
+        routeKind,
+        reason: `${reasonPrefix} ${localModelDecision.reason}`.trim(),
+        role: context.role,
+        readOnly,
+        complexity,
+        confidence,
+        skillPacks: this.defaultSkillPacks(context.role),
+        queueDepth,
+        fallbackCount,
+        localFirst,
+        cloudEscalated: false,
+      });
+    };
 
     if (
       roleDefinition.id === 'planner'
@@ -93,24 +144,13 @@ export class RoutingService {
         || stage === 'review'
         || planningHints.some((hint) => role.includes(hint))
     ) {
-      return this.auditDecision(context, {
-        engine: 'local-llama',
-        model: 'llama.cpp/planner',
-        modelTier: roleDefinition.defaultModelTier,
-        routeKind: localSaturated ? 'planner-local-saturated' : 'planner-local',
-        reason: withAppleFallbackReason(localSaturated
-          ? 'Local-first planning, review, and compression roles stay local even when llama capacity is saturated'
-          : 'Local-first planning, review, and orchestration policy'),
-        role: context.role,
-        readOnly,
-        complexity,
-        confidence: 0.84,
-        skillPacks: this.defaultSkillPacks(context.role),
-        queueDepth,
-        fallbackCount,
-        localFirst,
-        cloudEscalated: false,
-      });
+      return resolveLocalBackendDecision(
+        localSaturated ? 'planner-local-saturated' : 'planner-local',
+        withAppleFallbackReason(localSaturated
+          ? 'Local-first planning, review, and compression roles stay local even when local capacity is saturated.'
+          : 'Local-first planning, review, and orchestration policy.'),
+        0.84,
+      );
     }
 
     if (
@@ -152,24 +192,13 @@ export class RoutingService {
       });
     }
 
-    return this.auditDecision(context, {
-      engine: 'local-llama',
-      model: 'llama.cpp/default',
-      modelTier: roleDefinition.defaultModelTier,
-      routeKind: localSaturated ? 'default-local-saturated' : 'default-local',
-      reason: withAppleFallbackReason(localSaturated
-        ? 'Default local-first execution retained locally while the local tier is saturated'
-        : 'Default local-first execution policy'),
-      role: context.role,
-      readOnly,
-      complexity,
-      confidence: 0.75,
-      skillPacks: this.defaultSkillPacks(context.role),
-      queueDepth,
-      fallbackCount,
-      localFirst,
-      cloudEscalated: false,
-    });
+    return resolveLocalBackendDecision(
+      localSaturated ? 'default-local-saturated' : 'default-local',
+      withAppleFallbackReason(localSaturated
+        ? 'Default local-first execution retained locally while the local tier is saturated.'
+        : 'Default local-first execution policy.'),
+      0.75,
+    );
   }
 
   private auditDecision(context: RoutingContext, decision: RoutingDecision): RoutingDecision {

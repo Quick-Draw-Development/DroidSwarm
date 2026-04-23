@@ -11,8 +11,27 @@ export interface FederationPeerDescriptor {
   busUrl: string;
   adminUrl?: string;
   capabilities?: string[];
+  projectIds?: string[];
   lastHeartbeatAt?: string;
   lastKickAt?: string;
+}
+
+export interface FederationProjectDescriptor {
+  projectId: string;
+  peers: string[];
+  updatedAt: string;
+}
+
+export interface FederationDriftSummary {
+  projectId: string;
+  taskId: string;
+  nodeId?: string;
+  reportedDigestHash?: string;
+  expectedDigestHash?: string;
+  reportedHandoffHash?: string;
+  expectedHandoffHash?: string;
+  detail: string;
+  detectedAt: string;
 }
 
 export interface FederationBusEvent {
@@ -27,14 +46,21 @@ export interface FederationBusStatus {
   host: string;
   busPort: number;
   adminPort: number;
+  latestSequence: number;
   peerCount: number;
+  projectCount: number;
   peers: FederationPeerDescriptor[];
+  projects: FederationProjectDescriptor[];
   recentEventCount: number;
+  recentDriftCount: number;
+  recentDrifts: FederationDriftSummary[];
   counters: {
     envelopesReceived: number;
     envelopesForwarded: number;
     heartbeatsReceived: number;
     kicksReceived: number;
+    onboardingsReceived: number;
+    driftsDetected: number;
   };
 }
 
@@ -49,6 +75,7 @@ export interface StartFederationBusOptions {
   busPort: number;
   adminPort: number;
   peerUrls?: string[];
+  projectIds?: string[];
   debug?: boolean;
   heartbeatIntervalMs?: number;
   eventRetentionLimit?: number;
@@ -89,10 +116,15 @@ export interface HeartbeatInput {
   busUrl: string;
   adminUrl?: string;
   capabilities?: string[];
+  projectIds?: string[];
   ts?: string;
   signedBy?: string;
   nonce?: string;
   signature?: string;
+}
+
+export interface OnboardInput extends HeartbeatInput {
+  projectId?: string;
 }
 
 export interface KickInput {
@@ -102,6 +134,12 @@ export interface KickInput {
   signedBy?: string;
   nonce?: string;
   signature?: string;
+}
+
+interface ContinuitySnapshot {
+  digestHash?: string;
+  handoffHash?: string;
+  reportedAt: string;
 }
 
 const defaultHeaders = {
@@ -286,6 +324,7 @@ export const sendHeartbeat = async (busUrl: string, input: HeartbeatInput, auth?
     busUrl: input.busUrl,
     adminUrl: input.adminUrl,
     capabilities: input.capabilities,
+    projectIds: input.projectIds,
     ts: input.ts,
   } satisfies Record<string, unknown>;
   const signed = auth ? signFederationRequest('heartbeat', unsignedPayload, auth) : undefined;
@@ -294,8 +333,41 @@ export const sendHeartbeat = async (busUrl: string, input: HeartbeatInput, auth?
     peerId: input.peerId,
     adminUrl: input.adminUrl,
     capabilities: input.capabilities,
+    projectIds: input.projectIds,
   });
   return postJson(`${busUrl.replace(/\/$/, '')}/heartbeat`, {
+    ...unsignedPayload,
+    signedBy: signed?.signedBy ?? input.signedBy,
+    nonce: signed?.nonce ?? input.nonce,
+    signature: signed?.signature ?? input.signature,
+  });
+};
+
+export const onboardPeer = async (
+  adminUrl: string,
+  input: OnboardInput,
+  auth?: FederationPostAuth,
+): Promise<{ accepted: boolean; peerId: string }> => {
+  const projectIds = Array.from(new Set([
+    ...(input.projectIds ?? []),
+    ...(input.projectId ? [input.projectId] : []),
+  ]));
+  const unsignedPayload = {
+    peerId: input.peerId,
+    busUrl: input.busUrl,
+    adminUrl: input.adminUrl,
+    capabilities: input.capabilities,
+    projectIds,
+    ts: input.ts,
+  } satisfies Record<string, unknown>;
+  const signed = auth ? signFederationRequest('onboard', unsignedPayload, auth) : undefined;
+  tracer.audit('FEDERATION_ONBOARD_OUTBOUND', {
+    adminUrl,
+    peerId: input.peerId,
+    busUrl: input.busUrl,
+    projectIds,
+  });
+  return postJson(`${adminUrl.replace(/\/$/, '')}/onboard`, {
     ...unsignedPayload,
     signedBy: signed?.signedBy ?? input.signedBy,
     nonce: signed?.nonce ?? input.nonce,
@@ -337,16 +409,22 @@ export const fetchBusEvents = async (
 export const startFederationBus = (options: StartFederationBusOptions): FederationBusService => {
   const peers = new Map<string, FederationPeerDescriptor>();
   const events: FederationBusEvent[] = [];
+  const projects = new Map<string, FederationProjectDescriptor>();
+  const recentDrifts: FederationDriftSummary[] = [];
   const seenEnvelopeIds = new Set<string>();
   const seenRequestIds = new Set<string>();
+  const continuityByTask = new Map<string, Map<string, ContinuitySnapshot>>();
   let sequence = 0;
   const retentionLimit = Math.max(25, options.eventRetentionLimit ?? 200);
   const heartbeatIntervalMs = Math.max(5_000, options.heartbeatIntervalMs ?? 15_000);
+  const localProjects = Array.from(new Set(options.projectIds ?? []));
   const counters = {
     envelopesReceived: 0,
     envelopesForwarded: 0,
     heartbeatsReceived: 0,
     kicksReceived: 0,
+    onboardingsReceived: 0,
+    driftsDetected: 0,
   };
 
   for (const peer of options.peerUrls ?? []) {
@@ -416,16 +494,112 @@ export const startFederationBus = (options: StartFederationBusOptions): Federati
     }));
   };
 
+  const mergeProjectMembership = (peerId: string, inputProjectIds?: string[]): void => {
+    const projectIds = Array.from(new Set(inputProjectIds?.filter((entry) => typeof entry === 'string' && entry.length > 0) ?? []));
+    for (const projectId of projectIds) {
+      const existing = projects.get(projectId);
+      const peersForProject = new Set(existing?.peers ?? []);
+      peersForProject.add(peerId);
+      projects.set(projectId, {
+        projectId,
+        peers: [...peersForProject].sort(),
+        updatedAt: nowIso(),
+      });
+    }
+  };
+
+  mergeProjectMembership(options.nodeId, localProjects);
+
   const updatePeer = (input: HeartbeatInput): void => {
     const existing = peers.get(input.peerId);
+    const projectIds = Array.from(new Set(input.projectIds ?? existing?.projectIds ?? []));
     peers.set(input.peerId, {
       peerId: input.peerId,
       busUrl: input.busUrl.replace(/\/$/, ''),
       adminUrl: input.adminUrl?.replace(/\/$/, '') ?? existing?.adminUrl,
       capabilities: input.capabilities ?? existing?.capabilities,
+      projectIds,
       lastHeartbeatAt: input.ts ?? nowIso(),
       lastKickAt: existing?.lastKickAt,
     });
+    mergeProjectMembership(input.peerId, projectIds);
+  };
+
+  const getEnvelopeMetadata = (envelope: EnvelopeV2): Record<string, unknown> | undefined => {
+    const bodyMetadata =
+      typeof envelope.body.metadata === 'object' && envelope.body.metadata !== null
+        ? envelope.body.metadata as Record<string, unknown>
+        : undefined;
+    const payload =
+      typeof envelope.body.payload === 'object' && envelope.body.payload !== null
+        ? envelope.body.payload as Record<string, unknown>
+        : undefined;
+    const payloadMetadata =
+      payload && typeof payload.metadata === 'object' && payload.metadata !== null
+        ? payload.metadata as Record<string, unknown>
+        : undefined;
+    return bodyMetadata ?? payloadMetadata;
+  };
+
+  const recordDrift = (drift: FederationDriftSummary): void => {
+    recentDrifts.push(drift);
+    counters.driftsDetected += 1;
+    while (recentDrifts.length > retentionLimit) {
+      recentDrifts.shift();
+    }
+  };
+
+  const evaluateContinuityDrift = (sourceNodeId: string, envelope: EnvelopeV2): void => {
+    if (!envelope.task_id) {
+      return;
+    }
+    const metadata = getEnvelopeMetadata(envelope);
+    const digestHash = typeof metadata?.digestHash === 'string' ? metadata.digestHash : undefined;
+    const handoffHash = typeof metadata?.handoffHash === 'string' ? metadata.handoffHash : undefined;
+    if (!digestHash && !handoffHash) {
+      return;
+    }
+
+    const continuityKey = `${envelope.project_id}:${envelope.task_id}`;
+    const snapshots = continuityByTask.get(continuityKey) ?? new Map<string, ContinuitySnapshot>();
+    continuityByTask.set(continuityKey, snapshots);
+    const current: ContinuitySnapshot = {
+      digestHash,
+      handoffHash,
+      reportedAt: envelope.ts,
+    };
+
+    for (const [peerId, prior] of snapshots.entries()) {
+      if (peerId === sourceNodeId) {
+        continue;
+      }
+      const digestMismatch = digestHash && prior.digestHash && digestHash !== prior.digestHash;
+      const handoffMismatch = handoffHash && prior.handoffHash && handoffHash !== prior.handoffHash;
+      if (!digestMismatch && !handoffMismatch) {
+        continue;
+      }
+      recordDrift({
+        projectId: envelope.project_id,
+        taskId: envelope.task_id,
+        nodeId: sourceNodeId,
+        reportedDigestHash: digestHash,
+        expectedDigestHash: prior.digestHash,
+        reportedHandoffHash: handoffHash,
+        expectedHandoffHash: prior.handoffHash,
+        detail: `Continuity drift detected for ${envelope.task_id} between ${peerId} and ${sourceNodeId}.`,
+        detectedAt: nowIso(),
+      });
+      break;
+    }
+
+    snapshots.set(sourceNodeId, current);
+    while (snapshots.size > retentionLimit) {
+      const [oldestKey] = snapshots.keys();
+      if (!oldestKey) {
+        break;
+      }
+      snapshots.delete(oldestKey);
+    }
   };
 
   const busServer = createServer(async (request, response) => {
@@ -468,6 +642,21 @@ export const startFederationBus = (options: StartFederationBusOptions): Federati
 
       counters.envelopesReceived += 1;
       const event = rememberEvent(sourceNodeId, envelope);
+      mergeProjectMembership(sourceNodeId, [envelope.project_id]);
+      evaluateContinuityDrift(sourceNodeId, envelope);
+      if (envelope.verb === 'drift.detected') {
+        recordDrift({
+          projectId: envelope.project_id,
+          taskId: envelope.task_id ?? envelope.room_id,
+          nodeId: sourceNodeId,
+          reportedDigestHash: typeof envelope.body.reportedDigestHash === 'string' ? envelope.body.reportedDigestHash : undefined,
+          expectedDigestHash: typeof envelope.body.expectedDigestHash === 'string' ? envelope.body.expectedDigestHash : undefined,
+          reportedHandoffHash: typeof envelope.body.reportedHandoffHash === 'string' ? envelope.body.reportedHandoffHash : undefined,
+          expectedHandoffHash: typeof envelope.body.expectedHandoffHash === 'string' ? envelope.body.expectedHandoffHash : undefined,
+          detail: typeof envelope.body.detail === 'string' ? envelope.body.detail : `Federation drift detected for ${envelope.task_id ?? envelope.room_id}.`,
+          detectedAt: typeof envelope.body.detectedAt === 'string' ? envelope.body.detectedAt : nowIso(),
+        });
+      }
       tracer.audit('FEDERATION_MESSAGE_INBOUND', {
         sourceNodeId,
         envelopeId: envelope.id,
@@ -495,6 +684,7 @@ export const startFederationBus = (options: StartFederationBusOptions): Federati
           busUrl: body.busUrl,
           adminUrl: body.adminUrl,
           capabilities: body.capabilities,
+          projectIds: body.projectIds,
           ts: body.ts,
         },
         body.signedBy,
@@ -516,6 +706,7 @@ export const startFederationBus = (options: StartFederationBusOptions): Federati
         busUrl: body.busUrl,
         adminUrl: body.adminUrl,
         capabilities: body.capabilities,
+        projectIds: body.projectIds,
       });
       writeJson(response, 200, { accepted: true });
       return;
@@ -550,11 +741,59 @@ export const startFederationBus = (options: StartFederationBusOptions): Federati
         host: options.host,
         busPort: options.busPort,
         adminPort: options.adminPort,
+        latestSequence: sequence,
         peerCount: peers.size,
+        projectCount: projects.size,
         peers: [...peers.values()],
+        projects: [...projects.values()],
         recentEventCount: events.length,
+        recentDriftCount: recentDrifts.length,
+        recentDrifts,
         counters,
       } satisfies FederationBusStatus);
+      return;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/onboard') {
+      const body = await readJsonBody(request) as OnboardInput;
+      const projectIds = Array.from(new Set([
+        ...(body.projectIds ?? []),
+        ...(body.projectId ? [body.projectId] : []),
+      ]));
+      if (!verifyFederationRequest(
+        'onboard',
+        {
+          peerId: body.peerId,
+          busUrl: body.busUrl,
+          adminUrl: body.adminUrl,
+          capabilities: body.capabilities,
+          projectIds,
+          ts: body.ts,
+        },
+        body.signedBy,
+        body.nonce,
+        body.signature,
+        options.signing,
+      )) {
+        writeJson(response, 403, { accepted: false, error: 'invalid_signature' });
+        return;
+      }
+      if (rememberRequest('onboard', body.signedBy, body.nonce)) {
+        writeJson(response, 200, { accepted: true, peerId: body.peerId });
+        return;
+      }
+      counters.onboardingsReceived += 1;
+      updatePeer({
+        ...body,
+        projectIds,
+      });
+      tracer.audit('FEDERATION_ONBOARD_INBOUND', {
+        peerId: body.peerId,
+        busUrl: body.busUrl,
+        adminUrl: body.adminUrl,
+        projectIds,
+      });
+      writeJson(response, 200, { accepted: true, peerId: body.peerId });
       return;
     }
 
@@ -595,7 +834,8 @@ export const startFederationBus = (options: StartFederationBusOptions): Federati
         peerId: options.nodeId,
         busUrl: `http://127.0.0.1:${options.busPort}`,
         adminUrl: `http://127.0.0.1:${options.adminPort}`,
-        capabilities: ['envelope-v2', 'heartbeat', 'kick'],
+        capabilities: ['envelope-v2', 'heartbeat', 'kick', 'onboard', 'drift-detection'],
+        projectIds: localProjects,
       });
       if (peer) {
         peers.set(peer.peerId, {
@@ -615,7 +855,8 @@ export const startFederationBus = (options: StartFederationBusOptions): Federati
       peerId: options.nodeId,
       busUrl: `http://127.0.0.1:${options.busPort}`,
       adminUrl: `http://127.0.0.1:${options.adminPort}`,
-      capabilities: ['envelope-v2', 'heartbeat', 'kick'],
+      capabilities: ['envelope-v2', 'heartbeat', 'kick', 'onboard', 'drift-detection'],
+      projectIds: localProjects,
       ts: nowIso(),
     };
     for (const peer of peers.values()) {
@@ -637,9 +878,14 @@ export const startFederationBus = (options: StartFederationBusOptions): Federati
       host: options.host,
       busPort: options.busPort,
       adminPort: options.adminPort,
+      latestSequence: sequence,
       peerCount: peers.size,
+      projectCount: projects.size,
       peers: [...peers.values()],
+      projects: [...projects.values()],
       recentEventCount: events.length,
+      recentDriftCount: recentDrifts.length,
+      recentDrifts,
       counters,
     }),
     close: async () => {

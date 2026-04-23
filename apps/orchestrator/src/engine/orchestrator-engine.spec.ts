@@ -247,4 +247,65 @@ describe('OrchestratorEngine status handling', () => {
     assert.equal(recordedEvents[0]?.transportBody?.reportedHandoffHash, 'handoff-remote');
     assert.equal(recordedEvents[0]?.transportBody?.expectedHandoffHash, 'handoff-expected');
   });
+
+  it('records federated drift trace events relayed from the bus', async () => {
+    const recordedEvents: Array<{ eventType: string; detail?: string; transportBody?: Record<string, unknown> }> = [];
+    const persistenceService = {
+      recordExecutionEvent: (
+        eventType: string,
+        detail: string,
+        _metadata?: Record<string, unknown>,
+        transport?: { transportBody?: Record<string, unknown> },
+      ) => {
+        recordedEvents.push({ eventType, detail, transportBody: transport?.transportBody });
+      },
+      getLatestTaskStateDigest: () => undefined,
+      getLatestHandoffPacket: () => undefined,
+    } as unknown as OrchestratorPersistenceService;
+
+    const engine = new OrchestratorEngine({
+      config: TEST_CONFIG,
+      persistenceService,
+      scheduler: {} as TaskScheduler,
+      supervisor: {} as any,
+      gateway: {
+        send: () => undefined,
+        watchTaskChannel: () => undefined,
+        setMessageHandler: () => undefined,
+      } as any,
+      chatResponder: {} as any,
+      controlService: {} as any,
+      registry: new WorkerRegistry(),
+      runLifecycle: {} as any,
+      toolService: toolServiceStub,
+    });
+
+    const message = {
+      message_id: 'msg-trace-1',
+      project_id: TEST_CONFIG.projectId,
+      room_id: 'task-3',
+      task_id: 'task-3',
+      type: 'trace_event',
+      verb: 'drift.detected',
+      body: {
+        detail: 'Federation drift detected for task-3.',
+        reportedDigestHash: 'digest-remote',
+        expectedDigestHash: 'digest-local',
+      },
+      payload: {
+        detail: 'Federation drift detected for task-3.',
+      },
+      from: {
+        actor_type: 'agent',
+        actor_id: 'node-remote',
+        actor_name: 'node-remote',
+      },
+      timestamp: new Date().toISOString(),
+    } as unknown as MessageEnvelope;
+
+    await engine.handleMessage(message, 'task');
+    assert.equal(recordedEvents[0]?.eventType, 'agent_result');
+    assert.equal(recordedEvents[0]?.detail, 'Federation drift detected for task-3.');
+    assert.equal(recordedEvents[0]?.transportBody?.expectedDigestHash, 'digest-local');
+  });
 });

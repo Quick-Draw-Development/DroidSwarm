@@ -40,7 +40,7 @@ export interface FederationRemoteWorkerRecord {
   remoteEntry: string;
   remoteCommand: string;
   roles?: string[];
-  engines?: Array<'local-llama' | 'apple-intelligence' | 'codex-cloud' | 'codex-cli'>;
+  engines?: Array<'local-llama' | 'mlx' | 'apple-intelligence' | 'codex-cloud' | 'codex-cli'>;
   nodeId?: string;
 }
 

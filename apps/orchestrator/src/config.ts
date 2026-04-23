@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { defaultGitPolicy } from '@shared-git';
+import { detectAppleSilicon, detectMlxRuntime } from '@model-router';
 
 import { loadSpecCards } from './specs';
 import type { FederationRemoteWorkerTarget, OrchestratorConfig, TaskPolicy } from './types';
@@ -142,8 +143,11 @@ const envSchema = z.object({
   DROIDSWARM_MODEL_VERIFICATION: z.string().optional(),
   DROIDSWARM_MODEL_CODE: z.string().optional(),
   DROIDSWARM_MODEL_APPLE: z.string().optional(),
+  DROIDSWARM_MODEL_MLX: z.string().optional(),
   DROIDSWARM_MODEL_DEFAULT: z.string().optional(),
   DROIDSWARM_APPLE_INTELLIGENCE_ENABLED: z.string().optional(),
+  DROIDSWARM_MLX_ENABLED: z.string().optional(),
+  DROIDSWARM_MLX_BASE_URL: z.string().optional(),
   DROIDSWARM_ROUTING_PLANNER_ROLES: z.string().optional(),
   DROIDSWARM_ROUTING_APPLE_ROLES: z.string().optional(),
   DROIDSWARM_ROUTING_APPLE_HINTS: z.string().optional(),
@@ -211,12 +215,21 @@ export const loadConfig = (): OrchestratorConfig => {
   const verificationModel = env.DROIDSWARM_MODEL_VERIFICATION ?? 'gpt-4o-mini';
   const codeModel = env.DROIDSWARM_MODEL_CODE ?? 'claude-3.5-sonnet';
   const appleModel = env.DROIDSWARM_MODEL_APPLE ?? 'apple-intelligence/local';
+  const mlxModel = env.DROIDSWARM_MODEL_MLX ?? 'mlx/local';
   const defaultModel = env.DROIDSWARM_MODEL_DEFAULT ?? env.DROIDSWARM_CODEX_MODEL ?? 'o1-preview';
   const appleSdkAvailable = hasAppleIntelligenceSdk();
+  const prefersAppleHost = detectAppleSilicon();
   const appleIntelligenceConfigured = env.DROIDSWARM_APPLE_INTELLIGENCE_ENABLED == null
-    ? true
+    ? prefersAppleHost
     : parseBooleanFlag(env.DROIDSWARM_APPLE_INTELLIGENCE_ENABLED, true);
   const appleIntelligenceEnabled = appleIntelligenceConfigured && appleSdkAvailable;
+  const mlxEnabled = parseBooleanFlag(env.DROIDSWARM_MLX_ENABLED, prefersAppleHost);
+  const mlxBaseUrl = env.DROIDSWARM_MLX_BASE_URL;
+  const mlxAvailable = detectMlxRuntime({
+    enabled: mlxEnabled,
+    baseUrl: mlxBaseUrl,
+    model: mlxModel,
+  });
   const budgetMaxConsumed = toPositiveIntOrUndefined(env.DROIDSWARM_BUDGET_MAX_CONSUMED);
   const allowedTools = parseCommaList(env.DROIDSWARM_ALLOWED_TOOLS);
   const policyAllowedTools =
@@ -283,6 +296,7 @@ export const loadConfig = (): OrchestratorConfig => {
         engines: Array.isArray(record.engines)
           ? record.engines.filter((value): value is import('./types').WorkerEngine =>
             value === 'local-llama'
+            || value === 'mlx'
             || value === 'apple-intelligence'
             || value === 'codex-cloud'
             || value === 'codex-cli')
@@ -365,11 +379,19 @@ export const loadConfig = (): OrchestratorConfig => {
       verification: verificationModel,
       code: codeModel,
       apple: appleModel,
+      mlx: mlxModel,
       default: defaultModel,
     },
     appleIntelligence: {
       enabled: appleIntelligenceEnabled,
       sdkAvailable: appleSdkAvailable,
+      preferredByHost: prefersAppleHost,
+    },
+    mlx: {
+      enabled: mlxEnabled,
+      available: mlxAvailable,
+      baseUrl: mlxBaseUrl,
+      model: mlxModel,
     },
     routingPolicy: {
       plannerRoles: parseCommaList(env.DROIDSWARM_ROUTING_PLANNER_ROLES ?? 'plan,planner,research,review,orchestrator,checkpoint,compress'),

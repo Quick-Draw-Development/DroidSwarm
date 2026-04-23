@@ -21,6 +21,10 @@ export const startFromEnvironment = () => startFederationBus({
   busPort: toPositiveInt(process.env.DROIDSWARM_FEDERATION_BUS_PORT, 4947),
   adminPort: toPositiveInt(process.env.DROIDSWARM_FEDERATION_ADMIN_PORT, 4950),
   peerUrls: parseFederationPeers(process.env.DROIDSWARM_FEDERATION_PEERS).map((peer) => peer.busUrl),
+  projectIds: Array.from(new Set([
+    process.env.DROIDSWARM_PROJECT_ID,
+    ...(process.env.DROIDSWARM_ALLOWED_PROJECT_IDS?.split(',').map((entry) => entry.trim()).filter(Boolean) ?? []),
+  ].filter((entry): entry is string => typeof entry === 'string' && entry.length > 0))),
   debug: toBooleanFlag(process.env.DROIDSWARM_DEBUG, false),
   signing: process.env.DROIDSWARM_FEDERATION_SIGNING_KEY_ID
     ? {

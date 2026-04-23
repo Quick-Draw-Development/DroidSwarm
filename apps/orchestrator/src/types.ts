@@ -94,6 +94,7 @@ export interface OrchestratorConfig {
   modelRouting: ModelRoutingConfig;
   routingPolicy: RoutingPolicyConfig;
   appleIntelligence?: AppleIntelligenceConfig;
+  mlx?: MlxConfig;
   budgetMaxConsumed?: number;
   policyDefaults?: TaskPolicy;
   federationEnabled?: boolean;
@@ -123,12 +124,21 @@ export interface ModelRoutingConfig {
   verification: string;
   code: string;
   apple: string;
+  mlx?: string;
   default: string;
 }
 
 export interface AppleIntelligenceConfig {
   enabled: boolean;
   sdkAvailable: boolean;
+  preferredByHost?: boolean;
+}
+
+export interface MlxConfig {
+  enabled: boolean;
+  available: boolean;
+  baseUrl?: string;
+  model: string;
 }
 
 export interface RoutingPolicyConfig {

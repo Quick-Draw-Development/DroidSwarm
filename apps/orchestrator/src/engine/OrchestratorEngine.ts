@@ -228,6 +228,10 @@ export class OrchestratorEngine {
       this.deps.gateway.send(buildOperatorChatResponse(this.deps.config, content));
       return;
     }
+    if (message.type === 'trace_event' && (message.verb as string | undefined) === 'drift.detected') {
+      this.handleFederationDriftEvent(message);
+      return;
+    }
     if (message.type !== 'status_update') {
       return;
     }
@@ -421,6 +425,34 @@ export class OrchestratorEngine {
       response.result,
       response.error,
     ));
+  }
+
+  private handleFederationDriftEvent(message: MessageEnvelope): void {
+    const taskId = message.task_id ?? message.room_id;
+    const payload = typeof message.payload === 'object' && message.payload !== null
+      ? message.payload as Record<string, unknown>
+      : undefined;
+    const detail =
+      typeof payload?.detail === 'string'
+        ? payload.detail
+        : typeof message.body?.detail === 'string'
+          ? message.body.detail
+          : `Federation drift detected for ${taskId}.`;
+    this.log('federation.drift.received', {
+      taskId,
+      messageId: message.message_id,
+      actorId: message.from.actor_id,
+      actorName: message.from.actor_name,
+    });
+    this.deps.persistenceService.recordExecutionEvent('agent_result', detail, {
+      taskId,
+      source: 'federation-bus',
+      drift: message.body,
+    }, {
+      taskId,
+      normalizedVerb: 'drift.detected',
+      transportBody: message.body,
+    });
   }
 
   private lookupAttempt(taskId: string, actorId: string, actorName?: string): { attemptId: string; taskId: string; role: string; agentName: string } | undefined {

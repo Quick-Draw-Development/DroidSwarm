@@ -1,23 +1,36 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseSlackCommand, renderSlackCommandResponse } from './commands';
+import { parseSlackCommand, parseSlackIntent, renderSlackCommandResponse } from './commands';
 
 test('parses supported slash commands', () => {
-  assert.equal(parseSlackCommand('status').kind, 'status');
   assert.equal(parseSlackCommand('projects').kind, 'projects');
-  assert.equal(parseSlackCommand('agents').kind, 'agents');
-  assert.equal(parseSlackCommand('task start demo investigate flakes').kind, 'task-start');
-  assert.equal(parseSlackCommand('swarm pause swarm-123').kind, 'swarm-pause');
-  assert.equal(parseSlackCommand('swarm resume swarm-123').kind, 'swarm-resume');
+  assert.equal(parseSlackCommand('use demo').kind, 'project-use');
+  assert.equal(parseSlackCommand('task-1234abcd: please retry').kind, 'task-message');
+  assert.equal(parseSlackCommand('please check the planner state').kind, 'operator-message');
 });
 
 test('renders help for empty input', () => {
   const response = renderSlackCommandResponse(parseSlackCommand(''));
-  assert.match(response.text, /\/droid status/);
+  assert.match(response.text, /forwards a message to the orchestrator/i);
 });
 
-test('marks unknown commands as unsupported', () => {
-  const parsed = parseSlackCommand('launch everything');
-  assert.equal(parsed.kind, 'unsupported');
-  assert.match(renderSlackCommandResponse(parsed).text, /Unknown command/);
+test('parses natural language relay intents and project selection', () => {
+  const task = parseSlackIntent('task-1234abcd: investigate the dashboard build failure', {
+    preferAppleIntelligence: true,
+    appleRuntimeAvailable: true,
+  });
+  assert.equal(task.kind, 'task-message');
+  assert.equal(task.taskId, 'task-1234abcd');
+  assert.match(task.content ?? '', /dashboard build failure/i);
+  assert.equal(task.route.backend, 'apple-intelligence');
+
+  const useProject = parseSlackIntent('switch to project api');
+  assert.equal(useProject.kind, 'project-use');
+  assert.equal(useProject.projectHint, 'api');
+});
+
+test('defaults arbitrary messages to operator relay', () => {
+  const parsed = parseSlackIntent('launch everything');
+  assert.equal(parsed.kind, 'operator-message');
+  assert.match(renderSlackCommandResponse(parsed).text, /operator room/);
 });

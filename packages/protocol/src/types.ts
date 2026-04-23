@@ -17,6 +17,7 @@ export type EnvelopeVerb =
   | 'handoff.ready'
   | 'summary.emitted'
   | 'memory.pinned'
+  | 'drift.detected'
   | 'status.updated'
   | 'tool.request'
   | 'tool.response'

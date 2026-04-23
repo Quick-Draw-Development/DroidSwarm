@@ -16,6 +16,7 @@ import { buildAuthMessage, parseEnvelope } from './protocol';
 import type { HandoffPacket, MessageEnvelope, TaskRecord, TaskScope, TaskStateDigest, WorkerEngine, WorkerHeartbeat, WorkerResult } from './types';
 import { CompressionShape, StatusUpdatePayload, ToolResponsePayload, UsageShape } from '@protocol';
 import { LocalLlamaAdapter } from './adapters/worker/local-llama.adapter';
+import { MlxAdapter } from './adapters/worker/mlx.adapter';
 import { CodexCloudAdapter } from './adapters/worker/codex-cloud.adapter';
 import { CodexCliAdapter } from './adapters/worker/codex-cli.adapter';
 
@@ -103,6 +104,11 @@ const getAdapter = (config: ReturnType<typeof loadConfig>, engine: WorkerEngine,
   switch (engine) {
     case 'local-llama':
       return new LocalLlamaAdapter({ baseUrl: config.llamaBaseUrl, timeoutMs: config.llamaTimeoutMs });
+    case 'mlx':
+      return new MlxAdapter({
+        baseUrl: config.mlx?.baseUrl ?? config.llamaBaseUrl,
+        timeoutMs: config.llamaTimeoutMs,
+      });
     case 'apple-intelligence': {
       // Apple SDK wiring is optional; only resolve it when that engine is actually selected.
       // This keeps non-Apple local workers runnable on hosts without the Apple package installed.
@@ -111,6 +117,8 @@ const getAdapter = (config: ReturnType<typeof loadConfig>, engine: WorkerEngine,
       return new AppleIntelligenceWorkerAdapter({
         model: config.modelRouting.apple,
         sdkEnabled: config.appleIntelligence?.enabled,
+        preferredByHost: config.appleIntelligence?.preferredByHost,
+        availableTools: config.allowedTools,
       });
     }
     case 'codex-cloud':
@@ -189,6 +197,8 @@ export const runWorker = async (): Promise<void> => {
   const modelOverride = options.model
     ?? (engine === 'local-llama'
       ? config.llamaModel
+      : engine === 'mlx'
+        ? (config.modelRouting.mlx ?? 'mlx/local')
       : engine === 'apple-intelligence'
         ? config.modelRouting.apple
         : engine === 'codex-cloud'

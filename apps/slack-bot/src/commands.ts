@@ -1,17 +1,29 @@
+import { chooseBackendDecision, type ModelRouteDecision } from '@model-router';
+
 export type SlackCommandKind =
   | 'help'
-  | 'status'
   | 'projects'
-  | 'agents'
-  | 'task-start'
-  | 'swarm-pause'
-  | 'swarm-resume'
-  | 'unsupported';
+  | 'project-use'
+  | 'task-message'
+  | 'operator-message';
+
+export interface SlackParseContext {
+  preferAppleIntelligence?: boolean;
+  appleRuntimeAvailable?: boolean;
+  mlxAvailable?: boolean;
+  platform?: string;
+  arch?: string;
+}
 
 export interface ParsedSlackCommand {
   kind: SlackCommandKind;
   rawText: string;
   args: string[];
+  projectHint?: string;
+  taskId?: string;
+  content?: string;
+  source: 'slash' | 'natural-language';
+  route: ModelRouteDecision;
 }
 
 export interface SlackCommandResponse {
@@ -24,37 +36,139 @@ const tokenize = (input: string): string[] =>
     .split(/\s+/)
     .filter(Boolean);
 
-export const parseSlackCommand = (text: string): ParsedSlackCommand => {
-  const args = tokenize(text);
-  if (args.length === 0 || args[0] === 'help') {
-    return { kind: 'help', rawText: text, args: [] };
-  }
+const buildRouteDecision = (text: string, context?: SlackParseContext): ModelRouteDecision =>
+  chooseBackendDecision({
+    summary: text,
+    taskType: 'slack-relay',
+    stage: 'intent-parse',
+    preferAppleIntelligence: context?.preferAppleIntelligence,
+    appleRuntimeAvailable: context?.appleRuntimeAvailable,
+    mlxAvailable: context?.mlxAvailable,
+    platform: context?.platform,
+    arch: context?.arch,
+  });
 
-  if (args[0] === 'status') {
-    return { kind: 'status', rawText: text, args: args.slice(1) };
+const buildCommand = (
+  rawText: string,
+  route: ModelRouteDecision,
+  input: Omit<ParsedSlackCommand, 'rawText' | 'route'>,
+): ParsedSlackCommand => ({
+  rawText,
+  route,
+  ...input,
+});
+
+const parseUseCommand = (text: string, route: ModelRouteDecision, args: string[], source: ParsedSlackCommand['source']): ParsedSlackCommand | undefined => {
+  if ((args[0] === 'use' || args[0] === 'project') && args[1]) {
+    return buildCommand(text, route, {
+      kind: 'project-use',
+      args: args.slice(1),
+      projectHint: args[1],
+      source,
+    });
+  }
+  return undefined;
+};
+
+const parseTaskRelay = (text: string, route: ModelRouteDecision, source: ParsedSlackCommand['source']): ParsedSlackCommand | undefined => {
+  const match = text.trim().match(/^(?:task\s+)?([a-zA-Z0-9-]{8,})\s*[:\-]\s+(.+)$/);
+  if (!match) {
+    return undefined;
+  }
+  return buildCommand(text, route, {
+    kind: 'task-message',
+    args: [match[1], match[2]],
+    taskId: match[1],
+    content: match[2],
+    source,
+  });
+};
+
+const parseSlashCommand = (text: string, route: ModelRouteDecision): ParsedSlackCommand => {
+  const trimmed = text.trim();
+  const args = tokenize(trimmed);
+  if (args.length === 0 || args[0] === 'help') {
+    return buildCommand(text, route, { kind: 'help', args: [], source: 'slash' });
   }
 
   if (args[0] === 'projects') {
-    return { kind: 'projects', rawText: text, args: args.slice(1) };
+    return buildCommand(text, route, { kind: 'projects', args: [], source: 'slash' });
   }
 
-  if (args[0] === 'agents') {
-    return { kind: 'agents', rawText: text, args: args.slice(1) };
+  const useCommand = parseUseCommand(trimmed, route, args, 'slash');
+  if (useCommand) {
+    return useCommand;
   }
 
-  if (args[0] === 'task' && args[1] === 'start') {
-    return { kind: 'task-start', rawText: text, args: args.slice(2) };
+  const taskRelay = parseTaskRelay(trimmed, route, 'slash');
+  if (taskRelay) {
+    return taskRelay;
   }
 
-  if (args[0] === 'swarm' && args[1] === 'pause') {
-    return { kind: 'swarm-pause', rawText: text, args: args.slice(2) };
+  return buildCommand(text, route, {
+    kind: 'operator-message',
+    args,
+    content: trimmed,
+    source: 'slash',
+  });
+};
+
+const parseNaturalLanguage = (text: string, route: ModelRouteDecision): ParsedSlackCommand => {
+  const trimmed = text.trim();
+  const lower = trimmed.toLowerCase();
+
+  if (lower.length === 0 || lower === 'help' || lower.includes('what can you do')) {
+    return buildCommand(text, route, { kind: 'help', args: [], source: 'natural-language' });
   }
 
-  if (args[0] === 'swarm' && args[1] === 'resume') {
-    return { kind: 'swarm-resume', rawText: text, args: args.slice(2) };
+  if (/^(show|list)?\s*projects\b/.test(lower)) {
+    return buildCommand(text, route, { kind: 'projects', args: [], source: 'natural-language' });
   }
 
-  return { kind: 'unsupported', rawText: text, args };
+  const useMatch = lower.match(/(?:use|switch to|select)\s+(?:project\s+)?([a-z0-9._/-]+)/i);
+  if (useMatch?.[1]) {
+    return buildCommand(text, route, {
+      kind: 'project-use',
+      args: [useMatch[1]],
+      projectHint: useMatch[1],
+      source: 'natural-language',
+    });
+  }
+
+  const taskRelay = parseTaskRelay(trimmed, route, 'natural-language');
+  if (taskRelay) {
+    return taskRelay;
+  }
+
+  return buildCommand(text, route, {
+    kind: 'operator-message',
+    args: tokenize(trimmed),
+    content: trimmed,
+    source: 'natural-language',
+  });
+};
+
+export const parseSlackCommand = (text: string, context?: SlackParseContext): ParsedSlackCommand => {
+  const route = buildRouteDecision(text, context);
+  const trimmed = text.trim();
+  return parseSlashCommand(trimmed.startsWith('/') ? trimmed.slice(1) : trimmed, route);
+};
+
+export const parseSlackIntent = (text: string, context?: SlackParseContext): ParsedSlackCommand => {
+  const trimmed = text.trim();
+  const route = buildRouteDecision(trimmed, context);
+  const args = tokenize(trimmed);
+  const looksCommandLike = args.length > 0 && [
+    'help',
+    'projects',
+    'use',
+    'project',
+  ].includes(args[0]?.toLowerCase() ?? '');
+
+  if (trimmed.startsWith('/')) {
+    return parseSlashCommand(trimmed.slice(1), route);
+  }
+  return looksCommandLike ? parseSlashCommand(trimmed, route) : parseNaturalLanguage(trimmed, route);
 };
 
 export const renderSlackCommandResponse = (command: ParsedSlackCommand): SlackCommandResponse => {
@@ -62,34 +176,29 @@ export const renderSlackCommandResponse = (command: ParsedSlackCommand): SlackCo
     case 'help':
       return {
         text: [
-          '*DroidSwarm Slack bot scaffold*',
-          '`/droid status`',
-          '`/droid projects`',
-          '`/droid agents`',
-          '`/droid task start <project> <description>`',
-          '`/droid swarm pause <swarm-id>`',
-          '`/droid swarm resume <swarm-id>`',
-          'Execution hooks are intentionally deferred to orchestrator/shared-projects work.',
+          '*DroidSwarm Slack relay*',
+          '`/droid use <project>` selects the active project.',
+          '`/droid projects` lists registered projects.',
+          '`/droid <message>` forwards a message to the orchestrator operator room.',
+          '`/droid <task-id>: <message>` forwards a message to a task room.',
+          'Direct messages and mentions use the same parsing rules.',
         ].join('\n'),
       };
-    case 'status':
     case 'projects':
-    case 'agents':
       return {
-        text: `\`${command.kind}\` is scaffolded, but live multi-project state wiring is not part of this slice yet.`,
+        text: 'Listing registered projects.',
       };
-    case 'task-start':
+    case 'project-use':
       return {
-        text: 'Task creation command parsed successfully. Execution routing will be connected in a later slice.',
+        text: `Switching Slack relay context to \`${command.projectHint ?? 'unknown'}\`.`,
       };
-    case 'swarm-pause':
-    case 'swarm-resume':
+    case 'task-message':
       return {
-        text: `Swarm control command \`${command.kind}\` parsed successfully. Runtime execution is deferred to a later slice.`,
+        text: `Forwarding to task \`${command.taskId ?? 'unknown'}\`.`,
       };
-    default:
+    case 'operator-message':
       return {
-        text: 'Unknown command. Use `/droid help` to view the supported scaffolded commands.',
+        text: 'Forwarding to the orchestrator operator room.',
       };
   }
 };

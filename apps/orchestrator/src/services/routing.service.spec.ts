@@ -10,11 +10,19 @@ const service = new RoutingService({
     verification: 'llama.cpp/verifier',
     code: 'codex-cli/coder',
     apple: 'apple-intelligence/local',
+    mlx: 'mlx/local',
     default: 'llama.cpp/default',
   },
   appleIntelligence: {
     enabled: true,
     sdkAvailable: true,
+    preferredByHost: true,
+  },
+  mlx: {
+    enabled: true,
+    available: true,
+    baseUrl: 'http://127.0.0.1:8080',
+    model: 'mlx/local',
   },
   routingPolicy: {
     plannerRoles: ['plan', 'planner', 'research', 'review', 'orchestrator', 'checkpoint', 'compress'],
@@ -61,11 +69,19 @@ describe('RoutingService', () => {
         verification: 'llama.cpp/verifier',
         code: 'codex-cli/coder',
         apple: 'apple-intelligence/local',
+        mlx: 'mlx/local',
         default: 'llama.cpp/default',
       },
       appleIntelligence: {
         enabled: false,
         sdkAvailable: false,
+        preferredByHost: true,
+      },
+      mlx: {
+        enabled: true,
+        available: true,
+        baseUrl: 'http://127.0.0.1:8080',
+        model: 'mlx/local',
       },
       routingPolicy: {
         plannerRoles: ['plan', 'planner', 'research', 'review', 'orchestrator', 'checkpoint', 'compress'],
@@ -145,10 +161,57 @@ describe('RoutingService', () => {
       updatedAt: new Date().toISOString(),
     }, 'tester');
 
-    assert.equal(arbiterDecision.engine, 'local-llama');
+    assert.equal(arbiterDecision.engine, 'apple-intelligence');
     assert.equal(arbiterDecision.modelTier, 'local-cheap');
-    assert.equal(verifierDecision.engine, 'local-llama');
+    assert.equal(verifierDecision.engine, 'apple-intelligence');
     assert.equal(verifierDecision.modelTier, 'local-cheap');
+  });
+
+  it('falls back to MLX for local planner work when Apple runtime is unavailable on Apple Silicon', () => {
+    const unavailableService = new RoutingService({
+      modelRouting: {
+        planning: 'llama.cpp/planner',
+        verification: 'llama.cpp/verifier',
+        code: 'codex-cli/coder',
+        apple: 'apple-intelligence/local',
+        mlx: 'mlx/local',
+        default: 'llama.cpp/default',
+      },
+      appleIntelligence: {
+        enabled: false,
+        sdkAvailable: false,
+        preferredByHost: true,
+      },
+      mlx: {
+        enabled: true,
+        available: true,
+        baseUrl: 'http://127.0.0.1:8080',
+        model: 'mlx/local',
+      },
+      routingPolicy: {
+        plannerRoles: ['plan', 'planner', 'research', 'review', 'orchestrator', 'checkpoint', 'compress'],
+        appleRoles: ['apple', 'ios', 'macos', 'swift', 'swiftui', 'xcode', 'visionos'],
+        appleTaskHints: ['apple', 'ios', 'ipad', 'iphone', 'macos', 'osx', 'swift', 'swiftui', 'objective-c', 'uikit', 'appkit', 'xcode', 'testflight', 'visionos', 'watchos', 'tvos'],
+        codeHints: ['code', 'coder', 'dev', 'implementation', 'debug', 'refactor'],
+        cloudEscalationHints: ['refactor', 'debug', 'multi-file', 'migration', 'large-scale'],
+      },
+    });
+
+    const decision = unavailableService.decide({
+      taskId: 'task-plan-fallback',
+      runId: 'run-1',
+      name: 'Plan work',
+      status: 'queued',
+      priority: 'medium',
+      metadata: {
+        task_type: 'plan',
+        description: 'Need a planning pass for the feature.',
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }, 'planner');
+    assert.equal(decision.engine, 'mlx');
+    assert.equal(decision.model, 'mlx/local');
   });
 
   it('keeps planning and compression roles local when llama capacity is saturated', () => {
@@ -168,7 +231,7 @@ describe('RoutingService', () => {
       updatedAt: new Date().toISOString(),
     }, 'checkpoint-compressor');
 
-    assert.equal(decision.engine, 'local-llama');
+    assert.equal(decision.engine, 'apple-intelligence');
     assert.equal(decision.routeKind, 'planner-local-saturated');
     assert.equal(decision.cloudEscalated, false);
   });

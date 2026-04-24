@@ -36,6 +36,40 @@ export interface CurrentProjectSelection {
   selectedAt: string;
 }
 
+export interface FederatedNodeRecord {
+  nodeId: string;
+  swarmRole: 'master' | 'slave';
+  host?: string;
+  busUrl?: string;
+  adminUrl?: string;
+  projectId?: string;
+  status: 'active' | 'kicked' | 'rejected';
+  version?: string;
+  publicKey?: string;
+  rulesHash?: string;
+  hardwareFingerprintHash?: string;
+  capabilities: string[];
+  lastSeenAt: string;
+  createdAt: string;
+  updatedAt: string;
+  kickedAt?: string;
+}
+
+export interface RegisterFederatedNodeInput {
+  nodeId: string;
+  swarmRole: FederatedNodeRecord['swarmRole'];
+  host?: string;
+  busUrl?: string;
+  adminUrl?: string;
+  projectId?: string;
+  status?: FederatedNodeRecord['status'];
+  version?: string;
+  publicKey?: string;
+  rulesHash?: string;
+  hardwareFingerprintHash?: string;
+  capabilities?: string[];
+}
+
 export const resolveDroidSwarmHome = (): string =>
   process.env.DROIDSWARM_HOME ?? path.resolve(process.env.HOME ?? process.cwd(), '.droidswarm');
 
@@ -78,6 +112,28 @@ export const openProjectRegistryDatabase = (dbPath = resolveProjectRegistryDbPat
 
     CREATE INDEX IF NOT EXISTS idx_registry_projects_name
       ON projects(name);
+
+    CREATE TABLE IF NOT EXISTS federated_nodes (
+      node_id TEXT PRIMARY KEY,
+      swarm_role TEXT NOT NULL,
+      host TEXT,
+      bus_url TEXT,
+      admin_url TEXT,
+      project_id TEXT,
+      status TEXT NOT NULL,
+      version TEXT,
+      public_key TEXT,
+      rules_hash TEXT,
+      hardware_fingerprint_hash TEXT,
+      capabilities_json TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      kicked_at TEXT
+    ) STRICT;
+
+    CREATE INDEX IF NOT EXISTS idx_registry_federated_nodes_project
+      ON federated_nodes(project_id, updated_at DESC);
   `);
   return database;
 };
@@ -186,6 +242,143 @@ export const removeRegisteredProject = (projectId: string, dbPath?: string): boo
   try {
     const result = database.prepare(`DELETE FROM projects WHERE project_id = ?`).run(projectId);
     return result.changes > 0;
+  } finally {
+    database.close();
+  }
+};
+
+const normalizeNodeRecord = (row: Record<string, unknown>): FederatedNodeRecord => ({
+  nodeId: String(row.node_id),
+  swarmRole: row.swarm_role === 'slave' ? 'slave' : 'master',
+  host: typeof row.host === 'string' ? row.host : undefined,
+  busUrl: typeof row.bus_url === 'string' ? row.bus_url : undefined,
+  adminUrl: typeof row.admin_url === 'string' ? row.admin_url : undefined,
+  projectId: typeof row.project_id === 'string' ? row.project_id : undefined,
+  status: row.status === 'kicked' ? 'kicked' : row.status === 'rejected' ? 'rejected' : 'active',
+  version: typeof row.version === 'string' ? row.version : undefined,
+  publicKey: typeof row.public_key === 'string' ? row.public_key : undefined,
+  rulesHash: typeof row.rules_hash === 'string' ? row.rules_hash : undefined,
+  hardwareFingerprintHash:
+    typeof row.hardware_fingerprint_hash === 'string' ? row.hardware_fingerprint_hash : undefined,
+  capabilities: (() => {
+    try {
+      const parsed = JSON.parse(String(row.capabilities_json ?? '[]')) as unknown;
+      return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === 'string') : [];
+    } catch {
+      return [];
+    }
+  })(),
+  lastSeenAt: String(row.last_seen_at),
+  createdAt: String(row.created_at),
+  updatedAt: String(row.updated_at),
+  kickedAt: typeof row.kicked_at === 'string' ? row.kicked_at : undefined,
+});
+
+export const registerFederatedNode = (input: RegisterFederatedNodeInput, dbPath?: string): FederatedNodeRecord => {
+  const database = openProjectRegistryDatabase(dbPath);
+  try {
+    const now = new Date().toISOString();
+    const record = {
+      nodeId: input.nodeId,
+      swarmRole: input.swarmRole,
+      host: input.host ?? null,
+      busUrl: input.busUrl ?? null,
+      adminUrl: input.adminUrl ?? null,
+      projectId: input.projectId ?? null,
+      status: input.status ?? 'active',
+      version: input.version ?? null,
+      publicKey: input.publicKey ?? null,
+      rulesHash: input.rulesHash ?? null,
+      hardwareFingerprintHash: input.hardwareFingerprintHash ?? null,
+      capabilitiesJson: JSON.stringify(input.capabilities ?? []),
+      lastSeenAt: now,
+      createdAt: now,
+      updatedAt: now,
+      kickedAt: input.status === 'kicked' ? now : null,
+    };
+
+    database.prepare(`
+      INSERT INTO federated_nodes (
+        node_id, swarm_role, host, bus_url, admin_url, project_id, status, version, public_key,
+        rules_hash, hardware_fingerprint_hash, capabilities_json, last_seen_at, created_at, updated_at, kicked_at
+      ) VALUES (
+        @nodeId, @swarmRole, @host, @busUrl, @adminUrl, @projectId, @status, @version, @publicKey,
+        @rulesHash, @hardwareFingerprintHash, @capabilitiesJson, @lastSeenAt, @createdAt, @updatedAt, @kickedAt
+      )
+      ON CONFLICT(node_id) DO UPDATE SET
+        swarm_role = excluded.swarm_role,
+        host = excluded.host,
+        bus_url = excluded.bus_url,
+        admin_url = excluded.admin_url,
+        project_id = excluded.project_id,
+        status = excluded.status,
+        version = excluded.version,
+        public_key = excluded.public_key,
+        rules_hash = excluded.rules_hash,
+        hardware_fingerprint_hash = excluded.hardware_fingerprint_hash,
+        capabilities_json = excluded.capabilities_json,
+        last_seen_at = excluded.last_seen_at,
+        updated_at = excluded.updated_at,
+        kicked_at = excluded.kicked_at
+    `).run(record);
+
+    const row = database.prepare(`SELECT * FROM federated_nodes WHERE node_id = ? LIMIT 1`).get(input.nodeId) as Record<string, unknown>;
+    return normalizeNodeRecord(row);
+  } finally {
+    database.close();
+  }
+};
+
+export const listFederatedNodes = (input?: { projectId?: string; status?: FederatedNodeRecord['status'] }, dbPath?: string): FederatedNodeRecord[] => {
+  const database = openProjectRegistryDatabase(dbPath);
+  try {
+    const clauses: string[] = [];
+    const values: unknown[] = [];
+    if (input?.projectId) {
+      clauses.push(`project_id = ?`);
+      values.push(input.projectId);
+    }
+    if (input?.status) {
+      clauses.push(`status = ?`);
+      values.push(input.status);
+    }
+
+    const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    return (database.prepare(`
+      SELECT *
+      FROM federated_nodes
+      ${whereClause}
+      ORDER BY updated_at DESC, node_id ASC
+    `).all(...values) as Record<string, unknown>[])
+      .map(normalizeNodeRecord);
+  } finally {
+    database.close();
+  }
+};
+
+export const getFederatedNode = (nodeId: string, dbPath?: string): FederatedNodeRecord | undefined => {
+  const database = openProjectRegistryDatabase(dbPath);
+  try {
+    const row = database.prepare(`SELECT * FROM federated_nodes WHERE node_id = ? LIMIT 1`).get(nodeId) as Record<string, unknown> | undefined;
+    return row ? normalizeNodeRecord(row) : undefined;
+  } finally {
+    database.close();
+  }
+};
+
+export const markFederatedNodeKicked = (nodeId: string, dbPath?: string): FederatedNodeRecord | undefined => {
+  const database = openProjectRegistryDatabase(dbPath);
+  try {
+    const now = new Date().toISOString();
+    database.prepare(`
+      UPDATE federated_nodes
+      SET status = 'kicked',
+          kicked_at = ?,
+          updated_at = ?
+      WHERE node_id = ?
+    `).run(now, now, nodeId);
+    const row = database.prepare(`SELECT * FROM federated_nodes WHERE node_id = ? LIMIT 1`).get(nodeId) as Record<string, unknown> | undefined;
+    return row ? normalizeNodeRecord(row) : undefined;
   } finally {
     database.close();
   }

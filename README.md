@@ -157,3 +157,26 @@ Optional provider/runtime env:
 - `DROIDSWARM_ENABLE_FEDERATION`, `DROIDSWARM_FEDERATION_PEERS`, `DROIDSWARM_FEDERATION_BUS_PORT`, `DROIDSWARM_FEDERATION_ADMIN_PORT`
 - `DROIDSWARM_ENABLE_FEDERATION_ADB`, `DROIDSWARM_FEDERATION_ADB_PORT`, `DROIDSWARM_FEDERATION_ADB_BIN`
 - `DROIDSWARM_FEDERATION_REMOTE_WORKERS_FILE`, `DROIDSWARM_FEDERATION_SIGNING_KEY_ID`, `DROIDSWARM_FEDERATION_SIGNING_PRIVATE_KEY`
+
+## Slave Swarm Onboarding
+
+Provision a second machine as a federated slave swarm with:
+
+```bash
+./scripts/install-droidswarm.sh --connect-to <main-ip> --port 4950
+```
+
+That installation persists slave defaults into `~/.droidswarm/services.env`, including the slave role and the main swarm federation admin target. When you start the swarm on that machine:
+
+```bash
+DroidSwarm swarm --project-root "$PWD" --slave-mode --connect-to <main-ip>
+```
+
+the daemon starts the slave-safe runtime profile, runs the local federation bus, suppresses the dashboard and orchestrator, and sends a signed slave roll-call to the main swarm automatically.
+
+On the main swarm, inspect or remove federated nodes with:
+
+```bash
+DroidSwarm nodes list
+DroidSwarm nodes kick --node-id <node-id>
+```

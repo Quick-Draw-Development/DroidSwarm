@@ -28,6 +28,16 @@ runtime_restart_retries="${DROIDSWARM_RUNTIME_RESTART_RETRIES:-2}"
 retry_delay_seconds="${DROIDSWARM_RETRY_DELAY_SECONDS:-2}"
 component_grace_seconds="${DROIDSWARM_COMPONENT_GRACE_SECONDS:-2}"
 slack_bot_active="0"
+swarm_role="${DROIDSWARM_SWARM_ROLE:-master}"
+dashboard_enabled="1"
+orchestrator_enabled="1"
+slack_bot_enabled="${DROIDSWARM_ENABLE_SLACK_BOT:-0}"
+
+if [[ "$swarm_role" == "slave" ]]; then
+  dashboard_enabled="0"
+  orchestrator_enabled="0"
+  slack_bot_enabled="0"
+fi
 
 mkdir -p "$state_dir"
 
@@ -693,6 +703,9 @@ run_federation_bus() {
   export DROIDSWARM_FEDERATION_SIGNING_PUBLIC_KEY="${DROIDSWARM_FEDERATION_SIGNING_PUBLIC_KEY:-}"
   export DROIDSWARM_FEDERATION_TRUSTED_PUBLIC_KEYS="${DROIDSWARM_FEDERATION_TRUSTED_PUBLIC_KEYS:-}"
   export DROIDSWARM_FEDERATION_ENFORCE_SIGNATURES="${DROIDSWARM_FEDERATION_ENFORCE_SIGNATURES:-0}"
+  export DROIDSWARM_SWARM_ROLE="$swarm_role"
+  export DROIDSWARM_FEDERATION_CONNECT_TO="${DROIDSWARM_FEDERATION_CONNECT_TO:-}"
+  export DROIDSWARM_FEDERATION_MASTER_ADMIN_PORT="${DROIDSWARM_FEDERATION_MASTER_ADMIN_PORT:-4950}"
   exec "$DROIDSWARM_NODE_BIN" "$DROIDSWARM_FEDERATION_BUS_ENTRY"
 }
 
@@ -804,14 +817,22 @@ trap shutdown TERM INT
 for required_file in \
   "$state_dir/swarm.env" \
   "$DROIDSWARM_NODE_BIN" \
-  "$DROIDSWARM_SOCKET_SERVER_ENTRY" \
-  "$DROIDSWARM_ORCHESTRATOR_ENTRY" \
-  "$DROIDSWARM_DASHBOARD_SERVER_ENTRY"; do
+  "$DROIDSWARM_SOCKET_SERVER_ENTRY"; do
   if [[ ! -e "$required_file" ]]; then
     err "Missing daemon dependency: $required_file"
     exit 1
   fi
 done
+
+if [[ "$orchestrator_enabled" == "1" && ! -e "$DROIDSWARM_ORCHESTRATOR_ENTRY" ]]; then
+  err "Missing daemon dependency: $DROIDSWARM_ORCHESTRATOR_ENTRY"
+  exit 1
+fi
+
+if [[ "$dashboard_enabled" == "1" && ! -e "$DROIDSWARM_DASHBOARD_SERVER_ENTRY" ]]; then
+  err "Missing daemon dependency: $DROIDSWARM_DASHBOARD_SERVER_ENTRY"
+  exit 1
+fi
 
 if [[ "${DROIDSWARM_ENABLE_FEDERATION:-0}" == "1" ]]; then
   for required_file in "$DROIDSWARM_FEDERATION_BUS_ENTRY"; do
@@ -906,10 +927,18 @@ if [[ "${DROIDSWARM_ENABLE_FEDERATION_ADB:-0}" == "1" ]]; then
 fi
 start_component "socket-server" "$DROIDSWARM_WS_PORT" run_socket_server
 sleep 1
-start_component "dashboard" "$DROIDSWARM_DASHBOARD_PORT" run_dashboard
+if [[ "$dashboard_enabled" == "1" ]]; then
+  start_component "dashboard" "$DROIDSWARM_DASHBOARD_PORT" run_dashboard
+else
+  mark_component_status "dashboard" "disabled"
+fi
 sleep 1
-start_component "orchestrator" "-" run_orchestrator
-if [[ "${DROIDSWARM_ENABLE_SLACK_BOT:-0}" == "1" ]]; then
+if [[ "$orchestrator_enabled" == "1" ]]; then
+  start_component "orchestrator" "-" run_orchestrator
+else
+  mark_component_status "orchestrator" "disabled"
+fi
+if [[ "$slack_bot_enabled" == "1" ]]; then
   if slack_bot_has_tokens; then
     start_component "slack-bot" "-" run_slack_bot
     slack_bot_active="1"
@@ -928,6 +957,12 @@ while true; do
 
   for component_name in socket-server dashboard orchestrator slack-bot; do
     if [[ "$component_name" == "slack-bot" && "$slack_bot_active" != "1" ]]; then
+      continue
+    fi
+    if [[ "$component_name" == "dashboard" && "$dashboard_enabled" != "1" ]]; then
+      continue
+    fi
+    if [[ "$component_name" == "orchestrator" && "$orchestrator_enabled" != "1" ]]; then
       continue
     fi
     component_pid="$(<"$(component_pid_file "$component_name" "$state_dir")")"

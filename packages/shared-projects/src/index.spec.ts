@@ -7,10 +7,14 @@ import { tmpdir } from 'node:os';
 
 import {
   detectProjectMetadata,
+  getFederatedNode,
   getCurrentProject,
+  listFederatedNodes,
   listRegisteredProjects,
+  markFederatedNodeKicked,
   migrateLegacyProject,
   onboardProject,
+  registerFederatedNode,
   resolveCurrentProjectFile,
   resolveProjectLookup,
   setCurrentProject,
@@ -68,5 +72,28 @@ describe('shared-projects registry', () => {
     assert.equal(migrated.projectId, 'demo-app');
     assert.equal(migrated.dbPath, path.join(repo, '.droidswarm', 'droidswarm.db'));
     assert.equal(listRegisteredProjects()[0]?.projectId, 'demo-app');
+  });
+
+  it('registers and kicks federated nodes', () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'droidswarm-project-nodes-'));
+    tempDirs.push(home);
+    process.env.DROIDSWARM_HOME = home;
+
+    registerFederatedNode({
+      nodeId: 'slave-a',
+      swarmRole: 'slave',
+      host: '10.0.0.22',
+      busUrl: 'http://10.0.0.22:4947',
+      adminUrl: 'http://10.0.0.22:4950',
+      projectId: 'alpha',
+      capabilities: ['envelope-v2', 'audit-log'],
+    });
+
+    assert.equal(listFederatedNodes().length, 1);
+    assert.equal(getFederatedNode('slave-a')?.status, 'active');
+
+    const kicked = markFederatedNodeKicked('slave-a');
+    assert.equal(kicked?.status, 'kicked');
+    assert.equal(listFederatedNodes({ status: 'kicked' }).length, 1);
   });
 });

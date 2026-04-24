@@ -2,10 +2,14 @@ import * as path from 'node:path';
 
 import {
   detectProjectMetadata,
+  getFederatedNode,
   getCurrentProject,
   listRegisteredProjects,
+  listFederatedNodes,
+  markFederatedNodeKicked,
   migrateLegacyProject,
   onboardProject,
+  registerFederatedNode,
   removeRegisteredProject,
   resolveProjectLookup,
   setCurrentProject,
@@ -90,6 +94,57 @@ switch (command) {
       name: readValue('--project-name'),
       dbPath: readValue('--db-path'),
     }));
+    break;
+  }
+  case 'nodes-register':
+    output(registerFederatedNode({
+      nodeId: readValue('--node-id') ?? 'unknown-node',
+      swarmRole: readValue('--swarm-role') === 'slave' ? 'slave' : 'master',
+      host: readValue('--host'),
+      busUrl: readValue('--bus-url'),
+      adminUrl: readValue('--admin-url'),
+      projectId: readValue('--project-id'),
+      status: readValue('--status') === 'kicked'
+        ? 'kicked'
+        : readValue('--status') === 'rejected'
+          ? 'rejected'
+          : 'active',
+      version: readValue('--version'),
+      publicKey: readValue('--public-key'),
+      rulesHash: readValue('--rules-hash'),
+      hardwareFingerprintHash: readValue('--hardware-fingerprint-hash'),
+      capabilities: (readValue('--capabilities') ?? '')
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean),
+    }));
+    break;
+  case 'nodes-list':
+    output(listFederatedNodes({
+      projectId: readValue('--project-id'),
+      status: readValue('--status') === 'kicked'
+        ? 'kicked'
+        : readValue('--status') === 'rejected'
+          ? 'rejected'
+          : readValue('--status') === 'active'
+            ? 'active'
+            : undefined,
+    }));
+    break;
+  case 'nodes-status': {
+    const nodeId = readValue('--node-id');
+    if (!nodeId) {
+      throw new Error('Missing --node-id');
+    }
+    output(getFederatedNode(nodeId) ?? null);
+    break;
+  }
+  case 'nodes-kick': {
+    const nodeId = readValue('--node-id');
+    if (!nodeId) {
+      throw new Error('Missing --node-id');
+    }
+    output(markFederatedNodeKicked(nodeId) ?? null);
     break;
   }
   default:

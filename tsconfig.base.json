@@ -63,6 +63,9 @@
     "@shared-config": [
       "packages/shared-config/src/index.ts"
     ],
+    "@shared-droidspeak": [
+      "packages/shared-droidspeak/src/index.ts"
+    ],
     "@shared-persistence": [
       "packages/shared-persistence/src/index.ts"
     ],

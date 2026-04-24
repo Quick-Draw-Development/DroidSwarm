@@ -99,3 +99,36 @@ Ensure Mac-friendly (Apple Silicon slaves fully supported) and local-first.
 After all phases, update documentation with clear “How to onboard a slave swarm” section and example command.
 
 This plan turns DroidSwarm into a true federated system where slave swarms are first-class citizens that install themselves, connect automatically, and obey the exact same laws as the main swarm — delivering the massive horizontal scaling you want while staying secure and consistent.
+
+Completion Status
+
+Status: Implemented in repo on April 24, 2026
+
+Completed implementation summary
+
+- Phase 0: `packages/federation-bus` now exposes the real HTTP bus surface the rest of the repo already expected: `postToBus()`, `sendHeartbeat()`, `onboardPeer()`, `kickPeer()`, event/status fetchers, Ed25519 signing helpers, replay protection, duplicate suppression, drift tracking, and direct peer forwarding on the canonical bus/admin ports.
+- Phase 1: `packages/bootstrap/scripts/install-droidswarm.sh` now supports `--connect-to`, `--port`, and `--slave-mode`, and persists slave defaults into the installed service config. `DroidSwarm swarm` also understands slave mode and connect-to directly.
+- Phase 2: `packages/federation-bus/src/slave-onboarding-supervisor.ts` was added. Master nodes register slave roll calls durably; slave nodes auto-roll-call to the configured main swarm when the federation bus starts.
+- Phase 3: federation law enforcement was added in `packages/shared-tracing/src/laws.ts`, including a durable `LAW-001` manifest, rules hashing, and slave/dashboard prohibition checks used during onboarding.
+- Phase 4: federated node registration now lives in `packages/shared-projects`, with CLI support for listing and kicking nodes. The bootstrap CLI exposes this as `DroidSwarm nodes list` and `DroidSwarm nodes kick --node-id <id>`.
+- Phase 5: typecheck/test verification was completed for the touched surfaces. Shell entrypoints were also syntax-checked.
+
+Verification run
+
+- `npx nx typecheck federation-bus`
+- `npx nx typecheck shared-projects`
+- `npx nx typecheck shared-tracing`
+- `npx nx typecheck orchestrator`
+- `npx nx typecheck socket-server`
+- `npx nx test federation-bus`
+- `npx nx test shared-projects`
+- `npx nx test socket-server`
+- `bash -n packages/bootstrap/bin/DroidSwarm`
+- `bash -n packages/bootstrap/libexec/droidswarm-daemon.sh`
+- `bash -n packages/bootstrap/scripts/install-droidswarm.sh`
+
+Implementation notes
+
+- Slave mode is intentionally enforced through startup behavior: the daemon suppresses dashboard and orchestrator startup when `DROIDSWARM_SWARM_ROLE=slave`.
+- The installer now captures slave onboarding defaults, while the actual signed roll-call happens automatically when the federation bus service boots with slave mode enabled.
+- Law enforcement is present and durable, but the current hard enforcement is focused on startup/onboarding invariants and node governance rather than attempting to reinterpret every existing room payload format as strict Droidspeak.

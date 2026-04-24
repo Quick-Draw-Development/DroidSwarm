@@ -924,6 +924,9 @@ INSTALL_BIN_DIR="$INSTALL_ROOT/bin"
 MODELS_DIR="${DROIDSWARM_MODELS_DIR:-$SERVICE_HOME/models}"
 LLAMA_MODEL_URL="${DROIDSWARM_LLAMA_MODEL_URL:-}"
 LLAMA_MODELS_FILE="${DROIDSWARM_LLAMA_MODELS_FILE:-$MODELS_DIR/inventory.json}"
+CONNECT_TO="${DROIDSWARM_FEDERATION_CONNECT_TO:-}"
+MASTER_ADMIN_PORT="${DROIDSWARM_FEDERATION_MASTER_ADMIN_PORT:-4950}"
+SLAVE_MODE="${DROIDSWARM_SWARM_ROLE:-master}"
 
 print_help() {
   cat <<'EOF'
@@ -935,6 +938,9 @@ Options:
   --ref REF            Download this Git ref instead of the default branch
   --install-root DIR   Install files under this directory
   --bin-dir DIR        Place the DroidSwarm symlink in this directory
+  --connect-to HOST    Configure this install for slave federation onboarding
+  --port PORT          Main swarm federation admin port for slave onboarding (default: 4950)
+  --slave-mode         Force slave mode defaults for the installed runtime
   --force              Reinstall even if files already exist
   --help
 EOF
@@ -961,6 +967,20 @@ while [[ $# -gt 0 ]]; do
       shift
       require_value "--bin-dir" "${1:-}"
       BIN_DIR="$1"
+      ;;
+    --connect-to)
+      shift
+      require_value "--connect-to" "${1:-}"
+      CONNECT_TO="$1"
+      SLAVE_MODE="slave"
+      ;;
+    --port)
+      shift
+      require_value "--port" "${1:-}"
+      MASTER_ADMIN_PORT="$1"
+      ;;
+    --slave-mode)
+      SLAVE_MODE="slave"
       ;;
     --force)
       FORCE_INSTALL="1"
@@ -1179,6 +1199,9 @@ write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_DEFAULT_LLAMA_MODEL" "$MODEL
 write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_DEFAULT_WORKER_HOST_ENTRY" "$RUNTIME_DIR/worker-host/main.js"
 write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_DEFAULT_FEDERATION_BUS_ENTRY" "$RUNTIME_DIR/federation-bus/src/service.js"
 write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_DEFAULT_FEDERATION_ADB_ENTRY" "$RUNTIME_DIR/federation-adb/src/service.js"
+write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_SWARM_ROLE" "$SLAVE_MODE"
+write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_FEDERATION_CONNECT_TO" "$CONNECT_TO"
+write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_FEDERATION_MASTER_ADMIN_PORT" "$MASTER_ADMIN_PORT"
 write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_LLAMA_PORT" "$LLAMA_PORT"
 write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_LLAMA_BASE_URL" "http://127.0.0.1:$LLAMA_PORT"
 write_assignment "$SERVICE_CONFIG_FILE" "DROIDSWARM_LLAMA_START_CMD" "$LLAMA_START_CMD"
@@ -1205,5 +1228,5 @@ $PATH_UPDATE_MESSAGE
 Next steps:
   DroidSwarm help
   DroidSwarm setup --project-root "\$PWD" --project-mode <greenfield|existing>
-  DroidSwarm swarm --project-root "\$PWD"
+  DroidSwarm swarm --project-root "\$PWD"${CONNECT_TO:+ --slave-mode --connect-to "$CONNECT_TO"}
 EOF

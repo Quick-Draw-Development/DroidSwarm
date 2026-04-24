@@ -1,36 +1,91 @@
-import { createHash, createPrivateKey, createPublicKey, randomUUID, sign as signPayload, verify as verifySignature } from 'node:crypto';
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { URL } from 'node:url';
+import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http';
+import {
+  createPrivateKey,
+  createPublicKey,
+  randomUUID,
+  sign as signPayload,
+  verify as verifyPayload,
+} from 'node:crypto';
 
-import { tracer } from '@shared-tracing';
-import type { EnvelopeV2 } from '../../shared-types/src/index';
-import { normalizeToEnvelopeV2 } from '../../shared-types/src/index';
+import { envelopeV2Schema, type EnvelopeV2 } from '@shared-types';
+import { z } from 'zod';
 
-export interface FederationPeerDescriptor {
+const heartbeatPayloadSchema = z.object({
+  peerId: z.string().min(1),
+  busUrl: z.string().url(),
+  adminUrl: z.string().url(),
+  capabilities: z.array(z.string()).default([]),
+  projectIds: z.array(z.string()).optional(),
+  role: z.enum(['master', 'slave']).optional(),
+  ts: z.string().optional(),
+});
+
+const onboardPayloadSchema = heartbeatPayloadSchema.extend({
+  projectId: z.string().optional(),
+});
+
+const kickPayloadSchema = z.object({
+  peerId: z.string().min(1),
+  reason: z.string().optional(),
+});
+
+const slaveRollCallPayloadSchema = z.object({
+  nodeId: z.string().min(1),
+  host: z.string().optional(),
+  busUrl: z.string().url().optional(),
+  adminUrl: z.string().url().optional(),
+  version: z.string().optional(),
+  projectId: z.string().optional(),
+  hardwareFingerprintHash: z.string().optional(),
+  publicKey: z.string().optional(),
+  capabilities: z.array(z.string()).default([]),
+  role: z.literal('slave').default('slave'),
+  ts: z.string().optional(),
+});
+
+const signedRequestSchema = z.object({
+  payload: z.unknown(),
+  signedBy: z.string().optional(),
+  nonce: z.string().optional(),
+  signature: z.string().optional(),
+});
+
+export interface FederationSigningKey {
+  keyId: string;
+  privateKeyPem: string;
+}
+
+export interface FederationVerificationConfig {
+  keyId: string;
+  publicKeyPem: string;
+  enforceVerification?: boolean;
+}
+
+export interface FederationPeerRecord {
   peerId: string;
   busUrl: string;
-  adminUrl?: string;
-  capabilities?: string[];
-  projectIds?: string[];
-  lastHeartbeatAt?: string;
-  lastKickAt?: string;
+  adminUrl: string;
+  capabilities: string[];
+  projectIds: string[];
+  role: 'master' | 'slave';
+  status: 'active' | 'kicked';
+  lastSeen: string;
+  connected: boolean;
+  kickedAt?: string;
 }
 
-export interface FederationProjectDescriptor {
+export interface FederationProjectRecord {
   projectId: string;
   peers: string[];
-  updatedAt: string;
 }
 
-export interface FederationDriftSummary {
-  projectId: string;
+export interface FederationDriftRecord {
   taskId: string;
-  nodeId?: string;
+  projectId: string;
   reportedDigestHash?: string;
   expectedDigestHash?: string;
   reportedHandoffHash?: string;
   expectedHandoffHash?: string;
-  detail: string;
   detectedAt: string;
 }
 
@@ -49,848 +104,709 @@ export interface FederationBusStatus {
   latestSequence: number;
   peerCount: number;
   projectCount: number;
-  peers: FederationPeerDescriptor[];
-  projects: FederationProjectDescriptor[];
   recentEventCount: number;
   recentDriftCount: number;
-  recentDrifts: FederationDriftSummary[];
+  peers: FederationPeerRecord[];
+  projects: FederationProjectRecord[];
+  recentDrifts: FederationDriftRecord[];
   counters: {
-    envelopesReceived: number;
-    envelopesForwarded: number;
     heartbeatsReceived: number;
-    kicksReceived: number;
+    envelopesReceived: number;
     onboardingsReceived: number;
+    kicksIssued: number;
     driftsDetected: number;
+    slaveRollCallsReceived: number;
   };
 }
 
-export interface FederationBusService {
-  close(): Promise<void>;
-  getStatus(): FederationBusStatus;
-}
-
-export interface StartFederationBusOptions {
+export interface FederationBusConfig {
   nodeId: string;
   host: string;
   busPort: number;
   adminPort: number;
+  projectIds?: string[];
   peerUrls?: string[];
-  projectIds?: string[];
-  debug?: boolean;
-  heartbeatIntervalMs?: number;
   eventRetentionLimit?: number;
-  signing?: FederationSigningConfig;
-}
-
-export interface FederationSigningConfig {
-  keyId: string;
-  privateKeyPem?: string;
-  publicKeyPem?: string;
+  debug?: boolean;
+  swarmRole?: 'master' | 'slave';
   trustedPublicKeys?: Record<string, string>;
-  enforceVerification?: boolean;
+  enforceSignatures?: boolean;
+  rulesHash?: string;
+  droidspeakCatalog?: Record<string, unknown>;
+  lawManifest?: Record<string, unknown>;
+  onSlaveRollCall?: (payload: SlaveRollCallPayload) => Promise<SlaveWelcomeResponse | undefined> | SlaveWelcomeResponse | undefined;
 }
 
-export interface SignedRequestEnvelope<TPayload> {
-  payload: TPayload;
-  signedBy?: string;
-  nonce?: string;
-  signature?: string;
+export interface FederationBusService {
+  close(): Promise<void>;
 }
 
-export interface FederationPostAuth {
-  keyId: string;
-  privateKeyPem: string;
-}
-
-export interface PostEnvelopeInput {
+export interface PostToBusInput {
+  sourceNodeId: string;
   envelope: EnvelopeV2;
-  sourceNodeId?: string;
-  forward?: boolean;
-  signedBy?: string;
-  nonce?: string;
-  signature?: string;
 }
 
-export interface HeartbeatInput {
-  peerId: string;
-  busUrl: string;
-  adminUrl?: string;
-  capabilities?: string[];
-  projectIds?: string[];
-  ts?: string;
-  signedBy?: string;
-  nonce?: string;
-  signature?: string;
+export interface PostToBusResult {
+  accepted: boolean;
+  duplicate?: boolean;
+  sequence?: number;
 }
 
-export interface OnboardInput extends HeartbeatInput {
+export interface FetchBusEventsResponse {
+  latestSequence: number;
+  events: FederationBusEvent[];
+}
+
+export interface SlaveRollCallPayload extends z.infer<typeof slaveRollCallPayloadSchema> {}
+
+export interface SlaveWelcomeResponse {
+  accepted: boolean;
+  nodeId: string;
+  swarmRole: 'master';
+  rulesHash: string;
+  droidspeakCatalog: Record<string, unknown>;
+  lawManifest: Record<string, unknown>;
   projectId?: string;
+  reason?: string;
 }
 
-export interface KickInput {
-  peerId: string;
-  targetBusUrl?: string;
-  targetAdminUrl?: string;
-  signedBy?: string;
-  nonce?: string;
-  signature?: string;
-}
+const stableSerialize = (input: unknown): string => {
+  if (input == null || typeof input !== 'object') {
+    return JSON.stringify(input);
+  }
 
-interface ContinuitySnapshot {
-  digestHash?: string;
-  handoffHash?: string;
-  reportedAt: string;
-}
+  if (Array.isArray(input)) {
+    return `[${input.map((entry) => stableSerialize(entry)).join(',')}]`;
+  }
 
-const defaultHeaders = {
-  'content-type': 'application/json; charset=utf-8',
+  const record = input as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableSerialize(record[key])}`).join(',')}}`;
 };
 
-const nowIso = (): string => new Date().toISOString();
+const parseSignedPayload = async <T>(req: IncomingMessage, schema: z.ZodType<T>): Promise<{
+  payload: T;
+  signedBy?: string;
+  nonce?: string;
+  signature?: string;
+}> => {
+  const raw = await readJson(req);
+  const parsed = signedRequestSchema.parse(raw);
+  return {
+    payload: schema.parse(parsed.payload),
+    signedBy: parsed.signedBy,
+    nonce: parsed.nonce,
+    signature: parsed.signature,
+  };
+};
 
-const canonicalize = (value: unknown): string => JSON.stringify(value, Object.keys(value as Record<string, unknown>).sort());
+const readJson = async (req: IncomingMessage): Promise<unknown> =>
+  await new Promise((resolve, reject) => {
+    let body = '';
+    req.setEncoding('utf8');
+    req.on('data', (chunk) => {
+      body += chunk;
+    });
+    req.on('end', () => {
+      try {
+        resolve(body.length > 0 ? JSON.parse(body) as unknown : {});
+      } catch (error) {
+        reject(error);
+      }
+    });
+    req.on('error', reject);
+  });
 
-const signedPayloadBody = (purpose: string, payload: Record<string, unknown>, signedBy: string, nonce: string): string =>
-  canonicalize({ purpose, payload, signedBy, nonce });
+const writeJson = (res: ServerResponse, statusCode: number, payload: unknown): void => {
+  res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(payload));
+};
 
-export const signFederationRequest = <TPayload extends Record<string, unknown>>(
-  purpose: string,
-  payload: TPayload,
-  auth: FederationPostAuth,
-): SignedRequestEnvelope<TPayload> => {
+const buildSignatureBase = (kind: string, payload: unknown, signedBy: string, nonce: string): Buffer =>
+  Buffer.from(`${kind}|${signedBy}|${nonce}|${stableSerialize(payload)}`, 'utf8');
+
+export const signFederationRequest = <T>(kind: string, payload: T, key: FederationSigningKey): {
+  payload: T;
+  signedBy: string;
+  nonce: string;
+  signature: string;
+} => {
   const nonce = randomUUID();
   const signature = signPayload(
     null,
-    Buffer.from(signedPayloadBody(purpose, payload, auth.keyId, nonce), 'utf8'),
-    createPrivateKey(auth.privateKeyPem),
+    buildSignatureBase(kind, payload, key.keyId, nonce),
+    createPrivateKey(key.privateKeyPem),
   ).toString('base64');
 
   return {
     payload,
-    signedBy: auth.keyId,
+    signedBy: key.keyId,
     nonce,
     signature,
   };
 };
 
 export const verifyFederationRequest = (
-  purpose: string,
-  payload: Record<string, unknown>,
+  kind: string,
+  payload: unknown,
   signedBy: string | undefined,
   nonce: string | undefined,
   signature: string | undefined,
-  signing?: FederationSigningConfig,
+  verification: FederationVerificationConfig,
 ): boolean => {
-  if (!signing?.enforceVerification) {
-    if (!signedBy || !nonce || !signature) {
-      return true;
-    }
-  }
-
   if (!signedBy || !nonce || !signature) {
+    return verification.enforceVerification !== true;
+  }
+
+  if (signedBy !== verification.keyId) {
     return false;
   }
 
-  const publicKeyPem =
-    (signing?.trustedPublicKeys && signing.trustedPublicKeys[signedBy])
-    ?? (signing?.keyId === signedBy ? signing.publicKeyPem : undefined);
-  if (!publicKeyPem) {
-    return false;
-  }
-
-  return verifySignature(
+  return verifyPayload(
     null,
-    Buffer.from(signedPayloadBody(purpose, payload, signedBy, nonce), 'utf8'),
-    createPublicKey(publicKeyPem),
+    buildSignatureBase(kind, payload, signedBy, nonce),
+    createPublicKey(verification.publicKeyPem),
     Buffer.from(signature, 'base64'),
   );
 };
 
-const parsePeerUrl = (input: string): FederationPeerDescriptor | undefined => {
-  const trimmed = input.trim();
-  if (!trimmed) {
-    return undefined;
-  }
-
-  const busUrl = trimmed.startsWith('http://') || trimmed.startsWith('https://')
-    ? trimmed.replace(/\/$/, '')
-    : `http://${trimmed.replace(/\/$/, '')}`;
-  const parsed = new URL(busUrl);
-  const peerId = parsed.host.replace(/[^a-zA-Z0-9_.:-]/g, '-');
-  const adminPort = parsed.port ? String(Number(parsed.port) + 3) : '4950';
-  const adminUrl = `${parsed.protocol}//${parsed.hostname}:${adminPort}`;
-  return {
-    peerId,
-    busUrl,
-    adminUrl,
-  };
-};
-
-export const parseFederationPeers = (value?: string): FederationPeerDescriptor[] => {
-  if (!value) {
-    return [];
-  }
-
-  return value
-    .split(',')
-    .map((entry) => parsePeerUrl(entry))
-    .filter((entry): entry is FederationPeerDescriptor => entry != null);
-};
-
-const readJsonBody = async (request: IncomingMessage): Promise<unknown> => {
-  const chunks: Buffer[] = [];
-  for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  if (chunks.length === 0) {
-    return {};
-  }
-  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
-};
-
-const writeJson = (response: ServerResponse, statusCode: number, payload: unknown): void => {
-  response.writeHead(statusCode, defaultHeaders);
-  response.end(JSON.stringify(payload));
-};
-
-const waitForServerListen = async (server: ReturnType<typeof createServer>, port: number, host: string): Promise<void> =>
-  await new Promise((resolve, reject) => {
-    const handleError = (error: Error) => {
-      server.off('listening', handleListening);
-      reject(error);
-    };
-    const handleListening = () => {
-      server.off('error', handleError);
-      resolve();
-    };
-
-    server.once('error', handleError);
-    server.once('listening', handleListening);
-    server.listen(port, host);
-  });
-
-const postJson = async <TResponse>(url: string, payload: unknown): Promise<TResponse> => {
+const requestJson = async <T>(url: string, init?: RequestInit): Promise<T> => {
   const response = await fetch(url, {
-    method: 'POST',
-    headers: defaultHeaders,
-    body: JSON.stringify(payload),
+    ...init,
+    headers: {
+      'content-type': 'application/json',
+      ...(init?.headers ?? {}),
+    },
   });
+
   if (!response.ok) {
-    throw new Error(`Federation request failed (${response.status}) for ${url}`);
+    throw new Error(`Federation request failed: ${response.status} ${response.statusText}`);
   }
-  return await response.json() as TResponse;
+
+  return await response.json() as T;
 };
 
-const getJson = async <TResponse>(url: string): Promise<TResponse> => {
-  const response = await fetch(url, {
-    headers: defaultHeaders,
-  });
-  if (!response.ok) {
-    throw new Error(`Federation request failed (${response.status}) for ${url}`);
-  }
-  return await response.json() as TResponse;
-};
+const makeSignedPayload = <T>(kind: string, payload: T, signing?: FederationSigningKey) =>
+  signing ? signFederationRequest(kind, payload, signing) : { payload };
+
+const normalizeBaseUrl = (value: string): string => value.endsWith('/') ? value.slice(0, -1) : value;
 
 export const postToBus = async (
   busUrl: string,
-  input: PostEnvelopeInput,
-  auth?: FederationPostAuth,
-): Promise<{ accepted: boolean; duplicate?: boolean; sequence: number }> => {
-  const unsignedPayload = {
-    envelope: input.envelope,
-    sourceNodeId: input.sourceNodeId,
-    forward: input.forward,
-  } satisfies Record<string, unknown>;
-  const signed = auth ? signFederationRequest('bus', unsignedPayload, auth) : undefined;
-  tracer.audit('FEDERATION_MESSAGE_OUTBOUND', {
-    busUrl,
-    envelopeId: input.envelope.id,
-    verb: input.envelope.verb,
-    taskId: input.envelope.task_id,
-    roomId: input.envelope.room_id,
-    forward: input.forward,
+  payload: PostToBusInput,
+  signing?: FederationSigningKey,
+): Promise<PostToBusResult> =>
+  await requestJson<PostToBusResult>(`${normalizeBaseUrl(busUrl)}/events`, {
+    method: 'POST',
+    body: JSON.stringify(makeSignedPayload('events.post', payload, signing)),
   });
-  return postJson(`${busUrl.replace(/\/$/, '')}/bus`, {
-    ...unsignedPayload,
-    signedBy: signed?.signedBy ?? input.signedBy,
-    nonce: signed?.nonce ?? input.nonce,
-    signature: signed?.signature ?? input.signature,
-  });
-};
 
-export const sendHeartbeat = async (busUrl: string, input: HeartbeatInput, auth?: FederationPostAuth): Promise<{ accepted: boolean }> => {
-  const unsignedPayload = {
-    peerId: input.peerId,
-    busUrl: input.busUrl,
-    adminUrl: input.adminUrl,
-    capabilities: input.capabilities,
-    projectIds: input.projectIds,
-    ts: input.ts,
-  } satisfies Record<string, unknown>;
-  const signed = auth ? signFederationRequest('heartbeat', unsignedPayload, auth) : undefined;
-  tracer.audit('FEDERATION_HEARTBEAT_OUTBOUND', {
-    busUrl,
-    peerId: input.peerId,
-    adminUrl: input.adminUrl,
-    capabilities: input.capabilities,
-    projectIds: input.projectIds,
+export const sendHeartbeat = async (
+  busUrl: string,
+  payload: z.infer<typeof heartbeatPayloadSchema>,
+  signing?: FederationSigningKey,
+): Promise<{ accepted: boolean }> =>
+  await requestJson<{ accepted: boolean }>(`${normalizeBaseUrl(busUrl)}/heartbeat`, {
+    method: 'POST',
+    body: JSON.stringify(makeSignedPayload('heartbeat', payload, signing)),
   });
-  return postJson(`${busUrl.replace(/\/$/, '')}/heartbeat`, {
-    ...unsignedPayload,
-    signedBy: signed?.signedBy ?? input.signedBy,
-    nonce: signed?.nonce ?? input.nonce,
-    signature: signed?.signature ?? input.signature,
-  });
-};
 
 export const onboardPeer = async (
   adminUrl: string,
-  input: OnboardInput,
-  auth?: FederationPostAuth,
-): Promise<{ accepted: boolean; peerId: string }> => {
-  const projectIds = Array.from(new Set([
-    ...(input.projectIds ?? []),
-    ...(input.projectId ? [input.projectId] : []),
-  ]));
-  const unsignedPayload = {
-    peerId: input.peerId,
-    busUrl: input.busUrl,
-    adminUrl: input.adminUrl,
-    capabilities: input.capabilities,
-    projectIds,
-    ts: input.ts,
-  } satisfies Record<string, unknown>;
-  const signed = auth ? signFederationRequest('onboard', unsignedPayload, auth) : undefined;
-  tracer.audit('FEDERATION_ONBOARD_OUTBOUND', {
-    adminUrl,
-    peerId: input.peerId,
-    busUrl: input.busUrl,
-    projectIds,
+  payload: z.infer<typeof onboardPayloadSchema>,
+  signing?: FederationSigningKey,
+): Promise<{ accepted: boolean }> =>
+  await requestJson<{ accepted: boolean }>(`${normalizeBaseUrl(adminUrl)}/onboard`, {
+    method: 'POST',
+    body: JSON.stringify(makeSignedPayload('onboard', payload, signing)),
   });
-  return postJson(`${adminUrl.replace(/\/$/, '')}/onboard`, {
-    ...unsignedPayload,
-    signedBy: signed?.signedBy ?? input.signedBy,
-    nonce: signed?.nonce ?? input.nonce,
-    signature: signed?.signature ?? input.signature,
-  });
-};
 
-export const kickPeer = async (adminUrl: string, input: KickInput, auth?: FederationPostAuth): Promise<{ accepted: boolean }> => {
-  const unsignedPayload = {
-    peerId: input.peerId,
-    targetBusUrl: input.targetBusUrl,
-    targetAdminUrl: input.targetAdminUrl,
-  } satisfies Record<string, unknown>;
-  const signed = auth ? signFederationRequest('kick', unsignedPayload, auth) : undefined;
-  tracer.audit('FEDERATION_KICK_OUTBOUND', {
-    adminUrl,
-    peerId: input.peerId,
-    targetBusUrl: input.targetBusUrl,
-    targetAdminUrl: input.targetAdminUrl,
+export const kickPeer = async (
+  adminUrl: string,
+  payload: z.infer<typeof kickPayloadSchema>,
+  signing?: FederationSigningKey,
+): Promise<{ accepted: boolean }> =>
+  await requestJson<{ accepted: boolean }>(`${normalizeBaseUrl(adminUrl)}/kick`, {
+    method: 'POST',
+    body: JSON.stringify(makeSignedPayload('kick', payload, signing)),
   });
-  return postJson(`${adminUrl.replace(/\/$/, '')}/kick`, {
-    ...unsignedPayload,
-    signedBy: signed?.signedBy ?? input.signedBy,
-    nonce: signed?.nonce ?? input.nonce,
-    signature: signed?.signature ?? input.signature,
+
+export const rollCallSlave = async (
+  adminUrl: string,
+  payload: SlaveRollCallPayload,
+  signing?: FederationSigningKey,
+): Promise<SlaveWelcomeResponse> =>
+  await requestJson<SlaveWelcomeResponse>(`${normalizeBaseUrl(adminUrl)}/slave-roll-call`, {
+    method: 'POST',
+    body: JSON.stringify(makeSignedPayload('slave-roll-call', payload, signing)),
   });
-};
 
 export const fetchBusStatus = async (adminUrl: string): Promise<FederationBusStatus> =>
-  getJson(`${adminUrl.replace(/\/$/, '')}/status`);
+  await requestJson<FederationBusStatus>(`${normalizeBaseUrl(adminUrl)}/status`);
 
 export const fetchBusEvents = async (
   busUrl: string,
-  afterSequence = 0,
-  limit = 50,
-): Promise<{ events: FederationBusEvent[]; latestSequence: number }> =>
-  getJson(`${busUrl.replace(/\/$/, '')}/events?after=${afterSequence}&limit=${limit}`);
+  since = 0,
+  limit = 25,
+): Promise<FetchBusEventsResponse> =>
+  await requestJson<FetchBusEventsResponse>(`${normalizeBaseUrl(busUrl)}/events?since=${since}&limit=${limit}`);
 
-export const startFederationBus = (options: StartFederationBusOptions): FederationBusService => {
-  const peers = new Map<string, FederationPeerDescriptor>();
-  const events: FederationBusEvent[] = [];
-  const projects = new Map<string, FederationProjectDescriptor>();
-  const recentDrifts: FederationDriftSummary[] = [];
-  const seenEnvelopeIds = new Set<string>();
-  const seenRequestIds = new Set<string>();
-  const continuityByTask = new Map<string, Map<string, ContinuitySnapshot>>();
-  let sequence = 0;
-  const retentionLimit = Math.max(25, options.eventRetentionLimit ?? 200);
-  const heartbeatIntervalMs = Math.max(5_000, options.heartbeatIntervalMs ?? 15_000);
-  const localProjects = Array.from(new Set(options.projectIds ?? []));
-  const counters = {
-    envelopesReceived: 0,
-    envelopesForwarded: 0,
-    heartbeatsReceived: 0,
-    kicksReceived: 0,
-    onboardingsReceived: 0,
-    driftsDetected: 0,
+const findVerificationKey = (
+  signedBy: string | undefined,
+  trustedPublicKeys: Record<string, string>,
+): FederationVerificationConfig | undefined => {
+  if (!signedBy) {
+    return undefined;
+  }
+  const publicKeyPem = trustedPublicKeys[signedBy];
+  if (!publicKeyPem) {
+    return undefined;
+  }
+  return {
+    keyId: signedBy,
+    publicKeyPem,
+    enforceVerification: true,
   };
+};
 
-  for (const peer of options.peerUrls ?? []) {
-    const parsed = parsePeerUrl(peer);
-    if (parsed) {
-      peers.set(parsed.peerId, parsed);
+const validateSignedRequest = (input: {
+  kind: string;
+  signedBy?: string;
+  nonce?: string;
+  signature?: string;
+  payload: unknown;
+  trustedPublicKeys: Record<string, string>;
+  enforceSignatures: boolean;
+  seenNonces: Set<string>;
+}): void => {
+  if (!input.signedBy || !input.nonce || !input.signature) {
+    if (input.enforceSignatures) {
+      throw new Error(`Missing federation signature for ${input.kind}`);
     }
+    return;
   }
 
-  const log = (...args: unknown[]) => {
-    if (options.debug) {
-      console.log('[FederationBus]', ...args);
+  if (input.seenNonces.has(input.nonce)) {
+    throw new Error(`Replay detected for ${input.kind}`);
+  }
+
+  const verification = findVerificationKey(input.signedBy, input.trustedPublicKeys);
+  if (!verification) {
+    if (input.enforceSignatures) {
+      throw new Error(`Unknown federation signer: ${input.signedBy}`);
     }
+    return;
+  }
+
+  if (!verifyFederationRequest(
+    input.kind,
+    input.payload,
+    input.signedBy,
+    input.nonce,
+    input.signature,
+    verification,
+  )) {
+    throw new Error(`Invalid federation signature for ${input.kind}`);
+  }
+
+  input.seenNonces.add(input.nonce);
+};
+
+const nowIso = (): string => new Date().toISOString();
+
+const removeOldestNonce = (seenNonces: Set<string>): void => {
+  const first = seenNonces.values().next().value as string | undefined;
+  if (first) {
+    seenNonces.delete(first);
+  }
+};
+
+export const startFederationBus = (config: FederationBusConfig): FederationBusService => {
+  const peerMap = new Map<string, FederationPeerRecord>();
+  const projectMap = new Map<string, Set<string>>();
+  const taskContinuity = new Map<string, { projectId: string; digestHash?: string; handoffHash?: string }>();
+  const recentDrifts: FederationDriftRecord[] = [];
+  const events: FederationBusEvent[] = [];
+  const seenEnvelopeIds = new Set<string>();
+  const seenNonces = new Set<string>();
+  const eventRetentionLimit = config.eventRetentionLimit ?? 100;
+  const trustedPublicKeys = { ...(config.trustedPublicKeys ?? {}) };
+  const counters: FederationBusStatus['counters'] = {
+    heartbeatsReceived: 0,
+    envelopesReceived: 0,
+    onboardingsReceived: 0,
+    kicksIssued: 0,
+    driftsDetected: 0,
+    slaveRollCallsReceived: 0,
   };
+  const seededPeerUrls = new Set((config.peerUrls ?? []).map((entry) => normalizeBaseUrl(entry)));
+  let latestSequence = 0;
 
-  const rememberRequest = (purpose: string, signedBy?: string, nonce?: string): boolean => {
-    const replayKey = signedBy && nonce ? `${purpose}:${signedBy}:${nonce}` : undefined;
-    if (!replayKey) {
-      return false;
-    }
-    if (seenRequestIds.has(replayKey)) {
-      return true;
-    }
-    seenRequestIds.add(replayKey);
-    while (seenRequestIds.size > retentionLimit * 4) {
-      const [oldest] = seenRequestIds;
-      if (!oldest) {
-        break;
-      }
-      seenRequestIds.delete(oldest);
-    }
-    return false;
-  };
-
-  const rememberEvent = (sourceNodeId: string, envelope: EnvelopeV2): FederationBusEvent => {
-    sequence += 1;
-    const event: FederationBusEvent = {
-      sequence,
-      receivedAt: nowIso(),
-      sourceNodeId,
-      envelope,
-    };
-    events.push(event);
-    seenEnvelopeIds.add(envelope.id);
-    while (events.length > retentionLimit) {
-      const removed = events.shift();
-      if (removed) {
-        seenEnvelopeIds.delete(removed.envelope.id);
-      }
-    }
-    return event;
-  };
-
-  const forwardEnvelope = async (sourceNodeId: string, envelope: EnvelopeV2): Promise<void> => {
-    const targets = [...peers.values()].filter((peer) => peer.peerId !== sourceNodeId && peer.peerId !== options.nodeId);
-    await Promise.allSettled(targets.map(async (peer) => {
-      try {
-        await postToBus(peer.busUrl, {
-          envelope,
-          sourceNodeId: options.nodeId,
-          forward: false,
-        });
-        counters.envelopesForwarded += 1;
-      } catch (error) {
-        log('peer.forward.failed', { peerId: peer.peerId, error: error instanceof Error ? error.message : String(error) });
-      }
-    }));
-  };
-
-  const mergeProjectMembership = (peerId: string, inputProjectIds?: string[]): void => {
-    const projectIds = Array.from(new Set(inputProjectIds?.filter((entry) => typeof entry === 'string' && entry.length > 0) ?? []));
-    for (const projectId of projectIds) {
-      const existing = projects.get(projectId);
-      const peersForProject = new Set(existing?.peers ?? []);
-      peersForProject.add(peerId);
-      projects.set(projectId, {
-        projectId,
-        peers: [...peersForProject].sort(),
-        updatedAt: nowIso(),
-      });
-    }
-  };
-
-  mergeProjectMembership(options.nodeId, localProjects);
-
-  const updatePeer = (input: HeartbeatInput): void => {
-    const existing = peers.get(input.peerId);
-    const projectIds = Array.from(new Set(input.projectIds ?? existing?.projectIds ?? []));
-    peers.set(input.peerId, {
+  const upsertPeer = (input: {
+    peerId: string;
+    busUrl: string;
+    adminUrl: string;
+    capabilities?: string[];
+    projectIds?: string[];
+    role?: 'master' | 'slave';
+    status?: 'active' | 'kicked';
+  }): FederationPeerRecord => {
+    const record: FederationPeerRecord = {
       peerId: input.peerId,
-      busUrl: input.busUrl.replace(/\/$/, ''),
-      adminUrl: input.adminUrl?.replace(/\/$/, '') ?? existing?.adminUrl,
-      capabilities: input.capabilities ?? existing?.capabilities,
-      projectIds,
-      lastHeartbeatAt: input.ts ?? nowIso(),
-      lastKickAt: existing?.lastKickAt,
-    });
-    mergeProjectMembership(input.peerId, projectIds);
+      busUrl: normalizeBaseUrl(input.busUrl),
+      adminUrl: normalizeBaseUrl(input.adminUrl),
+      capabilities: input.capabilities ?? [],
+      projectIds: input.projectIds ?? [],
+      role: input.role ?? 'master',
+      status: input.status ?? 'active',
+      lastSeen: nowIso(),
+      connected: true,
+      kickedAt: input.status === 'kicked' ? nowIso() : undefined,
+    };
+    peerMap.set(record.peerId, record);
+    seededPeerUrls.add(record.busUrl);
+
+    for (const projectId of record.projectIds) {
+      const set = projectMap.get(projectId) ?? new Set<string>();
+      set.add(record.peerId);
+      projectMap.set(projectId, set);
+    }
+
+    return record;
   };
 
-  const getEnvelopeMetadata = (envelope: EnvelopeV2): Record<string, unknown> | undefined => {
-    const bodyMetadata =
-      typeof envelope.body.metadata === 'object' && envelope.body.metadata !== null
-        ? envelope.body.metadata as Record<string, unknown>
-        : undefined;
-    const payload =
-      typeof envelope.body.payload === 'object' && envelope.body.payload !== null
-        ? envelope.body.payload as Record<string, unknown>
-        : undefined;
-    const payloadMetadata =
-      payload && typeof payload.metadata === 'object' && payload.metadata !== null
-        ? payload.metadata as Record<string, unknown>
-        : undefined;
-    return bodyMetadata ?? payloadMetadata;
-  };
+  const registerDrift = (sourceNodeId: string, envelope: EnvelopeV2): void => {
+    if (envelope.verb !== 'status.updated' || !envelope.task_id) {
+      return;
+    }
 
-  const recordDrift = (drift: FederationDriftSummary): void => {
-    recentDrifts.push(drift);
+    const metadata = typeof envelope.body.metadata === 'object' && envelope.body.metadata !== null
+      ? envelope.body.metadata as Record<string, unknown>
+      : undefined;
+    if (!metadata) {
+      return;
+    }
+
+    const digestHash = typeof metadata.digestHash === 'string' ? metadata.digestHash : undefined;
+    const handoffHash = typeof metadata.handoffHash === 'string' ? metadata.handoffHash : undefined;
+    const existing = taskContinuity.get(envelope.task_id);
+    if (!existing) {
+      taskContinuity.set(envelope.task_id, {
+        projectId: envelope.project_id,
+        digestHash,
+        handoffHash,
+      });
+      return;
+    }
+
+    if (
+      (!digestHash || !existing.digestHash || digestHash === existing.digestHash)
+      && (!handoffHash || !existing.handoffHash || handoffHash === existing.handoffHash)
+    ) {
+      return;
+    }
+
     counters.driftsDetected += 1;
-    while (recentDrifts.length > retentionLimit) {
+    recentDrifts.push({
+      taskId: envelope.task_id,
+      projectId: envelope.project_id,
+      reportedDigestHash: digestHash,
+      expectedDigestHash: existing.digestHash,
+      reportedHandoffHash: handoffHash,
+      expectedHandoffHash: existing.handoffHash,
+      detectedAt: nowIso(),
+    });
+    while (recentDrifts.length > eventRetentionLimit) {
       recentDrifts.shift();
     }
-  };
 
-  const evaluateContinuityDrift = (sourceNodeId: string, envelope: EnvelopeV2): void => {
-    if (!envelope.task_id) {
-      return;
-    }
-    const metadata = getEnvelopeMetadata(envelope);
-    const digestHash = typeof metadata?.digestHash === 'string' ? metadata.digestHash : undefined;
-    const handoffHash = typeof metadata?.handoffHash === 'string' ? metadata.handoffHash : undefined;
-    if (!digestHash && !handoffHash) {
-      return;
-    }
-
-    const continuityKey = `${envelope.project_id}:${envelope.task_id}`;
-    const snapshots = continuityByTask.get(continuityKey) ?? new Map<string, ContinuitySnapshot>();
-    continuityByTask.set(continuityKey, snapshots);
-    const current: ContinuitySnapshot = {
-      digestHash,
-      handoffHash,
-      reportedAt: envelope.ts,
-    };
-
-    for (const [peerId, prior] of snapshots.entries()) {
-      if (peerId === sourceNodeId) {
-        continue;
-      }
-      const digestMismatch = digestHash && prior.digestHash && digestHash !== prior.digestHash;
-      const handoffMismatch = handoffHash && prior.handoffHash && handoffHash !== prior.handoffHash;
-      if (!digestMismatch && !handoffMismatch) {
-        continue;
-      }
-      recordDrift({
-        projectId: envelope.project_id,
-        taskId: envelope.task_id,
-        nodeId: sourceNodeId,
-        reportedDigestHash: digestHash,
-        expectedDigestHash: prior.digestHash,
-        reportedHandoffHash: handoffHash,
-        expectedHandoffHash: prior.handoffHash,
-        detail: `Continuity drift detected for ${envelope.task_id} between ${peerId} and ${sourceNodeId}.`,
-        detectedAt: nowIso(),
-      });
-      break;
-    }
-
-    snapshots.set(sourceNodeId, current);
-    while (snapshots.size > retentionLimit) {
-      const [oldestKey] = snapshots.keys();
-      if (!oldestKey) {
-        break;
-      }
-      snapshots.delete(oldestKey);
-    }
-  };
-
-  const busServer = createServer(async (request, response) => {
-    if (!request.url) {
-      writeJson(response, 404, { error: 'missing_url' });
-      return;
-    }
-    const url = new URL(request.url, `http://${request.headers.host ?? '127.0.0.1'}`);
-
-    if (request.method === 'POST' && url.pathname === '/bus') {
-      const body = await readJsonBody(request) as Record<string, unknown>;
-      const unsignedPayload = {
-        envelope: body.envelope ?? body,
-        sourceNodeId: typeof body.sourceNodeId === 'string' ? body.sourceNodeId : options.nodeId,
-        forward: body.forward,
-      } satisfies Record<string, unknown>;
-      if (!verifyFederationRequest(
-        'bus',
-        unsignedPayload,
-        typeof body.signedBy === 'string' ? body.signedBy : undefined,
-        typeof body.nonce === 'string' ? body.nonce : undefined,
-        typeof body.signature === 'string' ? body.signature : undefined,
-        options.signing,
-      )) {
-        writeJson(response, 403, { accepted: false, error: 'invalid_signature' });
-        return;
-      }
-      if (rememberRequest('bus', typeof body.signedBy === 'string' ? body.signedBy : undefined, typeof body.nonce === 'string' ? body.nonce : undefined)) {
-        writeJson(response, 200, { accepted: true, duplicate: true, sequence });
-        return;
-      }
-      const envelope = normalizeToEnvelopeV2(body.envelope ?? body);
-      const sourceNodeId = typeof body.sourceNodeId === 'string' ? body.sourceNodeId : options.nodeId;
-      const shouldForward = body.forward !== false;
-
-      if (seenEnvelopeIds.has(envelope.id)) {
-        writeJson(response, 200, { accepted: true, duplicate: true, sequence });
-        return;
-      }
-
-      counters.envelopesReceived += 1;
-      const event = rememberEvent(sourceNodeId, envelope);
-      mergeProjectMembership(sourceNodeId, [envelope.project_id]);
-      evaluateContinuityDrift(sourceNodeId, envelope);
-      if (envelope.verb === 'drift.detected') {
-        recordDrift({
-          projectId: envelope.project_id,
-          taskId: envelope.task_id ?? envelope.room_id,
-          nodeId: sourceNodeId,
-          reportedDigestHash: typeof envelope.body.reportedDigestHash === 'string' ? envelope.body.reportedDigestHash : undefined,
-          expectedDigestHash: typeof envelope.body.expectedDigestHash === 'string' ? envelope.body.expectedDigestHash : undefined,
-          reportedHandoffHash: typeof envelope.body.reportedHandoffHash === 'string' ? envelope.body.reportedHandoffHash : undefined,
-          expectedHandoffHash: typeof envelope.body.expectedHandoffHash === 'string' ? envelope.body.expectedHandoffHash : undefined,
-          detail: typeof envelope.body.detail === 'string' ? envelope.body.detail : `Federation drift detected for ${envelope.task_id ?? envelope.room_id}.`,
-          detectedAt: typeof envelope.body.detectedAt === 'string' ? envelope.body.detectedAt : nowIso(),
-        });
-      }
-      tracer.audit('FEDERATION_MESSAGE_INBOUND', {
+    if (config.debug) {
+      console.warn('[federation-bus] drift detected', {
         sourceNodeId,
-        envelopeId: envelope.id,
-        verb: envelope.verb,
         taskId: envelope.task_id,
-        roomId: envelope.room_id,
-        forwarded: shouldForward,
       });
-      log('bus.envelope', { id: envelope.id, verb: envelope.verb, sourceNodeId });
+    }
+  };
 
-      if (shouldForward) {
-        void forwardEnvelope(sourceNodeId, envelope);
+  const forwardEnvelope = async (event: FederationBusEvent): Promise<void> => {
+    const targets = new Set<string>(seededPeerUrls);
+    for (const peer of peerMap.values()) {
+      if (peer.status === 'active') {
+        targets.add(peer.busUrl);
       }
-
-      writeJson(response, 200, { accepted: true, sequence: event.sequence });
-      return;
     }
 
-    if (request.method === 'POST' && url.pathname === '/heartbeat') {
-      const body = await readJsonBody(request) as HeartbeatInput;
-      if (!verifyFederationRequest(
-        'heartbeat',
-        {
-          peerId: body.peerId,
-          busUrl: body.busUrl,
-          adminUrl: body.adminUrl,
-          capabilities: body.capabilities,
-          projectIds: body.projectIds,
-          ts: body.ts,
-        },
-        body.signedBy,
-        body.nonce,
-        body.signature,
-        options.signing,
-      )) {
-        writeJson(response, 403, { accepted: false, error: 'invalid_signature' });
-        return;
-      }
-      if (rememberRequest('heartbeat', body.signedBy, body.nonce)) {
-        writeJson(response, 200, { accepted: true });
-        return;
-      }
-      counters.heartbeatsReceived += 1;
-      updatePeer(body);
-      tracer.audit('FEDERATION_HEARTBEAT_INBOUND', {
-        peerId: body.peerId,
-        busUrl: body.busUrl,
-        adminUrl: body.adminUrl,
-        capabilities: body.capabilities,
-        projectIds: body.projectIds,
-      });
-      writeJson(response, 200, { accepted: true });
-      return;
-    }
+    await Promise.all(
+      Array.from(targets)
+        .filter((url) => url.length > 0)
+        .map(async (url) => {
+          try {
+            await requestJson<PostToBusResult>(`${normalizeBaseUrl(url)}/events`, {
+              method: 'POST',
+              body: JSON.stringify({
+                payload: {
+                  sourceNodeId: config.nodeId,
+                  envelope: event.envelope,
+                  forwarded: true,
+                },
+              }),
+            });
+          } catch {
+            // Best effort forwarding; the bus should continue serving local state.
+          }
+        }),
+    );
+  };
 
-    if (request.method === 'GET' && url.pathname === '/events') {
-      const after = Number(url.searchParams.get('after') ?? '0');
-      const limit = Number(url.searchParams.get('limit') ?? '50');
-      const selected = events
-        .filter((event) => event.sequence > after)
-        .slice(0, Math.max(1, Math.min(200, limit)));
-      writeJson(response, 200, {
-        events: selected,
-        latestSequence: sequence,
-      });
-      return;
-    }
-
-    writeJson(response, 404, { error: 'not_found' });
-  });
-
-  const adminServer = createServer(async (request, response) => {
-    if (!request.url) {
-      writeJson(response, 404, { error: 'missing_url' });
-      return;
-    }
-    const url = new URL(request.url, `http://${request.headers.host ?? '127.0.0.1'}`);
-
-    if (request.method === 'GET' && url.pathname === '/status') {
-      writeJson(response, 200, {
-        nodeId: options.nodeId,
-        host: options.host,
-        busPort: options.busPort,
-        adminPort: options.adminPort,
-        latestSequence: sequence,
-        peerCount: peers.size,
-        projectCount: projects.size,
-        peers: [...peers.values()],
-        projects: [...projects.values()],
-        recentEventCount: events.length,
-        recentDriftCount: recentDrifts.length,
-        recentDrifts,
-        counters,
-      } satisfies FederationBusStatus);
-      return;
-    }
-
-    if (request.method === 'POST' && url.pathname === '/onboard') {
-      const body = await readJsonBody(request) as OnboardInput;
-      const projectIds = Array.from(new Set([
-        ...(body.projectIds ?? []),
-        ...(body.projectId ? [body.projectId] : []),
-      ]));
-      if (!verifyFederationRequest(
-        'onboard',
-        {
-          peerId: body.peerId,
-          busUrl: body.busUrl,
-          adminUrl: body.adminUrl,
-          capabilities: body.capabilities,
-          projectIds,
-          ts: body.ts,
-        },
-        body.signedBy,
-        body.nonce,
-        body.signature,
-        options.signing,
-      )) {
-        writeJson(response, 403, { accepted: false, error: 'invalid_signature' });
+  const busServer = createServer(async (req, res) => {
+    try {
+      const url = new URL(req.url ?? '/', `http://${req.headers.host ?? `${config.host}:${config.busPort}`}`);
+      if (req.method === 'GET' && url.pathname === '/events') {
+        const since = Number.parseInt(url.searchParams.get('since') ?? '0', 10) || 0;
+        const limit = Number.parseInt(url.searchParams.get('limit') ?? String(eventRetentionLimit), 10) || eventRetentionLimit;
+        const filtered = events.filter((event) => event.sequence > since).slice(-Math.max(1, limit));
+        writeJson(res, 200, {
+          latestSequence,
+          events: filtered,
+        } satisfies FetchBusEventsResponse);
         return;
       }
-      if (rememberRequest('onboard', body.signedBy, body.nonce)) {
-        writeJson(response, 200, { accepted: true, peerId: body.peerId });
-        return;
-      }
-      counters.onboardingsReceived += 1;
-      updatePeer({
-        ...body,
-        projectIds,
-      });
-      tracer.audit('FEDERATION_ONBOARD_INBOUND', {
-        peerId: body.peerId,
-        busUrl: body.busUrl,
-        adminUrl: body.adminUrl,
-        projectIds,
-      });
-      writeJson(response, 200, { accepted: true, peerId: body.peerId });
-      return;
-    }
 
-    if (request.method === 'POST' && url.pathname === '/kick') {
-      const body = await readJsonBody(request) as KickInput;
-      if (!verifyFederationRequest(
-        'kick',
-        {
-          peerId: body.peerId,
-          targetBusUrl: body.targetBusUrl,
-          targetAdminUrl: body.targetAdminUrl,
-        },
-        body.signedBy,
-        body.nonce,
-        body.signature,
-        options.signing,
-      )) {
-        writeJson(response, 403, { accepted: false, error: 'invalid_signature' });
-        return;
-      }
-      if (rememberRequest('kick', body.signedBy, body.nonce)) {
-        writeJson(response, 200, { accepted: true });
-        return;
-      }
-      counters.kicksReceived += 1;
-      tracer.audit('FEDERATION_KICK_INBOUND', {
-        peerId: body.peerId,
-        targetBusUrl: body.targetBusUrl,
-        targetAdminUrl: body.targetAdminUrl,
-      });
-      const peer = peers.get(body.peerId);
-      const targetBusUrl = body.targetBusUrl ?? peer?.busUrl;
-      if (!targetBusUrl) {
-        writeJson(response, 400, { accepted: false, error: 'unknown_peer' });
-        return;
-      }
-      await sendHeartbeat(targetBusUrl, {
-        peerId: options.nodeId,
-        busUrl: `http://127.0.0.1:${options.busPort}`,
-        adminUrl: `http://127.0.0.1:${options.adminPort}`,
-        capabilities: ['envelope-v2', 'heartbeat', 'kick', 'onboard', 'drift-detection'],
-        projectIds: localProjects,
-      });
-      if (peer) {
-        peers.set(peer.peerId, {
-          ...peer,
-          lastKickAt: nowIso(),
+      if (req.method === 'POST' && url.pathname === '/events') {
+        const signed = await parseSignedPayload(req, z.object({
+          sourceNodeId: z.string().min(1),
+          envelope: envelopeV2Schema,
+          forwarded: z.boolean().optional(),
+        }));
+        validateSignedRequest({
+          kind: 'events.post',
+          signedBy: signed.signedBy,
+          nonce: signed.nonce,
+          signature: signed.signature,
+          payload: signed.payload,
+          trustedPublicKeys,
+          enforceSignatures: config.enforceSignatures === true,
+          seenNonces,
         });
-      }
-      writeJson(response, 200, { accepted: true });
-      return;
-    }
+        while (seenNonces.size > 1_000) {
+          removeOldestNonce(seenNonces);
+        }
 
-    writeJson(response, 404, { error: 'not_found' });
+        const { sourceNodeId, envelope, forwarded } = signed.payload;
+        if (seenEnvelopeIds.has(envelope.id)) {
+          writeJson(res, 200, {
+            accepted: true,
+            duplicate: true,
+            sequence: latestSequence,
+          } satisfies PostToBusResult);
+          return;
+        }
+
+        seenEnvelopeIds.add(envelope.id);
+        while (seenEnvelopeIds.size > 10_000) {
+          const first = seenEnvelopeIds.values().next().value as string | undefined;
+          if (!first) {
+            break;
+          }
+          seenEnvelopeIds.delete(first);
+        }
+
+        latestSequence += 1;
+        counters.envelopesReceived += 1;
+        const event: FederationBusEvent = {
+          sequence: latestSequence,
+          receivedAt: nowIso(),
+          sourceNodeId,
+          envelope,
+        };
+        events.push(event);
+        while (events.length > eventRetentionLimit) {
+          events.shift();
+        }
+
+        if (sourceNodeId !== config.nodeId && peerMap.has(sourceNodeId)) {
+          const existing = peerMap.get(sourceNodeId);
+          if (existing) {
+            existing.lastSeen = nowIso();
+            existing.connected = existing.status === 'active';
+          }
+        }
+
+        const projectPeers = projectMap.get(envelope.project_id) ?? new Set<string>();
+        if (sourceNodeId !== config.nodeId) {
+          projectPeers.add(sourceNodeId);
+        }
+        projectMap.set(envelope.project_id, projectPeers);
+
+        registerDrift(sourceNodeId, envelope);
+        if (!forwarded) {
+          void forwardEnvelope(event);
+        }
+
+        writeJson(res, 200, {
+          accepted: true,
+          sequence: event.sequence,
+        } satisfies PostToBusResult);
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/heartbeat') {
+        const signed = await parseSignedPayload(req, heartbeatPayloadSchema);
+        validateSignedRequest({
+          kind: 'heartbeat',
+          signedBy: signed.signedBy,
+          nonce: signed.nonce,
+          signature: signed.signature,
+          payload: signed.payload,
+          trustedPublicKeys,
+          enforceSignatures: config.enforceSignatures === true,
+          seenNonces,
+        });
+        counters.heartbeatsReceived += 1;
+        upsertPeer({
+          peerId: signed.payload.peerId,
+          busUrl: signed.payload.busUrl,
+          adminUrl: signed.payload.adminUrl,
+          capabilities: signed.payload.capabilities,
+          projectIds: signed.payload.projectIds ?? [],
+          role: signed.payload.role,
+        });
+        writeJson(res, 200, { accepted: true });
+        return;
+      }
+
+      writeJson(res, 404, { error: 'Not found' });
+    } catch (error) {
+      writeJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
+    }
   });
 
-  const heartbeatTimer = setInterval(() => {
-    const heartbeat: HeartbeatInput = {
-      peerId: options.nodeId,
-      busUrl: `http://127.0.0.1:${options.busPort}`,
-      adminUrl: `http://127.0.0.1:${options.adminPort}`,
-      capabilities: ['envelope-v2', 'heartbeat', 'kick', 'onboard', 'drift-detection'],
-      projectIds: localProjects,
-      ts: nowIso(),
-    };
-    for (const peer of peers.values()) {
-      void sendHeartbeat(peer.busUrl, heartbeat).catch((error) => {
-        log('heartbeat.failed', { peerId: peer.peerId, error: error instanceof Error ? error.message : String(error) });
-      });
-    }
-  }, heartbeatIntervalMs);
-  heartbeatTimer.unref?.();
+  const adminServer = createServer(async (req, res) => {
+    try {
+      const url = new URL(req.url ?? '/', `http://${req.headers.host ?? `${config.host}:${config.adminPort}`}`);
+      if (req.method === 'GET' && url.pathname === '/status') {
+        const peers = Array.from(peerMap.values()).sort((left, right) => left.peerId.localeCompare(right.peerId));
+        const projects = Array.from(projectMap.entries()).map(([projectId, peersForProject]) => ({
+          projectId,
+          peers: Array.from(peersForProject).sort(),
+        }));
 
-  const startup = Promise.all([
-    waitForServerListen(busServer, options.busPort, options.host),
-    waitForServerListen(adminServer, options.adminPort, options.host),
-  ]);
+        writeJson(res, 200, {
+          nodeId: config.nodeId,
+          host: config.host,
+          busPort: config.busPort,
+          adminPort: config.adminPort,
+          latestSequence,
+          peerCount: peers.length,
+          projectCount: projects.length,
+          recentEventCount: events.length,
+          recentDriftCount: recentDrifts.length,
+          peers,
+          projects,
+          recentDrifts,
+          counters,
+        } satisfies FederationBusStatus);
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/onboard') {
+        const signed = await parseSignedPayload(req, onboardPayloadSchema);
+        validateSignedRequest({
+          kind: 'onboard',
+          signedBy: signed.signedBy,
+          nonce: signed.nonce,
+          signature: signed.signature,
+          payload: signed.payload,
+          trustedPublicKeys,
+          enforceSignatures: config.enforceSignatures === true,
+          seenNonces,
+        });
+        counters.onboardingsReceived += 1;
+        const projectIds = signed.payload.projectIds ?? (signed.payload.projectId ? [signed.payload.projectId] : []);
+        upsertPeer({
+          peerId: signed.payload.peerId,
+          busUrl: signed.payload.busUrl,
+          adminUrl: signed.payload.adminUrl,
+          capabilities: signed.payload.capabilities,
+          projectIds,
+          role: signed.payload.role,
+        });
+        writeJson(res, 200, { accepted: true });
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/kick') {
+        const signed = await parseSignedPayload(req, kickPayloadSchema);
+        validateSignedRequest({
+          kind: 'kick',
+          signedBy: signed.signedBy,
+          nonce: signed.nonce,
+          signature: signed.signature,
+          payload: signed.payload,
+          trustedPublicKeys,
+          enforceSignatures: config.enforceSignatures === true,
+          seenNonces,
+        });
+        counters.kicksIssued += 1;
+        const existing = peerMap.get(signed.payload.peerId);
+        if (existing) {
+          existing.status = 'kicked';
+          existing.connected = false;
+          existing.kickedAt = nowIso();
+          existing.lastSeen = nowIso();
+        }
+        writeJson(res, 200, { accepted: true });
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/slave-roll-call') {
+        const signed = await parseSignedPayload(req, slaveRollCallPayloadSchema);
+        validateSignedRequest({
+          kind: 'slave-roll-call',
+          signedBy: signed.signedBy,
+          nonce: signed.nonce,
+          signature: signed.signature,
+          payload: signed.payload,
+          trustedPublicKeys,
+          enforceSignatures: config.enforceSignatures === true,
+          seenNonces,
+        });
+        counters.slaveRollCallsReceived += 1;
+        upsertPeer({
+          peerId: signed.payload.nodeId,
+          busUrl: signed.payload.busUrl ?? '',
+          adminUrl: signed.payload.adminUrl ?? '',
+          capabilities: signed.payload.capabilities,
+          projectIds: signed.payload.projectId ? [signed.payload.projectId] : [],
+          role: 'slave',
+        });
+        if (signed.payload.publicKey) {
+          trustedPublicKeys[signed.payload.nodeId] = signed.payload.publicKey;
+        }
+
+        const welcome = await config.onSlaveRollCall?.(signed.payload) ?? {
+          accepted: true,
+          nodeId: config.nodeId,
+          swarmRole: 'master' as const,
+          rulesHash: config.rulesHash ?? '',
+          droidspeakCatalog: config.droidspeakCatalog ?? {},
+          lawManifest: config.lawManifest ?? {},
+          projectId: signed.payload.projectId,
+        };
+        writeJson(res, 200, welcome);
+        return;
+      }
+
+      writeJson(res, 404, { error: 'Not found' });
+    } catch (error) {
+      writeJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  busServer.listen(config.busPort, config.host);
+  adminServer.listen(config.adminPort, config.host);
 
   return {
-    getStatus: () => ({
-      nodeId: options.nodeId,
-      host: options.host,
-      busPort: options.busPort,
-      adminPort: options.adminPort,
-      latestSequence: sequence,
-      peerCount: peers.size,
-      projectCount: projects.size,
-      peers: [...peers.values()],
-      projects: [...projects.values()],
-      recentEventCount: events.length,
-      recentDriftCount: recentDrifts.length,
-      recentDrifts,
-      counters,
-    }),
-    close: async () => {
-      clearInterval(heartbeatTimer);
-      await startup.catch(() => undefined);
+    async close(): Promise<void> {
       await Promise.all([
         new Promise<void>((resolve, reject) => busServer.close((error) => error ? reject(error) : resolve())),
         new Promise<void>((resolve, reject) => adminServer.close((error) => error ? reject(error) : resolve())),

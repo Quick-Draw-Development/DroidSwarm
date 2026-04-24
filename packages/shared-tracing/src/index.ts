@@ -5,6 +5,7 @@ import {
   listAuditEvents,
   verifyChain,
 } from './audit-logger';
+import { computeFederationRulesHash, enforceLaws, LAW_001_MANIFEST } from './laws';
 
 export interface TraceContext {
   traceId: string;
@@ -19,8 +20,11 @@ export const buildTraceContext = (workflowName: string): TraceContext => ({
 
 export {
   appendAuditEvent,
+  computeFederationRulesHash,
+  enforceLaws,
   exportProof,
   getMerkleRoot,
+  LAW_001_MANIFEST,
   listAuditEvents,
   verifyChain,
 };

@@ -69,6 +69,7 @@ Commands:
   project     Onboard and manage registered projects
   swarm       Start and register a managed DroidSwarm instance
   federation  Inspect federation state and onboard peer devices
+  nodes       List or kick federated slave nodes
   slack       Inspect or restart the optional Slack bot service
   orchestrator Inspect orchestrator state and send task-channel messages
   list        List tracked swarms running on this machine
@@ -116,6 +117,8 @@ Options:
   --db-path PATH
   --enable-federation
   --enable-federation-adb
+  --slave-mode
+  --connect-to HOST|URL
   --enable-slack-bot
   --federation-peer URL      Repeatable
   --federation-remote-workers-file PATH
@@ -145,6 +148,8 @@ Options:
   --llama-model PATH
   --enable-federation
   --enable-federation-adb
+  --slave-mode
+  --connect-to HOST|URL
   --enable-slack-bot
   --federation-peer URL      Repeatable
   --federation-remote-workers-file PATH
@@ -300,6 +305,26 @@ Examples:
   DroidSwarm federation status
   DroidSwarm federation devices --swarm-id <id>
   DroidSwarm federation onboard --swarm-id <id> --serial emulator-5554
+EOF
+}
+
+print_nodes_help() {
+  cat <<'EOF'
+Usage:
+  DroidSwarm nodes list [options]
+  DroidSwarm nodes kick [options]
+
+List options:
+  --project-id ID
+  --status STATUS
+
+Kick options:
+  --node-id ID              Required
+  --swarm-id ID
+
+Examples:
+  DroidSwarm nodes list
+  DroidSwarm nodes kick --node-id slave-a
 EOF
 }
 
@@ -940,6 +965,8 @@ cmd_swarm() {
   enable_slack_bot="${DROIDSWARM_ENABLE_SLACK_BOT:-0}"
   slack_bot_explicit="0"
   enable_federation="${DROIDSWARM_ENABLE_FEDERATION:-0}"
+  swarm_role="${DROIDSWARM_SWARM_ROLE:-master}"
+  federation_connect_to="${DROIDSWARM_FEDERATION_CONNECT_TO:-}"
   federation_bus_port="${DROIDSWARM_FEDERATION_BUS_PORT:-}"
   federation_admin_port="${DROIDSWARM_FEDERATION_ADMIN_PORT:-}"
   federation_node_id="${DROIDSWARM_FEDERATION_NODE_ID:-}"
@@ -1040,6 +1067,17 @@ cmd_swarm() {
         llama_model="$1"
         ;;
       --enable-federation)
+        enable_federation="1"
+        ;;
+      --slave-mode)
+        swarm_role="slave"
+        enable_federation="1"
+        ;;
+      --connect-to)
+        shift
+        require_value "--connect-to" "${1:-}"
+        federation_connect_to="$1"
+        swarm_role="slave"
         enable_federation="1"
         ;;
       --enable-federation-adb)
@@ -1347,6 +1385,10 @@ cmd_swarm() {
       federation_admin_url="http://${federation_host}:${federation_admin_port}"
     fi
 
+    if [[ "$swarm_role" == "slave" && -n "$federation_connect_to" && -z "$federation_peers" ]]; then
+      federation_peers="$federation_connect_to"
+    fi
+
     if [[ "$federation_adb_enabled" == "1" ]]; then
       if [[ -z "$federation_adb_entry" ]]; then
         err "Missing federation-adb build artifact."
@@ -1417,6 +1459,7 @@ cmd_swarm() {
   info "Swarm ID: $swarm_id"
   info "Project: $project_name ($project_id)"
   info "Project root: $project_root"
+  info "Swarm role: $swarm_role"
   info "Dashboard port: $dashboard_port"
   info "WebSocket port: $ws_port"
   info "llama.cpp port: $llama_port"
@@ -1474,6 +1517,8 @@ DROIDSWARM_SERVICE_CONFIG=$(printf '%q' "$DROIDSWARM_SERVICE_CONFIG")
 DROIDSWARM_ENABLE_SLACK_BOT=$(printf '%q' "$enable_slack_bot")
 DROIDSWARM_SLACK_KEYCHAIN_SERVICE=$(printf '%q' "${DROIDSWARM_SLACK_KEYCHAIN_SERVICE:-DroidSwarm Slack}")
 DROIDSWARM_ENABLE_FEDERATION=$(printf '%q' "$enable_federation")
+DROIDSWARM_SWARM_ROLE=$(printf '%q' "$swarm_role")
+DROIDSWARM_FEDERATION_CONNECT_TO=$(printf '%q' "$federation_connect_to")
 DROIDSWARM_FEDERATION_NODE_ID=$(printf '%q' "$federation_node_id")
 DROIDSWARM_FEDERATION_HOST=$(printf '%q' "$federation_host")
 DROIDSWARM_FEDERATION_BUS_PORT=$(printf '%q' "$federation_bus_port")
@@ -2133,6 +2178,74 @@ cmd_federation() {
     *)
       err "Unknown federation command: $action"
       print_federation_help
+      return 1
+      ;;
+  esac
+}
+
+cmd_nodes() {
+  local action="${1:-list}"
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
+
+  case "$action" in
+    list)
+      run_shared_projects_cli nodes-list "$@"
+      ;;
+    kick)
+      local node_id="" swarm_id=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --node-id)
+            shift
+            require_value "--node-id" "${1:-}"
+            node_id="$1"
+            ;;
+          --swarm-id)
+            shift
+            require_value "--swarm-id" "${1:-}"
+            swarm_id="$1"
+            ;;
+          --help|-h)
+            print_nodes_help
+            return 0
+            ;;
+          *)
+            err "Unknown nodes kick option: $1"
+            print_nodes_help
+            return 1
+            ;;
+        esac
+        shift
+      done
+
+      if [[ -z "$node_id" ]]; then
+        err "Missing --node-id"
+        return 1
+      fi
+
+      run_shared_projects_cli nodes-kick --node-id "$node_id" >/dev/null
+
+      if [[ -n "$swarm_id" || "$(active_swarm_ids | wc -l | tr -d ' ')" != "0" ]]; then
+        local resolved_swarm
+        resolved_swarm="$(resolve_swarm_id "$swarm_id")" || true
+        if [[ -n "$resolved_swarm" ]] && load_swarm_env "$resolved_swarm" && [[ -n "${DROIDSWARM_FEDERATION_ADMIN_URL:-}" ]] && command -v curl >/dev/null 2>&1; then
+          curl -fsS \
+            -H 'content-type: application/json' \
+            -d "{\"payload\":{\"peerId\":\"$(json_escape "$node_id")\"}}" \
+            "${DROIDSWARM_FEDERATION_ADMIN_URL%/}/kick" >/dev/null 2>&1 || true
+        fi
+      fi
+
+      info "Kicked node: $node_id"
+      ;;
+    help|-h|--help)
+      print_nodes_help
+      ;;
+    *)
+      err "Unknown nodes command: $action"
+      print_nodes_help
       return 1
       ;;
   esac
@@ -2892,6 +3005,9 @@ case "$COMMAND" in
     ;;
   federation)
     cmd_federation "$@"
+    ;;
+  nodes)
+    cmd_nodes "$@"
     ;;
   slack)
     cmd_slack "$@"

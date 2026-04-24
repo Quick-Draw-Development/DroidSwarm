@@ -1,6 +1,7 @@
-import { createPrivateKey, createPublicKey, generateKeyPairSync } from 'node:crypto';
+import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import type { GitPolicy } from '@shared-types';
 import { defaultGitPolicy } from '@shared-git';
@@ -11,11 +12,26 @@ export interface SharedConfig {
   socketUrl: string;
   skillsDir: string;
   gitPolicy: GitPolicy;
+  swarmRole: FederationNodeRole;
+  federationNodeId: string;
+  federationConnectTo?: string;
 }
 
 export interface AuditSigningKeyPair {
   privateKeyPem: string;
   publicKeyPem: string;
+}
+
+export type FederationNodeRole = 'master' | 'slave';
+
+export interface FederationNodeConfig {
+  nodeId: string;
+  swarmRole: FederationNodeRole;
+  connectTo?: string;
+  adminUrl?: string;
+  busUrl?: string;
+  hardwareFingerprintHash: string;
+  keyPair: AuditSigningKeyPair;
 }
 
 const DEFAULT_SLACK_KEYCHAIN_SERVICE = 'DroidSwarm Slack';
@@ -28,6 +44,14 @@ export const loadSharedConfig = (): SharedConfig => ({
   socketUrl: process.env.DROIDSWARM_SOCKET_URL ?? 'ws://127.0.0.1:8765',
   skillsDir: process.env.DROIDSWARM_SKILLS_DIR ?? path.resolve(process.cwd(), 'skills'),
   gitPolicy: defaultGitPolicy,
+  swarmRole: process.env.DROIDSWARM_SWARM_ROLE === 'slave' ? 'slave' : 'master',
+  federationNodeId:
+    process.env.DROIDSWARM_FEDERATION_NODE_ID
+    ?? process.env.DROIDSWARM_SWARM_ID
+    ?? process.env.DROIDSWARM_PROJECT_ID
+    ?? os.hostname()
+    ?? 'droidswarm-local',
+  federationConnectTo: process.env.DROIDSWARM_FEDERATION_CONNECT_TO,
 });
 
 const normalizePem = (value: string): string => value.includes('\\n') ? value.replace(/\\n/g, '\n') : value;
@@ -119,6 +143,20 @@ export const resolveAuditSigningKeyFile = (dbPath?: string): string => {
   return path.resolve(path.dirname(shared.dbPath), 'audit-signing-keypair.json');
 };
 
+export const resolveFederationSigningKeyFile = (dbPath?: string): string => {
+  const configured = process.env.DROIDSWARM_FEDERATION_SIGNING_KEY_FILE;
+  if (configured) {
+    return configured;
+  }
+
+  if (dbPath) {
+    return path.resolve(path.dirname(dbPath), 'federation-signing-keypair.json');
+  }
+
+  const shared = loadSharedConfig();
+  return path.resolve(path.dirname(shared.dbPath), 'federation-signing-keypair.json');
+};
+
 export const loadOrCreateAuditSigningKeyPair = (dbPath?: string): AuditSigningKeyPair => {
   const envPrivateKey = process.env.DROIDSWARM_AUDIT_SIGNING_PRIVATE_KEY;
   const envPublicKey = process.env.DROIDSWARM_AUDIT_SIGNING_PUBLIC_KEY;
@@ -155,6 +193,42 @@ export const loadOrCreateAuditSigningKeyPair = (dbPath?: string): AuditSigningKe
   return pair;
 };
 
+export const loadOrCreateFederationSigningKeyPair = (dbPath?: string): AuditSigningKeyPair => {
+  const envPrivateKey = process.env.DROIDSWARM_FEDERATION_SIGNING_PRIVATE_KEY;
+  const envPublicKey = process.env.DROIDSWARM_FEDERATION_SIGNING_PUBLIC_KEY;
+  if (envPrivateKey && envPublicKey) {
+    return {
+      privateKeyPem: normalizePem(envPrivateKey),
+      publicKeyPem: normalizePem(envPublicKey),
+    };
+  }
+
+  const keyFile = resolveFederationSigningKeyFile(dbPath);
+  if (fs.existsSync(keyFile)) {
+    const raw = JSON.parse(fs.readFileSync(keyFile, 'utf8')) as Partial<AuditSigningKeyPair>;
+    if (typeof raw.privateKeyPem === 'string' && typeof raw.publicKeyPem === 'string') {
+      return {
+        privateKeyPem: raw.privateKeyPem,
+        publicKeyPem: raw.publicKeyPem,
+      };
+    }
+  }
+
+  const directory = path.dirname(keyFile);
+  if (!fs.existsSync(directory)) {
+    fs.mkdirSync(directory, { recursive: true });
+  }
+
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+  const pair: AuditSigningKeyPair = {
+    privateKeyPem: privateKey.export({ format: 'pem', type: 'pkcs8' }).toString(),
+    publicKeyPem: publicKey.export({ format: 'pem', type: 'spki' }).toString(),
+  };
+
+  fs.writeFileSync(keyFile, JSON.stringify(pair, null, 2), { mode: 0o600 });
+  return pair;
+};
+
 export const isValidAuditSigningKeyPair = (pair: AuditSigningKeyPair): boolean => {
   try {
     createPrivateKey(pair.privateKeyPem);
@@ -163,4 +237,33 @@ export const isValidAuditSigningKeyPair = (pair: AuditSigningKeyPair): boolean =
   } catch {
     return false;
   }
+};
+
+const computeHardwareFingerprintHash = (): string => {
+  const payload = [
+    os.hostname(),
+    os.platform(),
+    os.arch(),
+    os.release(),
+    os.cpus()[0]?.model ?? 'unknown-cpu',
+  ].join('|');
+
+  return createHash('sha256').update(payload).digest('hex');
+};
+
+export const loadFederationNodeConfig = (dbPath?: string): FederationNodeConfig => {
+  const shared = loadSharedConfig();
+  const host = process.env.DROIDSWARM_FEDERATION_HOST ?? '127.0.0.1';
+  const busPort = process.env.DROIDSWARM_FEDERATION_BUS_PORT;
+  const adminPort = process.env.DROIDSWARM_FEDERATION_ADMIN_PORT;
+
+  return {
+    nodeId: shared.federationNodeId,
+    swarmRole: shared.swarmRole,
+    connectTo: shared.federationConnectTo,
+    busUrl: busPort ? `http://${host}:${busPort}` : process.env.DROIDSWARM_FEDERATION_BUS_URL,
+    adminUrl: adminPort ? `http://${host}:${adminPort}` : process.env.DROIDSWARM_FEDERATION_ADMIN_URL,
+    hardwareFingerprintHash: computeHardwareFingerprintHash(),
+    keyPair: loadOrCreateFederationSigningKeyPair(dbPath),
+  };
 };

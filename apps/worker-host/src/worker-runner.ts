@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 
 import { tracer } from '@shared-tracing';
+import { validateCompliance } from '@shared-governance';
 
 type WorkerMode = 'worker' | 'verifier';
 
@@ -44,6 +45,19 @@ export class WorkerRunner {
   async start(): Promise<void> {
     const mode = this.parseMode();
     const entry = this.resolveEntry(mode);
+    if (process.env.DROIDSWARM_ENABLE_GOVERNANCE !== '0') {
+      const report = validateCompliance({
+        eventType: 'worker-host.start',
+        actorRole: mode,
+        swarmRole: process.env.DROIDSWARM_SWARM_ROLE === 'slave' ? 'slave' : 'master',
+        projectId: process.env.DROIDSWARM_PROJECT_ID,
+        auditLoggingEnabled: true,
+        dashboardEnabled: false,
+      });
+      if (!report.ok) {
+        throw new Error(`Governance compliance failed for worker-host startup.`);
+      }
+    }
     tracer.audit('CODE_EXEC_START', {
       mode,
       entry,

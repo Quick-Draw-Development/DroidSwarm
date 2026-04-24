@@ -192,6 +192,29 @@ export interface OrchestrationInsightsData {
   serviceUsage?: RunServiceUsageSummary;
   federation?: FederationStatusSummary;
   auditTrail?: AuditTrailSummary;
+  governance?: GovernanceSummary;
+}
+
+export interface GovernanceSummary {
+  lawHash: string;
+  activeLawCount: number;
+  pendingProposalCount: number;
+  approvedProposalCount: number;
+  latestDebateAt?: string;
+  laws: Array<{
+    id: string;
+    title: string;
+    description: string;
+    version: string;
+  }>;
+  proposals: Array<{
+    proposalId: string;
+    lawId: string;
+    title: string;
+    status: string;
+    proposedBy: string;
+    updatedAt: string;
+  }>;
 }
 
 export interface AuditTrailSummary {

@@ -58,6 +58,7 @@ const createConfig = async (overrides: Partial<ServerConfig> = {}): Promise<Serv
     maxMessagesPerWindow: 10,
     messageWindowMs: 1_000,
     federationEnabled: true,
+    governanceEnabled: true,
     federationNodeId: 'node-local',
     federationPollMs: 50,
     environment: 'test',

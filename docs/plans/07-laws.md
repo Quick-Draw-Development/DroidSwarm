@@ -98,3 +98,39 @@ Ensure everything remains Mac-friendly, local-first, and fully auditable.
 After completion, update SYSTEM_LAWS.md, AGENTS.md, and all relevant documentation with the new governance framework.
 
 This plan gives DroidSwarm the same formal, self-regulating governance that makes Asolaria robust while adding human-in-the-loop adaptation and clear checks & balances. All internal reasoning stays in Droidspeak; user-facing interfaces remain natural English.
+
+Completion Status
+
+Status: Implemented in repo on April 24, 2026
+
+Completed implementation summary
+
+- Phase 0: added `packages/shared-governance` with the canonical law manifest, compliance helpers, proposal store, debate engine, CLI, and unit coverage. Root governance documents now live in `SYSTEM_LAWS.md` and `Brown-Hilbert.md`.
+- Phase 1: governance verbs were added to `packages/shared-droidspeak`, and law enforcement now gates critical boundaries in the orchestrator, socket server, worker host, Slack bot, dashboard operator API, and federation onboarding flow.
+- Phase 2: `apps/orchestrator/src/services/governance-supervisor.service.ts` now performs periodic compliance checks and audit emission. The debate engine enforces planner/reviewer/verifier quorum plus guardian veto handling before proposals can advance.
+- Phase 3: adaptive rule proposal flows now exist across CLI, Slack, and dashboard surfaces. Approved proposals persist in the governance store, update the active runtime law set, and append to `SYSTEM_LAWS.md`.
+- Phase 4: governance is loaded at startup behind `DROIDSWARM_ENABLE_GOVERNANCE` / `DroidSwarm swarm --no-governance`. Federation slave onboarding now includes law hash and manifest sync, and the dashboard board exposes governance status plus proposal controls.
+- Phase 5: unit and integration coverage now verifies law enforcement, debate simulation, Slack proposal approval, and governance-aware boundary enforcement across the touched services.
+
+Verification run
+
+- `npx nx typecheck shared-governance`
+- `npx nx typecheck slack-bot`
+- `npx nx typecheck dashboard`
+- `npx nx typecheck orchestrator`
+- `npx nx typecheck socket-server`
+- `npx nx typecheck worker-host`
+- `npx nx typecheck federation-bus`
+- `npx nx test shared-governance`
+- `npx nx test slack-bot`
+- `npx nx test socket-server`
+- `npx nx test orchestrator`
+- `bash -n packages/bootstrap/bin/DroidSwarm`
+- `bash -n packages/bootstrap/libexec/droidswarm-daemon.sh`
+- `bash -n packages/bootstrap/scripts/install-droidswarm.sh`
+
+Implementation notes
+
+- Governance enforcement is enabled by default, but remains runtime-switchable so existing local installs can still boot with `--no-governance` when needed.
+- Approved runtime laws are enforced immediately from the governance store and documented in `SYSTEM_LAWS.md`; code generation of new enforcement logic is intentionally not automatic.
+- The dashboard exposes governance proposal actions through server routes, while Slack and CLI provide equivalent human approval paths for operator workflows.

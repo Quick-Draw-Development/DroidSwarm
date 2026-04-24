@@ -66,6 +66,12 @@
     "@shared-droidspeak": [
       "packages/shared-droidspeak/src/index.ts"
     ],
+    "@shared-governance": [
+      "packages/shared-governance/src/index.ts"
+    ],
+    "@shared-governance/*": [
+      "packages/shared-governance/src/*"
+    ],
     "@shared-persistence": [
       "packages/shared-persistence/src/index.ts"
     ],

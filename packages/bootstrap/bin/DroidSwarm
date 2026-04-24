@@ -70,6 +70,7 @@ Commands:
   swarm       Start and register a managed DroidSwarm instance
   federation  Inspect federation state and onboard peer devices
   nodes       List or kick federated slave nodes
+  laws        Inspect and operate the governance law system
   slack       Inspect or restart the optional Slack bot service
   orchestrator Inspect orchestrator state and send task-channel messages
   list        List tracked swarms running on this machine
@@ -120,6 +121,7 @@ Options:
   --slave-mode
   --connect-to HOST|URL
   --enable-slack-bot
+  --no-governance
   --federation-peer URL      Repeatable
   --federation-remote-workers-file PATH
   --force
@@ -328,8 +330,24 @@ Examples:
 EOF
 }
 
+print_laws_help() {
+  cat <<'EOF'
+Usage:
+  DroidSwarm laws list
+  DroidSwarm laws status
+  DroidSwarm laws proposals
+  DroidSwarm laws propose --title TITLE --description TEXT [--rationale TEXT]
+  DroidSwarm laws approve --proposal-id ID [--comment TEXT]
+  DroidSwarm laws reject --proposal-id ID [--comment TEXT]
+EOF
+}
+
 run_shared_projects_cli() {
   node --import tsx "$ROOT_DIR/../shared-projects/src/cli.ts" "$@"
+}
+
+run_shared_governance_cli() {
+  node --import tsx "$ROOT_DIR/../shared-governance/src/cli.ts" "$@"
 }
 
 json_field() {
@@ -963,6 +981,7 @@ cmd_swarm() {
   node_bin="${DROIDSWARM_NODE_BIN:-$(command -v node || true)}"
   operator_token="${DROIDSWARM_OPERATOR_TOKEN:-}"
   enable_slack_bot="${DROIDSWARM_ENABLE_SLACK_BOT:-0}"
+  enable_governance="${DROIDSWARM_ENABLE_GOVERNANCE:-1}"
   slack_bot_explicit="0"
   enable_federation="${DROIDSWARM_ENABLE_FEDERATION:-0}"
   swarm_role="${DROIDSWARM_SWARM_ROLE:-master}"
@@ -1087,6 +1106,9 @@ cmd_swarm() {
       --enable-slack-bot)
         enable_slack_bot="1"
         slack_bot_explicit="1"
+        ;;
+      --no-governance)
+        enable_governance="0"
         ;;
       --federation-peer)
         shift
@@ -1464,6 +1486,7 @@ cmd_swarm() {
   info "WebSocket port: $ws_port"
   info "llama.cpp port: $llama_port"
   info "Federation: $( [[ "$enable_federation" == "1" ]] && printf 'enabled' || printf 'disabled' )"
+  info "Governance: $( [[ "$enable_governance" == "1" ]] && printf 'enabled' || printf 'disabled' )"
   info "Slack bot: $( [[ "$enable_slack_bot" == "1" ]] && printf 'enabled' || printf 'disabled' )"
   if [[ "$enable_federation" == "1" ]]; then
     info "Federation bus port: ${federation_bus_port:-unknown}"
@@ -1514,6 +1537,7 @@ DROIDSWARM_ADOPT_LLAMA=$(printf '%q' "$llama_adopt")
 DROIDSWARM_ADOPT_LLAMA_PID=$(printf '%q' "$llama_adopt_pid")
 DROIDSWARM_LLAMA_MODEL=$(printf '%q' "$llama_model")
 DROIDSWARM_SERVICE_CONFIG=$(printf '%q' "$DROIDSWARM_SERVICE_CONFIG")
+DROIDSWARM_ENABLE_GOVERNANCE=$(printf '%q' "$enable_governance")
 DROIDSWARM_ENABLE_SLACK_BOT=$(printf '%q' "$enable_slack_bot")
 DROIDSWARM_SLACK_KEYCHAIN_SERVICE=$(printf '%q' "${DROIDSWARM_SLACK_KEYCHAIN_SERVICE:-DroidSwarm Slack}")
 DROIDSWARM_ENABLE_FEDERATION=$(printf '%q' "$enable_federation")
@@ -2246,6 +2270,27 @@ cmd_nodes() {
     *)
       err "Unknown nodes command: $action"
       print_nodes_help
+      return 1
+      ;;
+  esac
+}
+
+cmd_laws() {
+  local action="${1:-status}"
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
+
+  case "$action" in
+    list|status|proposals|propose|approve|reject)
+      run_shared_governance_cli "$action" "$@"
+      ;;
+    help|-h|--help)
+      print_laws_help
+      ;;
+    *)
+      err "Unknown laws command: $action"
+      print_laws_help
       return 1
       ;;
   esac
@@ -3008,6 +3053,9 @@ case "$COMMAND" in
     ;;
   nodes)
     cmd_nodes "$@"
+    ;;
+  laws)
+    cmd_laws "$@"
     ;;
   slack)
     cmd_slack "$@"

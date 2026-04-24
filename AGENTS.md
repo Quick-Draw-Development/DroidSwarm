@@ -1,6 +1,6 @@
 # AGENTS root instructions
 
-`SYSTEM_CANON.md` is the root canon for repository identity, boot order, continuity, scan -> seek -> find, handoffs, digests, and role rules. Runtime-branded adapters must remain thin and reversible.
+`SYSTEM_CANON.md` is the root canon for repository identity, boot order, continuity, scan -> seek -> find, handoffs, digests, and role rules. `SYSTEM_LAWS.md` is the numbered governance companion for enforcement-oriented runtime law. Runtime-branded adapters must remain thin and reversible.
 
 ## Nx commands (mandatory)
 

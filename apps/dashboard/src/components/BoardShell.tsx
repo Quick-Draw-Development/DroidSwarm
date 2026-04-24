@@ -1,5 +1,6 @@
 import { AddTaskForm } from './AddTaskForm';
 import { BoardClient } from './BoardClient';
+import { GovernancePanel } from './GovernancePanel';
 import { LiveConnectionStatus } from './LiveConnectionStatus';
 import { ProvideInstructionsModal } from './ProvideInstructionsModal';
 import { OrchestrationInsights } from './OrchestrationInsights';
@@ -44,6 +45,7 @@ export function BoardShell({
         <AddTaskForm username={username} />
       </section>
       <BoardClient username={username} tasks={tasks} />
+      <GovernancePanel governance={insights.governance} />
       <OrchestrationInsights data={insights} />
     </main>
   );

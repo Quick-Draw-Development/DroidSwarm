@@ -5,6 +5,8 @@ import { parseSlackCommand, parseSlackIntent, renderSlackCommandResponse } from 
 test('parses supported slash commands', () => {
   assert.equal(parseSlackCommand('projects').kind, 'projects');
   assert.equal(parseSlackCommand('use demo').kind, 'project-use');
+  assert.equal(parseSlackCommand('law propose Require audit trail for governance').kind, 'law-propose');
+  assert.equal(parseSlackCommand('law approve proposal-123').kind, 'law-approve');
   assert.equal(parseSlackCommand('task-1234abcd: please retry').kind, 'task-message');
   assert.equal(parseSlackCommand('please check the planner state').kind, 'operator-message');
 });

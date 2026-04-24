@@ -10,6 +10,7 @@ import {
   onboardPeer,
   postToBus,
 } from '@federation-bus';
+import { validateCompliance } from '@shared-governance';
 
 import { authenticateClient, AuthenticationError } from './auth/authenticate';
 import { createDatabase } from './db/client';
@@ -55,6 +56,19 @@ export class DroidSwarmSocketServer {
   }
 
   async start(): Promise<void> {
+    if (this.config.governanceEnabled) {
+      const report = validateCompliance({
+        eventType: 'socket-server.start',
+        actorRole: 'gateway',
+        swarmRole: 'master',
+        projectId: this.config.projectId,
+        auditLoggingEnabled: true,
+        dashboardEnabled: false,
+      });
+      if (!report.ok) {
+        throw new Error(`Governance compliance failed for socket server startup.`);
+      }
+    }
     await new Promise<void>((resolve) => {
       this.httpServer.listen(this.config.port, this.config.host, () => {
         resolve();
@@ -224,6 +238,23 @@ export class DroidSwarmSocketServer {
     if (message.project_id !== this.config.projectId || message.room_id !== client.roomId) {
       this.sendRoomError(client, 'Message project or room mismatch', 'message_scope_mismatch');
       return;
+    }
+
+    if (this.config.governanceEnabled) {
+      const governance = validateCompliance({
+        eventType: message.verb.startsWith('governance.') ? 'governance.proposal' : 'socket-server.message',
+        actorRole: client.agentRole,
+        swarmRole: 'master',
+        projectId: message.project_id,
+        auditLoggingEnabled: true,
+        dashboardEnabled: false,
+        droidspeakState: (message.payload as { droidspeak?: unknown } | undefined)?.droidspeak
+          ?? (message.body as { droidspeak?: unknown } | undefined)?.droidspeak,
+      });
+      if (!governance.ok) {
+        this.sendRoomError(client, governance.laws.filter((entry) => !entry.ok).map((entry) => entry.violations.join(' ')).join(' '), 'governance_violation');
+        return;
+      }
     }
 
     if (message.type === 'heartbeat') {

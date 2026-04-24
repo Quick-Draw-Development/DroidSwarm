@@ -32,6 +32,7 @@ const makeTempHome = (): string => fs.mkdtempSync(path.join(os.tmpdir(), 'droids
 
 const baseConfig = (): SlackBotRuntimeConfig => ({
   enabled: true,
+  governanceEnabled: true,
   botToken: 'xoxb-test',
   appToken: 'xapp-test',
   operatorToken: 'operator-token',
@@ -178,4 +179,39 @@ test('forwards task-room messages and mirrors task replies into the slack thread
   assert.equal(posted.length, 1);
   assert.equal(posted[0]?.threadTs, '200.300');
   assert.match(posted[0]?.text ?? '', /planner-1/);
+});
+
+test('creates and approves governance proposals from slack commands', async () => {
+  const home = makeTempHome();
+  process.env.DROIDSWARM_HOME = home;
+  onboardProject({
+    projectId: 'demo',
+    name: 'Demo',
+    rootPath: path.join(home, 'repo'),
+    dbPath: path.join(home, 'projects', 'demo', 'droidswarm.db'),
+    wsPort: 9999,
+  });
+
+  const proposed = await handleSlackInput({
+    text: 'law propose Require explicit governance summaries at startup.',
+    userId: 'U1',
+    username: 'alice',
+    channelId: 'C1',
+  }, baseConfig());
+  assert.match(proposed.text, /pending human approval|rejected/);
+
+  const proposalStorePath = path.join(home, 'governance', 'store.json');
+  const payload = JSON.parse(fs.readFileSync(proposalStorePath, 'utf8')) as {
+    proposals: Array<{ proposalId: string }>;
+  };
+  const proposalId = payload.proposals[0]?.proposalId;
+  assert.ok(proposalId);
+
+  const approved = await handleSlackInput({
+    text: `law approve ${proposalId}`,
+    userId: 'U1',
+    username: 'alice',
+    channelId: 'C1',
+  }, baseConfig());
+  assert.match(approved.text, /approved and activated/i);
 });

@@ -191,6 +191,7 @@ export function OrchestrationInsights({ data }: { data: OrchestrationInsightsDat
   const serviceUsage = data.serviceUsage;
   const federation = data.federation;
   const auditTrail = data.auditTrail;
+  const governance = data.governance;
   const runSummary = (() => {
     if (!latestRun?.metadata) {
       return undefined;
@@ -475,6 +476,29 @@ export function OrchestrationInsights({ data }: { data: OrchestrationInsightsDat
             </ul>
           ) : (
             <p className="empty-copy">Audit trail unavailable.</p>
+          )}
+        </article>
+        <article className="insight-card">
+          <p className="section-title">Governance status</p>
+          {governance ? (
+            <ul className="insight-list">
+              <li className="insight-item">
+                <strong>Active laws</strong>
+                <span>{governance.activeLawCount} · pending {governance.pendingProposalCount}</span>
+              </li>
+              <li className="insight-item">
+                <strong>Law hash</strong>
+                <span>{governance.lawHash}</span>
+              </li>
+              {governance.latestDebateAt ? (
+                <li className="insight-item">
+                  <strong>Latest debate</strong>
+                  <span>{displayDate(governance.latestDebateAt)}</span>
+                </li>
+              ) : null}
+            </ul>
+          ) : (
+            <p className="empty-copy">Governance status unavailable.</p>
           )}
         </article>
         <article className="insight-card">

@@ -3,6 +3,7 @@ import { getSecureAppToken, getSecureSlackToken, resolveSlackKeychainService } f
 
 export interface SlackBotRuntimeConfig {
   enabled: boolean;
+  governanceEnabled: boolean;
   botToken: string | null;
   appToken: string | null;
   operatorToken: string | null;
@@ -54,6 +55,7 @@ export const loadSlackBotRuntimeConfig = (): SlackBotRuntimeConfig => {
 
   return {
     enabled,
+    governanceEnabled: process.env.DROIDSWARM_ENABLE_GOVERNANCE !== '0',
     botToken,
     appToken,
     operatorToken,

@@ -17,8 +17,10 @@ import type { OrchestratorConfig, RunRecord } from './types';
 import { finalizeRunOnShutdown } from './run-shutdown';
 import { ToolService } from './tools/ToolService';
 import { ProjectRegistryService } from './services/project-registry.service';
+import { GovernanceSupervisorService } from './services/governance-supervisor.service';
 import type { PersistedTask, TaskRecord } from './types';
 import { onboardPeer } from '@federation-bus';
+import { validateCompliance } from '@shared-governance';
 
 export class DroidSwarmOrchestratorClient {
   private readonly registry = new WorkerRegistry();
@@ -32,6 +34,7 @@ export class DroidSwarmOrchestratorClient {
   private currentRun?: RunRecord;
   private persistenceService?: OrchestratorPersistenceService;
   private engine?: OrchestratorEngine;
+  private governanceSupervisor?: GovernanceSupervisorService;
 
   constructor(private readonly config: OrchestratorConfig = loadConfig()) {
     this.database = openPersistenceDatabase(this.config.dbPath);
@@ -46,6 +49,19 @@ export class DroidSwarmOrchestratorClient {
   }
 
   start(): void {
+    if (this.config.governanceEnabled) {
+      const report = validateCompliance({
+        eventType: 'governance.startup',
+        actorRole: 'master',
+        swarmRole: 'master',
+        projectId: this.config.projectId,
+        auditLoggingEnabled: true,
+        dashboardEnabled: false,
+      });
+      if (!report.ok) {
+        throw new Error(`Governance compliance failed at orchestrator startup: ${report.laws.filter((entry) => !entry.ok).map((entry) => `${entry.lawId}: ${entry.violations.join(' ')}`).join(' | ')}`);
+      }
+    }
     this.log('starting orchestrator', {
       projectId: this.config.projectId,
       projectRoot: this.config.projectRoot,
@@ -130,6 +146,8 @@ export class DroidSwarmOrchestratorClient {
     this.gateway.setMessageHandler(this.engine.handleMessage.bind(this.engine));
     this.gateway.start();
     void this.announceFederationPresence();
+    this.governanceSupervisor = new GovernanceSupervisorService(this.config);
+    this.governanceSupervisor.start();
 
     this.hydrateExistingTasks();
     this.persistenceService.recordSwarmTopologySnapshot();
@@ -155,6 +173,7 @@ export class DroidSwarmOrchestratorClient {
   }
 
   stop(): void {
+    this.governanceSupervisor?.stop();
     if (this.currentRun) {
       finalizeRunOnShutdown(this.persistence, this.runLifecycle, this.currentRun.runId);
     }

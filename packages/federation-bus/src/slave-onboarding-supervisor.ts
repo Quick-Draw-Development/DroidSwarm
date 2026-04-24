@@ -1,7 +1,8 @@
 import { loadFederationNodeConfig, loadSharedConfig } from '@shared-config';
 import { DROIDSPEAK_CATALOGS } from '@shared-droidspeak';
+import { computeLawManifestHash, listActiveLaws, validateCompliance } from '@shared-governance';
 import { registerFederatedNode } from '@shared-projects';
-import { appendAuditEvent, computeFederationRulesHash, enforceLaws, LAW_001_MANIFEST } from '@shared-tracing';
+import { appendAuditEvent } from '@shared-tracing';
 
 import { rollCallSlave, type FederationSigningKey, type SlaveRollCallPayload, type SlaveWelcomeResponse } from './index';
 
@@ -9,30 +10,37 @@ export const createSlaveOnboardingWelcome = (payload: SlaveRollCallPayload): Sla
   accepted: true,
   nodeId: loadFederationNodeConfig().nodeId,
   swarmRole: 'master',
-  rulesHash: computeFederationRulesHash(),
+  rulesHash: computeLawManifestHash(listActiveLaws()),
   droidspeakCatalog: DROIDSPEAK_CATALOGS as unknown as Record<string, unknown>,
-  lawManifest: LAW_001_MANIFEST as unknown as Record<string, unknown>,
+  lawManifest: { laws: listActiveLaws() } as unknown as Record<string, unknown>,
   projectId: payload.projectId ?? loadSharedConfig().projectId,
 });
 
 export const registerSlaveRollCall = (payload: SlaveRollCallPayload): SlaveWelcomeResponse => {
   const shared = loadSharedConfig();
-  const enforcement = enforceLaws({
+  const enforcement = validateCompliance({
+    eventType: 'federation.message',
+    actorRole: 'slave',
     swarmRole: 'slave',
     dashboardEnabled: false,
     auditLoggingEnabled: true,
     projectId: payload.projectId ?? shared.projectId,
+    droidspeakState: {
+      compact: 'EVT-LAW-UPDATE',
+      expanded: payload.nodeId,
+      kind: 'federation_delta',
+    },
   });
   if (!enforcement.ok) {
     return {
       accepted: false,
       nodeId: loadFederationNodeConfig().nodeId,
       swarmRole: 'master',
-      rulesHash: enforcement.rulesHash,
+      rulesHash: enforcement.lawHash,
       droidspeakCatalog: DROIDSPEAK_CATALOGS as unknown as Record<string, unknown>,
-      lawManifest: LAW_001_MANIFEST as unknown as Record<string, unknown>,
+      lawManifest: { laws: listActiveLaws() } as unknown as Record<string, unknown>,
       projectId: payload.projectId ?? shared.projectId,
-      reason: enforcement.violations.join(' '),
+      reason: enforcement.laws.filter((entry) => !entry.ok).map((entry) => entry.violations.join(' ')).join(' '),
     };
   }
 
@@ -45,7 +53,7 @@ export const registerSlaveRollCall = (payload: SlaveRollCallPayload): SlaveWelco
     projectId: payload.projectId ?? shared.projectId,
     version: payload.version,
     publicKey: payload.publicKey,
-    rulesHash: computeFederationRulesHash(),
+    rulesHash: computeLawManifestHash(listActiveLaws()),
     hardwareFingerprintHash: payload.hardwareFingerprintHash,
     capabilities: payload.capabilities,
   });
@@ -89,6 +97,14 @@ export const beginSlaveOnboarding = async (input?: {
     keyId: node.nodeId,
     privateKeyPem: node.keyPair.privateKeyPem,
   });
+
+  if (welcome.rulesHash !== computeLawManifestHash(listActiveLaws())) {
+    appendAuditEvent('FEDERATION_LAW_HASH_MISMATCH', {
+      nodeId: node.nodeId,
+      localRulesHash: computeLawManifestHash(listActiveLaws()),
+      remoteRulesHash: welcome.rulesHash,
+    });
+  }
 
   registerFederatedNode({
     nodeId: node.nodeId,

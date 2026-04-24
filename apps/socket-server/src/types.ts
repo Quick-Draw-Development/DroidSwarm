@@ -63,6 +63,7 @@ export interface ServerConfig {
   federationPollMs: number;
   federationSigningKeyId?: string;
   federationSigningPrivateKey?: string;
+  governanceEnabled: boolean;
   environment: 'development' | 'test' | 'production';
 }
 

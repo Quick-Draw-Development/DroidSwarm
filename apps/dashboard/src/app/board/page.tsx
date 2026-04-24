@@ -1,4 +1,5 @@
 import { cookies } from 'next/headers';
+import { listActiveLaws, listLawProposals, validateCompliance } from '@shared-governance';
 
 import { BoardShell } from '../../components/BoardShell';
 import { ProjectSwitcher } from '../../components/project-switcher';
@@ -67,6 +68,39 @@ export default async function BoardPage({
     serviceUsage: getRunServiceUsage(latestRunId),
     federation: getFederationStatus(),
     auditTrail: getAuditTrail(latestRunId),
+    governance: (() => {
+      const laws = listActiveLaws();
+      const proposals = listLawProposals();
+      const status = validateCompliance({
+        eventType: 'dashboard.read',
+        actorRole: 'dashboard',
+        swarmRole: process.env.DROIDSWARM_SWARM_ROLE === 'slave' ? 'slave' : 'master',
+        projectId: selectedProjectId,
+        auditLoggingEnabled: true,
+        dashboardEnabled: true,
+      });
+      return {
+        lawHash: status.lawHash,
+        activeLawCount: laws.length,
+        pendingProposalCount: proposals.filter((entry) => entry.status === 'pending').length,
+        approvedProposalCount: proposals.filter((entry) => entry.status === 'approved').length,
+        latestDebateAt: proposals[0]?.updatedAt,
+        laws: laws.map((law) => ({
+          id: law.id,
+          title: law.title,
+          description: law.description,
+          version: law.version,
+        })),
+        proposals: proposals.slice(0, 8).map((proposal) => ({
+          proposalId: proposal.proposalId,
+          lawId: proposal.lawId,
+          title: proposal.title,
+          status: proposal.status,
+          proposedBy: proposal.proposedBy,
+          updatedAt: proposal.updatedAt,
+        })),
+      };
+    })(),
   };
   const operatorMessages = listOperatorMessages();
   const appVersion = getAppVersion();

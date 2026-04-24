@@ -176,6 +176,7 @@ const envSchema = z.object({
   DROIDSWARM_FEDERATION_SIGNING_PRIVATE_KEY: z.string().optional(),
   DROIDSWARM_FEDERATION_REMOTE_WORKERS_FILE: z.string().optional(),
   DROIDSWARM_FEDERATION_REMOTE_WORKERS: z.string().optional(),
+  DROIDSWARM_ENABLE_GOVERNANCE: z.string().optional(),
 });
 
 export const loadConfig = (): OrchestratorConfig => {
@@ -410,6 +411,7 @@ export const loadConfig = (): OrchestratorConfig => {
     federationSigningPrivateKey: env.DROIDSWARM_FEDERATION_SIGNING_PRIVATE_KEY,
     federationRemoteWorkersFile: env.DROIDSWARM_FEDERATION_REMOTE_WORKERS_FILE,
     federationRemoteWorkers,
+    governanceEnabled: parseBooleanFlag(env.DROIDSWARM_ENABLE_GOVERNANCE, true),
     policyDefaults: {
       maxDepth: toPositiveIntOrUndefined(env.DROIDSWARM_POLICY_MAX_DEPTH),
       maxChildren: toPositiveIntOrUndefined(env.DROIDSWARM_POLICY_MAX_CHILDREN),

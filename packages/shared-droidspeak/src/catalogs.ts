@@ -55,7 +55,14 @@ export const DROIDSPEAK_CATALOGS = {
     'EVT-CLASSIFY': 'Classify',
     'EVT-CLUSTER': 'Cluster',
     'EVT-ASSIGN': 'Assign',
-    'EVT-REASSIGN': 'Reassign'
+    'EVT-REASSIGN': 'Reassign',
+    'EVT-LAW-PROPOSAL': 'Law Proposal',
+    'EVT-DEBATE-ROUND': 'Debate Round',
+    'EVT-VOTE': 'Vote',
+    'EVT-HUMAN-APPROVAL': 'Human Approval',
+    'EVT-LAW-UPDATE': 'Law Update',
+    'EVT-COMPLIANCE-CHECK': 'Compliance Check',
+    'EVT-GUARDIAN-VETO': 'Guardian Veto'
   },
   
   // D11: Promotion (8 entries)

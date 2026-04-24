@@ -104,6 +104,14 @@ Shut down all swarms:
 DroidSwarm shutdown --all
 ```
 
+Inspect or manage governance state:
+
+```bash
+DroidSwarm laws list
+DroidSwarm laws status
+DroidSwarm laws propose --title "Require startup governance summaries" --description "Require a startup governance summary in operator-facing surfaces." --rationale "Operators need a visible compliance snapshot at boot."
+```
+
 ## Current Scope
 
 The repo now carries the shared contracts and persistence scaffolding for multi-project runs, repo-target/workspace scoping, canonical task chat, worker results and heartbeats, project memory, skill packs, local-first routing, EnvelopeV2 compatibility, TaskStateDigest/HandoffPacket durability, and strict git-flow enforcement. Existing durable runs/tasks/checkpoints are preserved and extended rather than replaced.
@@ -148,6 +156,18 @@ The daemon also writes a machine-readable service health snapshot per swarm, and
 When federation is enabled, the daemon also writes a machine-readable `federation-status.json` snapshot per swarm. The dashboard board insights surface federation enablement, bus/admin URLs, peer counts, and known peers directly from that snapshot.
 
 Federated worker status updates also carry digest/handoff hashes. The orchestrator compares those against the latest persisted continuity packets and emits a federated drift report when a remote node is running against stale continuity state.
+
+## Governance
+
+Governance is enabled by default and can be disabled for a swarm with `DroidSwarm swarm --no-governance`. The runtime law set lives in [SYSTEM_LAWS.md](SYSTEM_LAWS.md), while the Brown-Hilbert reasoning/glyph reference lives in [Brown-Hilbert.md](Brown-Hilbert.md).
+
+The shared governance package provides:
+
+- built-in numbered laws with a manifest hash and compliance checks
+- a debate engine that records planner/reviewer/verifier/guardian rounds before proposals become pending human approval
+- Slack commands for `law propose` and `law approve <proposal-id>`
+- dashboard governance views and approval controls
+- federation law hash sync during slave onboarding
 
 Optional provider/runtime env:
 

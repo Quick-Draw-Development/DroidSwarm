@@ -105,6 +105,7 @@ export interface OrchestratorConfig {
   federationSigningPrivateKey?: string;
   federationRemoteWorkersFile?: string;
   federationRemoteWorkers?: FederationRemoteWorkerTarget[];
+  governanceEnabled?: boolean;
 }
 
 export interface FederationRemoteWorkerTarget {

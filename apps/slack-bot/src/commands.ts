@@ -5,7 +5,9 @@ export type SlackCommandKind =
   | 'projects'
   | 'project-use'
   | 'task-message'
-  | 'operator-message';
+  | 'operator-message'
+  | 'law-propose'
+  | 'law-approve';
 
 export interface SlackParseContext {
   preferAppleIntelligence?: boolean;
@@ -22,6 +24,7 @@ export interface ParsedSlackCommand {
   projectHint?: string;
   taskId?: string;
   content?: string;
+  proposalId?: string;
   source: 'slash' | 'natural-language';
   route: ModelRouteDecision;
 }
@@ -95,6 +98,24 @@ const parseSlashCommand = (text: string, route: ModelRouteDecision): ParsedSlack
     return buildCommand(text, route, { kind: 'projects', args: [], source: 'slash' });
   }
 
+  if (args[0] === 'law' && args[1] === 'propose' && args.length > 2) {
+    return buildCommand(text, route, {
+      kind: 'law-propose',
+      args: args.slice(2),
+      content: trimmed.replace(/^law\s+propose\s+/i, ''),
+      source: 'slash',
+    });
+  }
+
+  if (args[0] === 'law' && args[1] === 'approve' && args[2]) {
+    return buildCommand(text, route, {
+      kind: 'law-approve',
+      args: args.slice(2),
+      proposalId: args[2],
+      source: 'slash',
+    });
+  }
+
   const useCommand = parseUseCommand(trimmed, route, args, 'slash');
   if (useCommand) {
     return useCommand;
@@ -123,6 +144,26 @@ const parseNaturalLanguage = (text: string, route: ModelRouteDecision): ParsedSl
 
   if (/^(show|list)?\s*projects\b/.test(lower)) {
     return buildCommand(text, route, { kind: 'projects', args: [], source: 'natural-language' });
+  }
+
+  const lawProposalMatch = trimmed.match(/^law\s+propose\s+(.+)$/i);
+  if (lawProposalMatch?.[1]) {
+    return buildCommand(text, route, {
+      kind: 'law-propose',
+      args: tokenize(lawProposalMatch[1]),
+      content: lawProposalMatch[1],
+      source: 'natural-language',
+    });
+  }
+
+  const lawApproveMatch = trimmed.match(/^law\s+approve\s+([a-z0-9-]+)$/i);
+  if (lawApproveMatch?.[1]) {
+    return buildCommand(text, route, {
+      kind: 'law-approve',
+      args: [lawApproveMatch[1]],
+      proposalId: lawApproveMatch[1],
+      source: 'natural-language',
+    });
   }
 
   const useMatch = lower.match(/(?:use|switch to|select)\s+(?:project\s+)?([a-z0-9._/-]+)/i);
@@ -163,6 +204,7 @@ export const parseSlackIntent = (text: string, context?: SlackParseContext): Par
     'projects',
     'use',
     'project',
+    'law',
   ].includes(args[0]?.toLowerCase() ?? '');
 
   if (trimmed.startsWith('/')) {
@@ -199,6 +241,14 @@ export const renderSlackCommandResponse = (command: ParsedSlackCommand): SlackCo
     case 'operator-message':
       return {
         text: 'Forwarding to the orchestrator operator room.',
+      };
+    case 'law-propose':
+      return {
+        text: 'Submitting a governance law proposal for debate.',
+      };
+    case 'law-approve':
+      return {
+        text: `Approving governance proposal \`${command.proposalId ?? 'unknown'}\`.`,
       };
   }
 };

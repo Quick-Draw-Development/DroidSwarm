@@ -4,6 +4,7 @@ import path from 'node:path';
 import WebSocket from 'ws';
 
 import { appendAuditEvent, tracer } from '@shared-tracing';
+import { approveLawProposal, listLawProposals, runGovernanceDebate, validateCompliance } from '@shared-governance';
 import {
   getCurrentProject,
   listRegisteredProjects,
@@ -414,6 +415,28 @@ export const executeSlackIntent = async (
   const project = resolveProjectForCommand(command, user.userId, config.defaultProjectId);
   session.recentMessages = [command.rawText, ...session.recentMessages].slice(0, 10);
 
+  if (config.governanceEnabled) {
+    const report = validateCompliance({
+      eventType: command.kind === 'law-propose' || command.kind === 'law-approve' ? 'governance.proposal' : 'slack.command',
+      actorRole: 'slack-bot',
+      swarmRole: 'master',
+      projectId: project?.projectId ?? config.defaultProjectId,
+      auditLoggingEnabled: true,
+      dashboardEnabled: false,
+      droidspeakState: command.kind === 'law-propose'
+        ? { compact: 'EVT-LAW-PROPOSAL', expanded: command.content ?? '', kind: 'memory_pinned' }
+        : command.kind === 'law-approve'
+          ? { compact: 'EVT-HUMAN-APPROVAL', expanded: command.proposalId ?? '', kind: 'audit_delta' }
+          : undefined,
+    });
+    if (!report.ok) {
+      return {
+        text: report.laws.filter((entry) => !entry.ok).map((entry) => entry.violations.join(' ')).join(' '),
+        backend: command.route.backend,
+      };
+    }
+  }
+
   appendSlackAudit('SLACK_COMMAND_RECEIVED', {
     userId: user.userId,
     username: user.username,
@@ -461,6 +484,56 @@ export const executeSlackIntent = async (
       return {
         text: `Slack relay now targets *${project.name}* (\`${project.projectId}\`).`,
         projectId: project.projectId,
+        backend: command.route.backend,
+      };
+    }
+    case 'law-propose': {
+      const content = command.content?.trim();
+      if (!content) {
+        return {
+          text: 'Law proposal content is empty.',
+          backend: command.route.backend,
+        };
+      }
+      const debate = runGovernanceDebate({
+        lawId: `LAW-${String(listLawProposals().length + 6).padStart(3, '0')}`,
+        title: content.split(/[.:]/)[0] ?? content,
+        description: content,
+        rationale: content,
+        glyph: 'EVT-LAW-PROPOSAL',
+        proposedBy: user.username,
+        context: {
+          eventType: 'governance.proposal',
+          actorRole: 'planner',
+          swarmRole: 'master',
+          projectId: project?.projectId ?? config.defaultProjectId,
+          auditLoggingEnabled: true,
+          dashboardEnabled: false,
+          droidspeakState: { compact: 'EVT-LAW-PROPOSAL', expanded: content, kind: 'memory_pinned' },
+        },
+      });
+      return {
+        text: debate.status === 'pending-human-approval'
+          ? `Proposal \`${debate.proposal.proposalId}\` is pending human approval after debate.`
+          : `Proposal \`${debate.proposal.proposalId}\` was rejected during debate.`,
+        projectId: project?.projectId,
+        backend: command.route.backend,
+      };
+    }
+    case 'law-approve': {
+      if (!command.proposalId) {
+        return {
+          text: 'Missing proposal id.',
+          backend: command.route.backend,
+        };
+      }
+      const approved = approveLawProposal(command.proposalId, {
+        approvedBy: user.username,
+        comment: `Approved from Slack by ${user.username}.`,
+      });
+      return {
+        text: `Governance proposal \`${approved.proposalId}\` approved and activated as ${approved.lawId}.`,
+        projectId: project?.projectId,
         backend: command.route.backend,
       };
     }

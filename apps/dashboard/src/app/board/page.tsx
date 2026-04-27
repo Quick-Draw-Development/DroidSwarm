@@ -1,5 +1,13 @@
 import { cookies } from 'next/headers';
-import { listActiveLaws, listLawProposals, validateCompliance } from '@shared-governance';
+import {
+  computeSystemStateHash,
+  listActiveLaws,
+  listConsensusRounds,
+  listDriftSnapshots,
+  listGovernanceRoles,
+  listLawProposals,
+  validateCompliance,
+} from '@shared-governance';
 import { listRegisteredSkillManifests, listSpecializedAgents } from '@shared-skills';
 
 import { BoardShell } from '../../components/BoardShell';
@@ -82,10 +90,28 @@ export default async function BoardPage({
       });
       return {
         lawHash: status.lawHash,
+        systemStateHash: computeSystemStateHash(),
         activeLawCount: laws.length,
         pendingProposalCount: proposals.filter((entry) => entry.status === 'pending').length,
         approvedProposalCount: proposals.filter((entry) => entry.status === 'approved').length,
         latestDebateAt: proposals[0]?.updatedAt,
+        roles: listGovernanceRoles(),
+        consensus: listConsensusRounds().slice(0, 8).map((round) => ({
+          consensusId: round.consensusId,
+          proposalId: round.proposalId,
+          proposalType: round.proposalType,
+          approved: round.approved,
+          guardianVeto: round.guardianVeto,
+          updatedAt: round.updatedAt,
+        })),
+        drift: listDriftSnapshots().slice(0, 8).map((snapshot) => ({
+          nodeId: snapshot.nodeId,
+          localHash: snapshot.localHash,
+          remoteHash: snapshot.remoteHash,
+          matches: snapshot.matches,
+          source: snapshot.source,
+          createdAt: snapshot.createdAt,
+        })),
         laws: laws.map((law) => ({
           id: law.id,
           title: law.title,

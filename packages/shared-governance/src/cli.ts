@@ -1,7 +1,12 @@
 import {
   approveLawProposal,
+  computeSystemStateHash,
+  listConsensusRounds,
+  listDriftSnapshots,
   listActiveLaws,
   listLawProposals,
+  listGovernanceRoles,
+  overrideLawProposal,
   rejectLawProposal,
   runGovernanceDebate,
   validateCompliance,
@@ -33,14 +38,28 @@ switch (command) {
     })));
     break;
   case 'status':
-    output(validateCompliance({
-      eventType: 'governance.status',
-      actorRole: 'cli',
-      swarmRole: process.env.DROIDSWARM_SWARM_ROLE === 'slave' ? 'slave' : 'master',
-      projectId: process.env.DROIDSWARM_PROJECT_ID,
-      auditLoggingEnabled: true,
-      dashboardEnabled: false,
-    }));
+    output({
+      compliance: validateCompliance({
+        eventType: 'governance.status',
+        actorRole: 'cli',
+        swarmRole: process.env.DROIDSWARM_SWARM_ROLE === 'slave' ? 'slave' : 'master',
+        projectId: process.env.DROIDSWARM_PROJECT_ID,
+        auditLoggingEnabled: true,
+        dashboardEnabled: false,
+      }),
+      consensus: listConsensusRounds().slice(0, 10),
+      drift: listDriftSnapshots().slice(0, 10),
+      systemStateHash: computeSystemStateHash(),
+    });
+    break;
+  case 'roles':
+    output(listGovernanceRoles());
+    break;
+  case 'consensus':
+    output(listConsensusRounds());
+    break;
+  case 'drift':
+    output(listDriftSnapshots());
     break;
   case 'proposals':
     output(listLawProposals());
@@ -78,6 +97,17 @@ switch (command) {
     }
     output(approveLawProposal(proposalId, {
       approvedBy: process.env.USER ?? 'cli',
+      comment: readValue('--comment'),
+    }));
+    break;
+  }
+  case 'override': {
+    const proposalId = readValue('--proposal-id');
+    if (!proposalId) {
+      throw new Error('Missing --proposal-id');
+    }
+    output(overrideLawProposal(proposalId, {
+      overriddenBy: process.env.USER ?? 'cli',
       comment: readValue('--comment'),
     }));
     break;

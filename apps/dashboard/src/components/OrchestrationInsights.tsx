@@ -499,6 +499,10 @@ export function OrchestrationInsights({ data }: { data: OrchestrationInsightsDat
                 <strong>Law hash</strong>
                 <span>{governance.lawHash}</span>
               </li>
+              <li className="insight-item">
+                <strong>Consensus / drift</strong>
+                <span>{governance.consensus.length} rounds · {governance.drift.filter((entry) => !entry.matches).length} mismatches</span>
+              </li>
               {governance.latestDebateAt ? (
                 <li className="insight-item">
                   <strong>Latest debate</strong>

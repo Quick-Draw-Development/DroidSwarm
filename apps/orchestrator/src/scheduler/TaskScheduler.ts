@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { COMPACT_VERB_DICTIONARY } from '@shared-types';
 import { getSwarmRoleDefinition, normalizeSwarmRole } from '@shared-routing';
+import { runConsensusRound } from '@shared-governance';
 
 import { AgentSupervisor, defaultRoleInstructions } from '../AgentSupervisor';
 import type { OrchestratorPersistenceService } from '../persistence/service';
@@ -473,6 +474,17 @@ export class TaskScheduler {
     const workspace = this.workspaceService.ensureWorkspace(task, attemptId, branch, routingDecision.readOnly);
     const skillPackNames = this.skillPackService.resolveNames(role, routingDecision.skillPacks);
     const skillTexts = this.skillPackService.resolve(role, routingDecision.skillPacks);
+    const spawnConsensus = this.runHighImpactConsensus(
+      task,
+      'agent-spawn',
+      `Spawn ${role} for ${task.taskId}`,
+      instructions,
+      'EVT-CONSENSUS-ROUND',
+    );
+    if (!spawnConsensus.approved) {
+      this.schedule();
+      return;
+    }
     const spawned = this.supervisor.startAgentForTask(
       {
         ...record,
@@ -506,6 +518,10 @@ export class TaskScheduler {
         routingTelemetry,
         requiredReads: handoffPacket?.requiredReads ?? taskDigest?.artifactIndex.map((artifact) => artifact.artifactId) ?? [],
         compactVerbDictionary: COMPACT_VERB_DICTIONARY,
+        governance: {
+          consensusId: spawnConsensus.consensusId,
+          assignmentType: 'agent-spawn',
+        },
       },
     );
     if (!spawned) {
@@ -592,7 +608,21 @@ export class TaskScheduler {
       return false;
     }
 
-    for (const request of expandedRequests) {
+    const approvedHandshakes = expandedRequests.map((request) => ({
+      request,
+      consensus: this.runHighImpactConsensus(
+        task,
+        'task-handoff',
+        `Handoff ${task.taskId} -> ${request.role}`,
+        request.instructions ?? request.reason,
+        'EVT-CONSENSUS-ROUND',
+      ),
+    }));
+    if (approvedHandshakes.some((entry) => !entry.consensus.approved)) {
+      return false;
+    }
+
+    for (const { request, consensus } of approvedHandshakes) {
       const childId = randomUUID();
       const childRecord = this.persistenceService.createTask({
         taskId: childId,
@@ -612,6 +642,7 @@ export class TaskScheduler {
           parallel_group: request.parallelGroupId,
           parallel_index: request.parallelIndex,
           parallel_total: request.parallelTotal,
+          consensus_id: consensus.consensusId,
           project_id: task.projectId ?? this.config.projectId,
           repo_id: task.repoId ?? this.config.repoId,
           root_path: task.rootPath ?? this.config.projectRoot,
@@ -638,6 +669,7 @@ export class TaskScheduler {
         digestHash: digest.federationHash,
         handoffHash: handoff.federationHash,
         auditHash: handoff.auditHash,
+        consensusId: consensus.consensusId,
       }, {
         taskId: childId,
         normalizedVerb: 'handoff.ready',
@@ -649,6 +681,13 @@ export class TaskScheduler {
           auditHash: handoff.auditHash,
           requiredReads: handoff.requiredReads,
           toRole: request.role,
+          consensus: {
+            consensus_id: consensus.consensusId,
+            proposal_id: consensus.proposalId,
+            approved: consensus.approved,
+            guardian_veto: consensus.guardianVeto,
+            audit_hash: consensus.auditHash,
+          },
         },
       });
       this.readyQueue.add(childId);
@@ -666,6 +705,63 @@ export class TaskScheduler {
       );
     }
     return childIds.length > 0;
+  }
+
+  private runHighImpactConsensus(
+    task: PersistedTask,
+    proposalType: 'agent-spawn' | 'task-handoff',
+    title: string,
+    summary: string,
+    glyph: string,
+  ): {
+    approved: boolean;
+    consensusId?: string;
+    proposalId?: string;
+    guardianVeto?: boolean;
+    auditHash?: string;
+    reason?: string;
+  } {
+    if (!this.config.governanceEnabled) {
+      return {
+        approved: true,
+      };
+    }
+
+    const consensus = runConsensusRound({
+      proposalId: `${task.taskId}:${proposalType}`,
+      proposalType,
+      title,
+      summary,
+      glyph,
+      context: {
+        eventType: 'governance.vote',
+        actorRole: typeof task.metadata?.agent_role === 'string' ? task.metadata.agent_role : 'orchestrator',
+        swarmRole: 'master',
+        projectId: task.projectId ?? this.config.projectId,
+        auditLoggingEnabled: true,
+        dashboardEnabled: false,
+      },
+    });
+    if (!consensus.approved) {
+      this.persistenceService.updateTaskMetadata(task.taskId, {
+        ...(task.metadata ?? {}),
+        blocked_reason: consensus.reason,
+        consensus_id: consensus.consensusId,
+      });
+      this.persistenceService.setTaskStatus(task.taskId, 'waiting_on_human');
+      this.persistenceService.recordExecutionEvent(
+        'governance_consensus_blocked',
+        `Consensus blocked ${proposalType} for ${task.taskId}`,
+        {
+          taskId: task.taskId,
+          proposalType,
+          consensusId: consensus.consensusId,
+          reason: consensus.reason,
+          guardianVeto: consensus.guardianVeto,
+        },
+      );
+    }
+    return consensus;
   }
 
   private resolveParentIfReady(task: PersistedTask): void {

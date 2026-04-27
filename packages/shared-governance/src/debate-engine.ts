@@ -4,6 +4,7 @@ import { chooseBackendDecision } from '@model-router';
 import { appendAuditEvent } from '@shared-tracing';
 
 import { validateCompliance } from './compliance';
+import { runConsensusRound } from './consensus-engine';
 import { createLawProposal, recordGovernanceDebateTimestamp, type LawProposalRecord } from './proposal-store';
 import type { GovernanceLawContext, LawId } from './laws-manifest';
 
@@ -30,6 +31,7 @@ export interface DebateResult {
   quorumRoles: string[];
   guardianVote: 'approve' | 'reject' | 'veto';
   proposal: LawProposalRecord;
+  consensusId?: string;
 }
 
 const buildArguments = (title: string, rationale: string): DebateParticipant[] => [
@@ -155,7 +157,18 @@ export const runGovernanceDebate = (input: {
   }
 
   recordGovernanceDebateTimestamp(new Date().toISOString());
-  const status = compliance.ok ? 'pending-human-approval' : 'rejected';
+  const consensus = runConsensusRound({
+    proposalId: proposal.proposalId,
+    proposalType: 'law-change',
+    title: input.title,
+    summary: input.description,
+    glyph: input.glyph,
+    context: {
+      ...input.context,
+      eventType: 'governance.vote',
+    },
+  });
+  const status = compliance.ok && consensus.approved ? 'pending-human-approval' : 'rejected';
   appendAuditEvent('GOVERNANCE_DEBATE_RESULT', {
     debateId,
     proposalId: proposal.proposalId,
@@ -163,6 +176,7 @@ export const runGovernanceDebate = (input: {
     backend,
     status,
     complianceOk: compliance.ok,
+    consensusId: consensus.consensusId,
     violations: compliance.laws.filter((entry) => !entry.ok),
   });
 
@@ -175,5 +189,6 @@ export const runGovernanceDebate = (input: {
     quorumRoles,
     guardianVote,
     proposal,
+    consensusId: consensus.consensusId,
   };
 };

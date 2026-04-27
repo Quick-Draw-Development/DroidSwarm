@@ -45,6 +45,10 @@ export interface AgentLaunchOptions {
   routingTelemetry?: RoutingTelemetry;
   requiredReads?: string[];
   compactVerbDictionary?: Record<CompactVerb, string>;
+  governance?: {
+    consensusId?: string;
+    assignmentType?: string;
+  };
 }
 
 export const defaultRoleInstructions = (task: TaskRecord): RequestedAgent[] => {
@@ -127,6 +131,9 @@ export class AgentSupervisor {
     })], {
       env: {
         ...process.env,
+        DROIDSWARM_AGENT_ROLE: role,
+        ...(options?.governance?.consensusId ? { DROIDSWARM_CONSENSUS_ID: options.governance.consensusId } : {}),
+        ...(options?.governance?.assignmentType ? { DROIDSWARM_GOVERNANCE_ASSIGNMENT_TYPE: options.governance.assignmentType } : {}),
         ...(executionTarget
           ? {
             DROIDSWARM_FEDERATION_REMOTE_SERIAL: executionTarget.serial,

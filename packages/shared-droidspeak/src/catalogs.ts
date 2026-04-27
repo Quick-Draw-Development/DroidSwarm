@@ -64,7 +64,9 @@ export const DROIDSPEAK_CATALOGS = {
     'EVT-COMPLIANCE-CHECK': 'Compliance Check',
     'EVT-GUARDIAN-VETO': 'Guardian Veto',
     'EVT-SKILL-REGISTERED': 'Skill Registered',
-    'EVT-AGENT-UPDATED': 'Agent Updated'
+    'EVT-AGENT-UPDATED': 'Agent Updated',
+    'EVT-CONSENSUS-ROUND': 'Consensus Round',
+    'EVT-DRIFT-DETECTED': 'Drift Detected'
   },
   
   // D11: Promotion (8 entries)

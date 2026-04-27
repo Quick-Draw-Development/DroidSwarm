@@ -38,6 +38,7 @@ const slaveRollCallPayloadSchema = z.object({
   projectId: z.string().optional(),
   hardwareFingerprintHash: z.string().optional(),
   publicKey: z.string().optional(),
+  systemStateHash: z.string().optional(),
   capabilities: z.array(z.string()).default([]),
   role: z.literal('slave').default('slave'),
   ts: z.string().optional(),
@@ -136,6 +137,7 @@ export interface FederationBusConfig {
   lawManifest?: Record<string, unknown>;
   skillManifest?: Record<string, unknown>;
   agentManifest?: Record<string, unknown>;
+  systemStateHash?: string;
   onSlaveRollCall?: (payload: SlaveRollCallPayload) => Promise<SlaveWelcomeResponse | undefined> | SlaveWelcomeResponse | undefined;
 }
 
@@ -170,6 +172,7 @@ export interface SlaveWelcomeResponse {
   lawManifest: Record<string, unknown>;
   skillManifest?: Record<string, unknown>;
   agentManifest?: Record<string, unknown>;
+  systemStateHash?: string;
   projectId?: string;
   reason?: string;
 }

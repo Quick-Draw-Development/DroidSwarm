@@ -110,6 +110,7 @@ export interface RegisteredAgentRecord {
   preferredBackend?: string;
   modelTier?: string;
   governanceParticipation: 'observer' | 'participant' | 'guardian';
+  consensusRoles: string[];
   resourceQuotas: Record<string, unknown>;
   manifest: Record<string, unknown>;
   createdAt: string;
@@ -127,6 +128,7 @@ export interface UpsertRegisteredAgentInput {
   preferredBackend?: string;
   modelTier?: string;
   governanceParticipation?: RegisteredAgentRecord['governanceParticipation'];
+  consensusRoles?: string[];
   resourceQuotas?: Record<string, unknown>;
   manifest: Record<string, unknown>;
 }
@@ -240,6 +242,7 @@ export const openProjectRegistryDatabase = (dbPath = resolveProjectRegistryDbPat
       preferred_backend TEXT,
       model_tier TEXT,
       governance_participation TEXT NOT NULL,
+      consensus_roles_json TEXT NOT NULL,
       resource_quotas_json TEXT NOT NULL,
       manifest_json TEXT NOT NULL,
       created_at TEXT NOT NULL,
@@ -249,6 +252,13 @@ export const openProjectRegistryDatabase = (dbPath = resolveProjectRegistryDbPat
     CREATE INDEX IF NOT EXISTS idx_registry_agents_status
       ON agent_registry(status, updated_at DESC);
   `);
+  const ensureColumn = (tableName: string, columnName: string, definition: string): void => {
+    const columns = database.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name?: string }>;
+    if (!columns.some((column) => column.name === columnName)) {
+      database.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+    }
+  };
+  ensureColumn('agent_registry', 'consensus_roles_json', `TEXT NOT NULL DEFAULT '[]'`);
   return database;
 };
 
@@ -467,6 +477,7 @@ const normalizeAgentRecord = (row: Record<string, unknown>): RegisteredAgentReco
       : row.governance_participation === 'guardian'
         ? 'guardian'
         : 'participant',
+  consensusRoles: parseJsonArray(row.consensus_roles_json),
   resourceQuotas: parseJsonObject(row.resource_quotas_json),
   manifest: parseJsonObject(row.manifest_json),
   createdAt: String(row.created_at),
@@ -670,6 +681,7 @@ export const upsertRegisteredAgent = (input: UpsertRegisteredAgentInput, dbPath?
       preferredBackend: input.preferredBackend ?? null,
       modelTier: input.modelTier ?? null,
       governanceParticipation: input.governanceParticipation ?? 'participant',
+      consensusRolesJson: JSON.stringify(input.consensusRoles ?? []),
       resourceQuotasJson: JSON.stringify(input.resourceQuotas ?? {}),
       manifestJson: JSON.stringify(input.manifest),
       createdAt: now,
@@ -678,10 +690,10 @@ export const upsertRegisteredAgent = (input: UpsertRegisteredAgentInput, dbPath?
     database.prepare(`
       INSERT INTO agent_registry (
         name, version, description, hash, status, project_scoped, skills_json, priority, preferred_backend,
-        model_tier, governance_participation, resource_quotas_json, manifest_json, created_at, updated_at
+        model_tier, governance_participation, consensus_roles_json, resource_quotas_json, manifest_json, created_at, updated_at
       ) VALUES (
         @name, @version, @description, @hash, @status, @projectScoped, @skillsJson, @priority, @preferredBackend,
-        @modelTier, @governanceParticipation, @resourceQuotasJson, @manifestJson, @createdAt, @updatedAt
+        @modelTier, @governanceParticipation, @consensusRolesJson, @resourceQuotasJson, @manifestJson, @createdAt, @updatedAt
       )
       ON CONFLICT(name) DO UPDATE SET
         version = excluded.version,
@@ -694,6 +706,7 @@ export const upsertRegisteredAgent = (input: UpsertRegisteredAgentInput, dbPath?
         preferred_backend = excluded.preferred_backend,
         model_tier = excluded.model_tier,
         governance_participation = excluded.governance_participation,
+        consensus_roles_json = excluded.consensus_roles_json,
         resource_quotas_json = excluded.resource_quotas_json,
         manifest_json = excluded.manifest_json,
         updated_at = excluded.updated_at
@@ -748,6 +761,9 @@ export const updateRegisteredAgentStatus = (
     database.close();
   }
 };
+
+export const listRegisteredAgentsByConsensusRole = (role: string, dbPath?: string): RegisteredAgentRecord[] =>
+  listRegisteredAgents(dbPath).filter((entry) => entry.consensusRoles.includes(role));
 
 export const markFederatedNodeKicked = (nodeId: string, dbPath?: string): FederatedNodeRecord | undefined => {
   const database = openProjectRegistryDatabase(dbPath);

@@ -5,6 +5,18 @@ import { randomUUID } from 'node:crypto';
 import { appendAuditEvent } from '@shared-tracing';
 
 import type { LawDefinition, LawId } from './laws-manifest';
+import type { ConsensusRoundState } from './consensus-state';
+
+export interface DriftSnapshotRecord {
+  nodeId: string;
+  projectId: string;
+  localHash: string;
+  remoteHash?: string;
+  matches: boolean;
+  source?: string;
+  auditHash?: string;
+  createdAt: string;
+}
 
 export interface LawProposalRecord {
   proposalId: string;
@@ -32,12 +44,16 @@ export interface GovernanceStatus {
 type GovernanceStore = {
   proposals: LawProposalRecord[];
   approvedRuntimeLaws: Array<Pick<LawDefinition, 'id' | 'version' | 'title' | 'description' | 'glyph'>>;
+  consensusRounds: ConsensusRoundState[];
+  driftSnapshots: DriftSnapshotRecord[];
   latestDebateAt?: string;
 };
 
 const defaultStore = (): GovernanceStore => ({
   proposals: [],
   approvedRuntimeLaws: [],
+  consensusRounds: [],
+  driftSnapshots: [],
 });
 
 export const resolveGovernanceDir = (): string =>
@@ -61,6 +77,8 @@ const readStore = (): GovernanceStore => {
     return {
       proposals: Array.isArray(parsed.proposals) ? parsed.proposals as LawProposalRecord[] : [],
       approvedRuntimeLaws: Array.isArray(parsed.approvedRuntimeLaws) ? parsed.approvedRuntimeLaws as LawDefinition[] : [],
+      consensusRounds: Array.isArray(parsed.consensusRounds) ? parsed.consensusRounds as ConsensusRoundState[] : [],
+      driftSnapshots: Array.isArray(parsed.driftSnapshots) ? parsed.driftSnapshots as DriftSnapshotRecord[] : [],
       latestDebateAt: typeof parsed.latestDebateAt === 'string' ? parsed.latestDebateAt : undefined,
     };
   } catch {
@@ -166,6 +184,17 @@ export const approveLawProposal = (proposalId: string, input: {
   return proposal;
 };
 
+export const overrideLawProposal = (proposalId: string, input: {
+  overriddenBy: string;
+  comment?: string;
+  rootDir?: string;
+}): LawProposalRecord =>
+  approveLawProposal(proposalId, {
+    approvedBy: input.overriddenBy,
+    comment: input.comment ?? `Human override by ${input.overriddenBy}.`,
+    rootDir: input.rootDir,
+  });
+
 export const rejectLawProposal = (proposalId: string, input: {
   rejectedBy: string;
   comment?: string;
@@ -193,3 +222,29 @@ export const recordGovernanceDebateTimestamp = (ts: string): void => {
   store.latestDebateAt = ts;
   writeStore(store);
 };
+
+export const recordConsensusRound = (round: ConsensusRoundState): ConsensusRoundState => {
+  const store = readStore();
+  store.consensusRounds.unshift(round);
+  store.consensusRounds = store.consensusRounds.slice(0, 200);
+  writeStore(store);
+  return round;
+};
+
+export const listConsensusRounds = (): ConsensusRoundState[] =>
+  readStore().consensusRounds.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+
+export const recordDriftSnapshot = (input: Omit<DriftSnapshotRecord, 'createdAt'>): DriftSnapshotRecord => {
+  const store = readStore();
+  const record: DriftSnapshotRecord = {
+    ...input,
+    createdAt: new Date().toISOString(),
+  };
+  store.driftSnapshots.unshift(record);
+  store.driftSnapshots = store.driftSnapshots.slice(0, 200);
+  writeStore(store);
+  return record;
+};
+
+export const listDriftSnapshots = (): DriftSnapshotRecord[] =>
+  readStore().driftSnapshots.sort((left, right) => right.createdAt.localeCompare(left.createdAt));

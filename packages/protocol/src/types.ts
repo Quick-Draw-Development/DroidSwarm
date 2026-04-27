@@ -15,6 +15,7 @@ export type EnvelopeVerb =
   | 'verification.completed'
   | 'run.completed'
   | 'handoff.ready'
+  | 'consensus.round'
   | 'summary.emitted'
   | 'memory.pinned'
   | 'drift.detected'

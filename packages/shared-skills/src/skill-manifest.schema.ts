@@ -30,6 +30,7 @@ export const agentManifestSchema = z.object({
     preferredBackend: z.string().optional(),
     modelTier: z.string().optional(),
   }).default({}),
+  consensusRoles: z.array(z.enum(['proposer', 'reviewer', 'verifier', 'guardian', 'arbitrator'])).default(['proposer', 'reviewer', 'verifier']),
   governanceParticipation: z.enum(['observer', 'participant', 'guardian']).default('participant'),
   resourceQuotas: z.object({
     maxConcurrentTasks: z.number().int().positive().optional(),

@@ -19,6 +19,7 @@ export const COMPACT_VERBS = [
   'verification.completed',
   'run.completed',
   'handoff.ready',
+  'consensus.round',
   'summary.emitted',
   'memory.pinned',
   'drift.detected',
@@ -75,6 +76,13 @@ export interface EnvelopeV2 {
   memory_refs?: string[];
   risk?: EnvelopeRisk;
   audit_hash?: string;
+  consensus?: {
+    consensus_id: string;
+    proposal_id: string;
+    approved: boolean;
+    guardian_veto?: boolean;
+    audit_hash?: string;
+  };
   body: Record<string, unknown>;
 }
 
@@ -93,6 +101,7 @@ export const COMPACT_VERB_DICTIONARY: Record<CompactVerb, string> = {
   'verification.completed': 'Verification completed.',
   'run.completed': 'Run reached a terminal state.',
   'handoff.ready': 'A helper handoff is ready.',
+  'consensus.round': 'A governance consensus round was recorded.',
   'summary.emitted': 'A summary update was emitted.',
   'memory.pinned': 'Durable memory or digest state was pinned.',
   'drift.detected': 'A federation drift or continuity mismatch was detected.',
@@ -191,6 +200,13 @@ export const envelopeV2Schema: z.ZodType<EnvelopeV2> = z.object({
   memory_refs: z.array(z.string()).optional(),
   risk: envelopeRiskSchema.optional(),
   audit_hash: z.string().min(1).optional(),
+  consensus: z.object({
+    consensus_id: z.string().min(1),
+    proposal_id: z.string().min(1),
+    approved: z.boolean(),
+    guardian_veto: z.boolean().optional(),
+    audit_hash: z.string().min(1).optional(),
+  }).optional(),
   body: z.record(z.string(), z.unknown()),
 }).strict();
 

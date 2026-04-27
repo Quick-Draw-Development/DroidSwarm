@@ -266,6 +266,7 @@ export interface ExecutionEventRecord {
     | 'plan_proposed'
     | 'verification_fix_task_created'
     | 'handoff_ready'
+    | 'governance_consensus_blocked'
     | 'memory_pinned';
   detail: string;
   normalizedVerb?: import('@shared-types').CompactVerb;

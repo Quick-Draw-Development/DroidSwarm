@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 
 import { tracer } from '@shared-tracing';
-import { validateCompliance } from '@shared-governance';
+import { runComplianceCheck } from '@shared-governance';
 
 type WorkerMode = 'worker' | 'verifier';
 
@@ -45,14 +45,20 @@ export class WorkerRunner {
   async start(): Promise<void> {
     const mode = this.parseMode();
     const entry = this.resolveEntry(mode);
+    const assignedRole = process.env.DROIDSWARM_AGENT_ROLE ?? mode;
     if (process.env.DROIDSWARM_ENABLE_GOVERNANCE !== '0') {
-      const report = validateCompliance({
+      const report = runComplianceCheck({
         eventType: 'worker-host.start',
-        actorRole: mode,
+        actorRole: assignedRole,
         swarmRole: process.env.DROIDSWARM_SWARM_ROLE === 'slave' ? 'slave' : 'master',
         projectId: process.env.DROIDSWARM_PROJECT_ID,
         auditLoggingEnabled: true,
         dashboardEnabled: false,
+        droidspeakState: {
+          compact: 'EVT-CONSENSUS-ROUND',
+          expanded: process.env.DROIDSWARM_CONSENSUS_ID ?? assignedRole,
+          kind: 'memory_pinned',
+        },
       });
       if (!report.ok) {
         throw new Error(`Governance compliance failed for worker-host startup.`);
@@ -60,6 +66,9 @@ export class WorkerRunner {
     }
     tracer.audit('CODE_EXEC_START', {
       mode,
+      assignedRole,
+      consensusId: process.env.DROIDSWARM_CONSENSUS_ID,
+      assignmentType: process.env.DROIDSWARM_GOVERNANCE_ASSIGNMENT_TYPE,
       entry,
       remoteSerial: process.env.DROIDSWARM_FEDERATION_REMOTE_SERIAL,
       remoteEntry: process.env.DROIDSWARM_FEDERATION_REMOTE_ENTRY,

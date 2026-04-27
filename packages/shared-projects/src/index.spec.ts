@@ -126,6 +126,7 @@ describe('shared-projects registry', () => {
       description: 'Vision agent',
       skills: ['vision'],
       preferredBackend: 'apple-intelligence',
+      consensusRoles: ['reviewer', 'verifier'],
       manifest: {
         name: 'vision-agent',
         version: '0.1.0',
@@ -136,5 +137,6 @@ describe('shared-projects registry', () => {
     assert.equal(listRegisteredSkills().length, 1);
     assert.equal(getRegisteredAgent('vision-agent')?.name, 'vision-agent');
     assert.equal(listRegisteredAgents()[0]?.skills[0], 'vision');
+    assert.equal(listRegisteredAgents()[0]?.consensusRoles[0], 'reviewer');
   });
 });

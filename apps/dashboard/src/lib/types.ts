@@ -198,10 +198,32 @@ export interface OrchestrationInsightsData {
 
 export interface GovernanceSummary {
   lawHash: string;
+  systemStateHash: string;
   activeLawCount: number;
   pendingProposalCount: number;
   approvedProposalCount: number;
   latestDebateAt?: string;
+  roles: Array<{
+    id: string;
+    title: string;
+    responsibility: string;
+  }>;
+  consensus: Array<{
+    consensusId: string;
+    proposalId: string;
+    proposalType: string;
+    approved: boolean;
+    guardianVeto: boolean;
+    updatedAt: string;
+  }>;
+  drift: Array<{
+    nodeId: string;
+    localHash: string;
+    remoteHash?: string;
+    matches: boolean;
+    source?: string;
+    createdAt: string;
+  }>;
   laws: Array<{
     id: string;
     title: string;

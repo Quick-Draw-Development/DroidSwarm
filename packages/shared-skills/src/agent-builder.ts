@@ -38,6 +38,7 @@ export const createAgentManifest = (input: {
   preferredBackend?: string;
   modelTier?: string;
   governanceParticipation?: AgentManifest['governanceParticipation'];
+  consensusRoles?: AgentManifest['consensusRoles'];
   projectScoped?: boolean;
   affectsCoreBehavior?: boolean;
 }): AgentManifest => {
@@ -54,6 +55,10 @@ export const createAgentManifest = (input: {
       preferredBackend: input.preferredBackend,
       modelTier: input.modelTier,
     },
+    consensusRoles: input.consensusRoles
+      ?? (input.governanceParticipation === 'guardian'
+        ? ['proposer', 'reviewer', 'verifier', 'guardian']
+        : ['proposer', 'reviewer', 'verifier']),
     governanceParticipation: input.governanceParticipation ?? 'participant',
   });
 
@@ -78,6 +83,7 @@ export const syncDiscoveredAgents = (skillsRoot: string) => {
     preferredBackend: manifest.modelRouting.preferredBackend,
     modelTier: manifest.modelRouting.modelTier,
     governanceParticipation: manifest.governanceParticipation,
+    consensusRoles: manifest.consensusRoles,
     resourceQuotas: manifest.resourceQuotas,
     manifest,
   }));

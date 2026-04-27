@@ -216,6 +216,50 @@ test('creates and approves governance proposals from slack commands', async () =
   assert.match(approved.text, /approved and activated/i);
 });
 
+test('returns governance status and supports human override from slack commands', async () => {
+  const home = makeTempHome();
+  process.env.DROIDSWARM_HOME = home;
+  onboardProject({
+    projectId: 'demo',
+    name: 'Demo',
+    rootPath: path.join(home, 'repo'),
+    dbPath: path.join(home, 'projects', 'demo', 'droidswarm.db'),
+    wsPort: 9999,
+  });
+
+  const proposed = await handleSlackInput({
+    text: 'law propose Require operator confirmation for drift alerts.',
+    userId: 'U1',
+    username: 'alice',
+    channelId: 'C1',
+  }, baseConfig());
+  assert.match(proposed.text, /pending human approval|rejected/);
+
+  const proposalStorePath = path.join(home, 'governance', 'store.json');
+  const payload = JSON.parse(fs.readFileSync(proposalStorePath, 'utf8')) as {
+    proposals: Array<{ proposalId: string }>;
+  };
+  const proposalId = payload.proposals[0]?.proposalId;
+  assert.ok(proposalId);
+
+  const status = await handleSlackInput({
+    text: 'law status',
+    userId: 'U1',
+    username: 'alice',
+    channelId: 'C1',
+  }, baseConfig());
+  assert.match(status.text, /Governance status/i);
+  assert.match(status.text, /consensus rounds/i);
+
+  const overridden = await handleSlackInput({
+    text: `override ${proposalId}`,
+    userId: 'U1',
+    username: 'alice',
+    channelId: 'C1',
+  }, baseConfig());
+  assert.match(overridden.text, /overridden and activated/i);
+});
+
 test('creates skill scaffolds and specialized agents from slack commands', async () => {
   const home = makeTempHome();
   process.env.DROIDSWARM_HOME = home;

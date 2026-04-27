@@ -6,11 +6,18 @@ import test from 'node:test';
 
 import {
   approveLawProposal,
+  computeSystemStateHash,
   createLawProposal,
+  createDriftSnapshot,
   enforceLaw,
+  listConsensusRounds,
+  listDriftSnapshots,
+  listGovernanceRoles,
   listActiveLaws,
   listLawProposals,
+  overrideLawProposal,
   rejectLawProposal,
+  runConsensusRound,
   runGovernanceDebate,
   validateCompliance,
 } from './index';
@@ -52,6 +59,7 @@ test('runs debate rounds and leaves compliant proposals pending human approval',
   assert.equal(result.status, 'pending-human-approval');
   assert.equal(result.rounds.length, 3);
   assert.equal(listLawProposals().length, 1);
+  assert.equal(typeof result.consensusId, 'string');
 });
 
 test('approves proposals and appends them to SYSTEM_LAWS.md', () => {
@@ -102,4 +110,85 @@ test('reports compliance with current law hash and proposal counts', () => {
   });
   assert.equal(typeof report.lawHash, 'string');
   assert.equal(report.pendingProposalCount, 0);
+});
+
+test('lists governance roles and records approved consensus rounds', () => {
+  const roles = listGovernanceRoles();
+  assert.equal(roles.length, 5);
+
+  const round = runConsensusRound({
+    proposalId: 'proposal-1',
+    proposalType: 'agent-spawn',
+    title: 'Spawn reviewer',
+    summary: 'Allow a reviewer helper to start.',
+    glyph: 'EVT-CONSENSUS-ROUND',
+    context: {
+      eventType: 'governance.vote',
+      actorRole: 'planner',
+      swarmRole: 'master',
+      projectId: 'demo',
+      auditLoggingEnabled: true,
+      dashboardEnabled: false,
+      droidspeakState: { compact: 'EVT-CONSENSUS-ROUND', expanded: 'spawn reviewer', kind: 'memory_pinned' },
+    },
+  });
+
+  assert.equal(round.approved, true);
+  assert.ok(listConsensusRounds().some((entry) => entry.consensusId === round.consensusId));
+});
+
+test('guardian veto blocks failing consensus rounds', () => {
+  const round = runConsensusRound({
+    proposalId: 'proposal-2',
+    proposalType: 'task-handoff',
+    title: 'Block invalid handoff',
+    summary: 'Handoff without droidspeak context.',
+    glyph: 'EVT-CONSENSUS-ROUND',
+    context: {
+      eventType: 'governance.vote',
+      actorRole: 'planner',
+      swarmRole: 'master',
+      projectId: 'demo',
+      auditLoggingEnabled: true,
+      dashboardEnabled: false,
+      guardianVote: 'veto',
+    },
+  });
+
+  assert.equal(round.approved, false);
+  assert.equal(round.guardianVeto, true);
+});
+
+test('records drift snapshots for matching and mismatched system state hashes', () => {
+  const matched = createDriftSnapshot({
+    nodeId: 'node-a',
+    projectId: 'demo',
+    remoteHash: computeSystemStateHash(),
+    source: 'test',
+  });
+  assert.equal(matched.matches, true);
+
+  const mismatched = createDriftSnapshot({
+    nodeId: 'node-b',
+    projectId: 'demo',
+    remoteHash: 'mismatch',
+    source: 'test',
+  });
+  assert.equal(mismatched.matches, false);
+  assert.ok(listDriftSnapshots().length >= 2);
+});
+
+test('allows explicit human overrides for pending proposals', () => {
+  const proposal = createLawProposal({
+    lawId: 'LAW-006',
+    title: 'Override me',
+    description: 'An overridable law.',
+    rationale: 'Manual recovery path.',
+    glyph: 'EVT-LAW-PROPOSAL',
+    proposedBy: 'tester',
+  });
+  const approved = overrideLawProposal(proposal.proposalId, {
+    overriddenBy: 'admin',
+  });
+  assert.equal(approved.status, 'approved');
 });

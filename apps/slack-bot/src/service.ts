@@ -4,7 +4,17 @@ import path from 'node:path';
 import WebSocket from 'ws';
 
 import { appendAuditEvent, tracer } from '@shared-tracing';
-import { approveLawProposal, listLawProposals, runGovernanceDebate, validateCompliance } from '@shared-governance';
+import {
+  approveLawProposal,
+  computeSystemStateHash,
+  listConsensusRounds,
+  listDriftSnapshots,
+  listGovernanceRoles,
+  listLawProposals,
+  overrideLawProposal,
+  runGovernanceDebate,
+  validateCompliance,
+} from '@shared-governance';
 import {
   approveRegisteredSkill,
   approveSpecializedAgent,
@@ -426,7 +436,7 @@ export const executeSlackIntent = async (
 
   if (config.governanceEnabled) {
     const report = validateCompliance({
-      eventType: command.kind === 'law-propose' || command.kind === 'law-approve'
+      eventType: command.kind === 'law-propose' || command.kind === 'law-approve' || command.kind === 'law-override' || command.kind === 'law-status'
         ? 'governance.proposal'
         : command.kind === 'skill-create' || command.kind === 'skill-approve' || command.kind === 'agent-create'
           ? 'skill.register'
@@ -440,6 +450,10 @@ export const executeSlackIntent = async (
         ? { compact: 'EVT-LAW-PROPOSAL', expanded: command.content ?? '', kind: 'memory_pinned' }
         : command.kind === 'law-approve'
           ? { compact: 'EVT-HUMAN-APPROVAL', expanded: command.proposalId ?? '', kind: 'audit_delta' }
+          : command.kind === 'law-override'
+            ? { compact: 'EVT-HUMAN-APPROVAL', expanded: command.proposalId ?? '', kind: 'audit_delta' }
+            : command.kind === 'law-status'
+              ? { compact: 'EVT-CONSENSUS-ROUND', expanded: 'governance status', kind: 'memory_pinned' }
           : command.kind === 'skill-create'
             ? { compact: 'EVT-SKILL-REGISTERED', expanded: command.name ?? '', kind: 'memory_pinned' }
             : command.kind === 'skill-approve'
@@ -506,6 +520,30 @@ export const executeSlackIntent = async (
         backend: command.route.backend,
       };
     }
+    case 'law-status': {
+      const compliance = validateCompliance({
+        eventType: 'governance.status',
+        actorRole: 'slack-bot',
+        swarmRole: 'master',
+        projectId: project?.projectId ?? config.defaultProjectId,
+        auditLoggingEnabled: true,
+        dashboardEnabled: false,
+      });
+      const consensus = listConsensusRounds().slice(0, 3);
+      const drift = listDriftSnapshots().slice(0, 3);
+      return {
+        text: [
+          '*Governance status*',
+          `law hash \`${compliance.lawHash}\``,
+          `system state \`${computeSystemStateHash()}\``,
+          `roles ${listGovernanceRoles().map((entry) => entry.id).join(', ')}`,
+          `consensus rounds ${consensus.length}${consensus[0] ? ` · latest ${consensus[0].proposalType} ${consensus[0].approved ? 'approved' : 'blocked'}` : ''}`,
+          `drift snapshots ${drift.length}${drift[0] ? ` · latest ${drift[0].matches ? 'match' : 'mismatch'}` : ''}`,
+        ].join('\n'),
+        projectId: project?.projectId,
+        backend: command.route.backend,
+      };
+    }
     case 'law-propose': {
       const content = command.content?.trim();
       if (!content) {
@@ -552,6 +590,23 @@ export const executeSlackIntent = async (
       });
       return {
         text: `Governance proposal \`${approved.proposalId}\` approved and activated as ${approved.lawId}.`,
+        projectId: project?.projectId,
+        backend: command.route.backend,
+      };
+    }
+    case 'law-override': {
+      if (!command.proposalId) {
+        return {
+          text: 'Missing proposal id.',
+          backend: command.route.backend,
+        };
+      }
+      const approved = overrideLawProposal(command.proposalId, {
+        overriddenBy: user.username,
+        comment: `Human override from Slack by ${user.username}.`,
+      });
+      return {
+        text: `Governance proposal \`${approved.proposalId}\` overridden and activated as ${approved.lawId}.`,
         projectId: project?.projectId,
         backend: command.route.backend,
       };

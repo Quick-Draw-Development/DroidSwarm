@@ -1,5 +1,17 @@
 import { NextResponse } from 'next/server';
-import { approveLawProposal, listActiveLaws, listLawProposals, rejectLawProposal, runGovernanceDebate, validateCompliance } from '@shared-governance';
+import {
+  approveLawProposal,
+  computeSystemStateHash,
+  listActiveLaws,
+  listConsensusRounds,
+  listDriftSnapshots,
+  listLawProposals,
+  listGovernanceRoles,
+  overrideLawProposal,
+  rejectLawProposal,
+  runGovernanceDebate,
+  validateCompliance,
+} from '@shared-governance';
 
 export async function GET(): Promise<NextResponse> {
   return NextResponse.json({
@@ -10,12 +22,16 @@ export async function GET(): Promise<NextResponse> {
       version: law.version,
     })),
     proposals: listLawProposals(),
+    consensus: listConsensusRounds(),
+    drift: listDriftSnapshots(),
+    roles: listGovernanceRoles(),
+    systemStateHash: computeSystemStateHash(),
   });
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
   const body = await request.json() as {
-    action?: 'propose' | 'approve' | 'reject';
+    action?: 'propose' | 'approve' | 'reject' | 'override';
     proposalId?: string;
     title?: string;
     description?: string;
@@ -82,6 +98,15 @@ export async function POST(request: Request): Promise<NextResponse> {
       proposal: rejectLawProposal(body.proposalId, {
         rejectedBy: body.approvedBy ?? 'dashboard-admin',
         comment: 'Rejected from dashboard.',
+      }),
+    });
+  }
+
+  if (body.action === 'override') {
+    return NextResponse.json({
+      proposal: overrideLawProposal(body.proposalId, {
+        overriddenBy: body.approvedBy ?? 'dashboard-admin',
+        comment: 'Human override from dashboard.',
       }),
     });
   }

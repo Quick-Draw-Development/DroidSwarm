@@ -31,3 +31,10 @@ Require explicit governance summaries at startup.
 - New skills and specialized agents must register through the shared skills registry before they are treated as active runtime capabilities.
 - Skill manifests must declare valid Droidspeak verbs for any new internal event surface they introduce.
 - Skill packs or agents that affect core behavior may remain pending until explicit human approval.
+
+## Role-Based Consensus And Drift Rules
+
+- High-impact actions such as agent spawns, task handoffs, and law changes must record a lightweight consensus round across proposer, reviewer, verifier, guardian, and arbitrator roles.
+- Guardian vetoes and human overrides must be preserved in the tamper-evident governance audit trail.
+- The system state hash includes active laws, registered skills, specialized agents, and the Droidspeak catalog and must be checked continuously across federated nodes.
+- Drift mismatches must be surfaced to operators through governance status surfaces before normal automation proceeds.

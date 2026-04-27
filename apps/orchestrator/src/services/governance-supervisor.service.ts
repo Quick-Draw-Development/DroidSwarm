@@ -1,6 +1,6 @@
-import { postToBus } from '@federation-bus';
 import { appendAuditEvent } from '@shared-tracing';
-import { validateCompliance } from '@shared-governance';
+import { broadcastSystemStateHash } from '@shared-governance';
+import { runComplianceCheck } from '@shared-governance';
 
 import type { OrchestratorConfig } from '../types';
 
@@ -15,7 +15,7 @@ export class GovernanceSupervisorService {
       return;
     }
     this.runCheck();
-    this.interval = setInterval(() => this.runCheck(), 30_000);
+    this.interval = setInterval(() => this.runCheck(), 60_000);
     this.interval.unref?.();
   }
 
@@ -27,7 +27,7 @@ export class GovernanceSupervisorService {
   }
 
   private runCheck(): void {
-    const report = validateCompliance({
+    const report = runComplianceCheck({
       eventType: 'governance.compliance-check',
       actorRole: 'master',
       swarmRole: 'master',
@@ -35,35 +35,23 @@ export class GovernanceSupervisorService {
       auditLoggingEnabled: true,
       dashboardEnabled: false,
     });
-    appendAuditEvent('GOVERNANCE_COMPLIANCE_CHECK', {
-      projectId: this.config.projectId,
-      ok: report.ok,
-      lawHash: report.lawHash,
-      violations: report.laws.filter((entry) => !entry.ok),
-    });
     if (this.config.federationEnabled && this.config.federationBusUrl) {
-      void postToBus(this.config.federationBusUrl, {
+      void broadcastSystemStateHash({
+        busUrl: this.config.federationBusUrl,
         sourceNodeId: this.config.federationNodeId ?? this.config.projectId,
-        envelope: {
-          id: `gov-${Date.now()}`,
-          ts: new Date().toISOString(),
-          project_id: this.config.projectId,
-          swarm_id: this.config.federationNodeId ?? this.config.projectId,
-          room_id: 'operator',
-          verb: 'status.updated',
-          body: {
-            metadata: {
-              lawHash: report.lawHash,
-              governanceOk: report.ok,
-            },
-          },
-        },
-      }, this.config.federationSigningKeyId && this.config.federationSigningPrivateKey
+        projectId: this.config.projectId,
+        signing: this.config.federationSigningKeyId && this.config.federationSigningPrivateKey
         ? {
           keyId: this.config.federationSigningKeyId,
           privateKeyPem: this.config.federationSigningPrivateKey,
         }
-        : undefined).catch(() => undefined);
+        : undefined,
+      }).catch(() => undefined);
     }
+    appendAuditEvent('GOVERNANCE_SUPERVISOR_TICK', {
+      projectId: this.config.projectId,
+      ok: report.ok,
+      lawHash: report.lawHash,
+    });
   }
 }

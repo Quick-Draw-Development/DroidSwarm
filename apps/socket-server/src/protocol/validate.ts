@@ -39,6 +39,7 @@ const typeByVerb: Record<EnvelopeV2['verb'], MessageType> = {
   'verification.completed': 'verification_completed',
   'run.completed': 'run_completed',
   'handoff.ready': 'handoff_event',
+  'consensus.round': 'trace_event',
   'summary.emitted': 'guardrail_event',
   'memory.pinned': 'checkpoint_event',
   'drift.detected': 'trace_event',

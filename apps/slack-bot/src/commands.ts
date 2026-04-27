@@ -6,8 +6,10 @@ export type SlackCommandKind =
   | 'project-use'
   | 'task-message'
   | 'operator-message'
+  | 'law-status'
   | 'law-propose'
   | 'law-approve'
+  | 'law-override'
   | 'skills-list'
   | 'skill-create'
   | 'skill-approve'
@@ -119,11 +121,28 @@ const parseSlashCommand = (text: string, route: ModelRouteDecision): ParsedSlack
     });
   }
 
+  if (args[0] === 'law' && args[1] === 'status') {
+    return buildCommand(text, route, {
+      kind: 'law-status',
+      args: [],
+      source: 'slash',
+    });
+  }
+
   if (args[0] === 'law' && args[1] === 'approve' && args[2]) {
     return buildCommand(text, route, {
       kind: 'law-approve',
       args: args.slice(2),
       proposalId: args[2],
+      source: 'slash',
+    });
+  }
+
+  if (args[0] === 'override' && args[1]) {
+    return buildCommand(text, route, {
+      kind: 'law-override',
+      args: args.slice(1),
+      proposalId: args[1],
       source: 'slash',
     });
   }
@@ -202,12 +221,30 @@ const parseNaturalLanguage = (text: string, route: ModelRouteDecision): ParsedSl
     });
   }
 
+  if (/^law\s+status$/i.test(trimmed)) {
+    return buildCommand(text, route, {
+      kind: 'law-status',
+      args: [],
+      source: 'natural-language',
+    });
+  }
+
   const lawApproveMatch = trimmed.match(/^law\s+approve\s+([a-z0-9-]+)$/i);
   if (lawApproveMatch?.[1]) {
     return buildCommand(text, route, {
       kind: 'law-approve',
       args: [lawApproveMatch[1]],
       proposalId: lawApproveMatch[1],
+      source: 'natural-language',
+    });
+  }
+
+  const lawOverrideMatch = trimmed.match(/^override\s+([a-z0-9-]+)$/i);
+  if (lawOverrideMatch?.[1]) {
+    return buildCommand(text, route, {
+      kind: 'law-override',
+      args: [lawOverrideMatch[1]],
+      proposalId: lawOverrideMatch[1],
       source: 'natural-language',
     });
   }
@@ -284,6 +321,7 @@ export const parseSlackIntent = (text: string, context?: SlackParseContext): Par
     'use',
     'project',
     'law',
+    'override',
   ].includes(args[0]?.toLowerCase() ?? '');
 
   if (trimmed.startsWith('/')) {
@@ -300,6 +338,8 @@ export const renderSlackCommandResponse = (command: ParsedSlackCommand): SlackCo
           '*DroidSwarm Slack relay*',
           '`/droid use <project>` selects the active project.',
           '`/droid projects` lists registered projects.',
+          '`/droid law status` shows law, consensus, and drift status.',
+          '`/droid override <proposal-id>` forces a human override for a proposal.',
           '`/droid skills list` lists registered skills and specialized agents.',
           '`/droid skill create <name> [template]` scaffolds a new skill.',
           '`/droid agent create <name> <skill1,skill2> [priority]` creates a specialized agent.',
@@ -324,6 +364,10 @@ export const renderSlackCommandResponse = (command: ParsedSlackCommand): SlackCo
       return {
         text: 'Forwarding to the orchestrator operator room.',
       };
+    case 'law-status':
+      return {
+        text: 'Fetching governance status.',
+      };
     case 'law-propose':
       return {
         text: 'Submitting a governance law proposal for debate.',
@@ -331,6 +375,10 @@ export const renderSlackCommandResponse = (command: ParsedSlackCommand): SlackCo
     case 'law-approve':
       return {
         text: `Approving governance proposal \`${command.proposalId ?? 'unknown'}\`.`,
+      };
+    case 'law-override':
+      return {
+        text: `Overriding governance proposal \`${command.proposalId ?? 'unknown'}\`.`,
       };
     case 'skills-list':
       return {

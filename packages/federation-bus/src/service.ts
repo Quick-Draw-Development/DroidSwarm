@@ -1,6 +1,6 @@
 import { loadFederationNodeConfig } from '@shared-config';
 import { buildDroidspeakCatalogs } from '@shared-droidspeak';
-import { computeLawManifestHash, listActiveLaws } from '@shared-governance';
+import { computeLawManifestHash, computeSystemStateHash, listActiveLaws } from '@shared-governance';
 import { buildDynamicSkillVerbCatalog, listRegisteredSkillManifests, listSpecializedAgents } from '@shared-skills';
 
 import { startFederationBus } from './index';
@@ -33,6 +33,7 @@ export const startFederationBusService = () => {
     lawManifest: { laws: listActiveLaws() } as unknown as Record<string, unknown>,
     skillManifest: { skills: listRegisteredSkillManifests() } as unknown as Record<string, unknown>,
     agentManifest: { agents: listSpecializedAgents() } as unknown as Record<string, unknown>,
+    systemStateHash: computeSystemStateHash(),
     onSlaveRollCall: async (payload) => registerSlaveRollCall(payload),
   });
   console.log(`Federation Bus service listening on ${host}:${busPort} (admin ${adminPort})`);

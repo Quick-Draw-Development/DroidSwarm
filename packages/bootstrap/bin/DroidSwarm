@@ -71,6 +71,7 @@ Commands:
   federation  Inspect federation state and onboard peer devices
   nodes       List or kick federated slave nodes
   laws        Inspect and operate the governance law system
+  governance  Governance status and role inspection shortcuts
   skill       Create, build, approve, and list skill packs
   agent       Create, approve, and list specialized agents
   slack       Inspect or restart the optional Slack bot service
@@ -337,10 +338,17 @@ print_laws_help() {
 Usage:
   DroidSwarm laws list
   DroidSwarm laws status
+  DroidSwarm laws roles
+  DroidSwarm laws consensus
+  DroidSwarm laws drift
   DroidSwarm laws proposals
   DroidSwarm laws propose --title TITLE --description TEXT [--rationale TEXT]
   DroidSwarm laws approve --proposal-id ID [--comment TEXT]
+  DroidSwarm laws override --proposal-id ID [--comment TEXT]
   DroidSwarm laws reject --proposal-id ID [--comment TEXT]
+
+  DroidSwarm governance status
+  DroidSwarm governance roles list
 EOF
 }
 
@@ -2307,7 +2315,7 @@ cmd_laws() {
   fi
 
   case "$action" in
-    list|status|proposals|propose|approve|reject)
+    list|status|roles|consensus|drift|proposals|propose|approve|override|reject)
       run_shared_governance_cli "$action" "$@"
       ;;
     help|-h|--help)
@@ -2315,6 +2323,40 @@ cmd_laws() {
       ;;
     *)
       err "Unknown laws command: $action"
+      print_laws_help
+      return 1
+      ;;
+  esac
+}
+
+cmd_governance() {
+  local action="${1:-status}"
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
+
+  case "$action" in
+    status)
+      run_shared_governance_cli status "$@"
+      ;;
+    roles)
+      local subaction="${1:-list}"
+      if [[ $# -gt 0 ]]; then
+        shift
+      fi
+      case "$subaction" in
+        list)
+          run_shared_governance_cli roles "$@"
+          ;;
+        *)
+          err "Unknown governance roles command: $subaction"
+          print_laws_help
+          return 1
+          ;;
+      esac
+      ;;
+    *)
+      err "Unknown governance command: $action"
       print_laws_help
       return 1
       ;;
@@ -3208,6 +3250,9 @@ case "$COMMAND" in
     ;;
   laws)
     cmd_laws "$@"
+    ;;
+  governance)
+    cmd_governance "$@"
     ;;
   skill)
     cmd_skill "$@"

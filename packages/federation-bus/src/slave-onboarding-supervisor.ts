@@ -1,6 +1,6 @@
 import { loadFederationNodeConfig, loadSharedConfig } from '@shared-config';
 import { buildDroidspeakCatalogs } from '@shared-droidspeak';
-import { computeLawManifestHash, listActiveLaws, validateCompliance } from '@shared-governance';
+import { computeLawManifestHash, computeSystemStateHash, createDriftSnapshot, listActiveLaws, validateCompliance } from '@shared-governance';
 import { registerFederatedNode } from '@shared-projects';
 import { buildDynamicSkillVerbCatalog, listRegisteredSkillManifests, listSpecializedAgents } from '@shared-skills';
 import { appendAuditEvent } from '@shared-tracing';
@@ -16,6 +16,7 @@ export const createSlaveOnboardingWelcome = (payload: SlaveRollCallPayload): Sla
   lawManifest: { laws: listActiveLaws() } as unknown as Record<string, unknown>,
   skillManifest: { skills: listRegisteredSkillManifests() } as unknown as Record<string, unknown>,
   agentManifest: { agents: listSpecializedAgents() } as unknown as Record<string, unknown>,
+  systemStateHash: computeSystemStateHash(),
   projectId: payload.projectId ?? loadSharedConfig().projectId,
 });
 
@@ -44,9 +45,19 @@ export const registerSlaveRollCall = (payload: SlaveRollCallPayload): SlaveWelco
       lawManifest: { laws: listActiveLaws() } as unknown as Record<string, unknown>,
       skillManifest: { skills: listRegisteredSkillManifests() } as unknown as Record<string, unknown>,
       agentManifest: { agents: listSpecializedAgents() } as unknown as Record<string, unknown>,
+      systemStateHash: computeSystemStateHash(),
       projectId: payload.projectId ?? shared.projectId,
       reason: enforcement.laws.filter((entry) => !entry.ok).map((entry) => entry.violations.join(' ')).join(' '),
     };
+  }
+
+  if (payload.systemStateHash) {
+    createDriftSnapshot({
+      nodeId: payload.nodeId,
+      projectId: payload.projectId ?? shared.projectId,
+      remoteHash: payload.systemStateHash,
+      source: 'slave-roll-call',
+    });
   }
 
   registerFederatedNode({
@@ -97,6 +108,7 @@ export const beginSlaveOnboarding = async (input?: {
     publicKey: node.keyPair.publicKeyPem,
     capabilities: ['envelope-v2', 'slave-onboarding', 'audit-log'],
     role: 'slave',
+    systemStateHash: computeSystemStateHash(),
     ts: new Date().toISOString(),
   }, input?.signingKey ?? {
     keyId: node.nodeId,
@@ -108,6 +120,14 @@ export const beginSlaveOnboarding = async (input?: {
       nodeId: node.nodeId,
       localRulesHash: computeLawManifestHash(listActiveLaws()),
       remoteRulesHash: welcome.rulesHash,
+    });
+  }
+  if (welcome.systemStateHash) {
+    createDriftSnapshot({
+      nodeId: node.nodeId,
+      projectId: shared.projectId,
+      remoteHash: welcome.systemStateHash,
+      source: 'master-welcome',
     });
   }
 
@@ -126,6 +146,7 @@ export const beginSlaveOnboarding = async (input?: {
     nodeId: node.nodeId,
     accepted: welcome.accepted,
     rulesHash: welcome.rulesHash,
+    systemStateHash: welcome.systemStateHash,
   });
   return welcome;
 };

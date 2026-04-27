@@ -359,6 +359,10 @@ print_models_help() {
 Usage:
   DroidSwarm models status [options]
   DroidSwarm models refresh [options]
+  DroidSwarm models discover [options]
+  DroidSwarm models new [options]
+  DroidSwarm models download <model-id>
+  DroidSwarm models config [options]
 
 Options:
   --node-id ID
@@ -2402,6 +2406,25 @@ cmd_models() {
     refresh)
       run_shared_models_cli refresh "$@"
       ;;
+    discover)
+      run_shared_models_cli discover "$@"
+      ;;
+    new)
+      run_shared_models_cli new "$@"
+      ;;
+    download)
+      local model_id="${1:-}"
+      if [[ -z "$model_id" ]]; then
+        err "Provide the model id."
+        print_models_help
+        return 1
+      fi
+      shift
+      run_shared_models_cli download --model-id "$model_id" "$@"
+      ;;
+    config)
+      run_shared_models_cli config "$@"
+      ;;
     help|-h|--help)
       print_models_help
       ;;
@@ -2971,6 +2994,10 @@ cmd_update() {
     DROIDSWARM_BIN_DIR="$bin_dir" \
     DROIDSWARM_DEFAULT_REPO_URL="${repo_url:-https://github.com/Quick-Draw-Development/DroidSwarm}" \
     "${update_cmd[@]}"
+
+  if [[ "${DROIDSWARM_MODEL_DISCOVERY_ENABLED:-0}" == "1" || "${DROIDSWARM_MODEL_DISCOVERY_ENABLED:-false}" == "true" ]]; then
+    run_shared_models_cli discover >/dev/null 2>&1 || true
+  fi
 }
 
 cmd_repair() {

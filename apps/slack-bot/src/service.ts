@@ -16,6 +16,9 @@ import {
   validateCompliance,
 } from '@shared-governance';
 import {
+  discoverModels,
+  downloadDiscoveredModel,
+  listDiscoveredModels,
   listRegisteredModels,
   refreshModelInventory,
 } from '@shared-models';
@@ -445,7 +448,7 @@ export const executeSlackIntent = async (
         ? 'governance.proposal'
         : command.kind === 'review-run'
           ? 'review.request'
-        : command.kind === 'models-list' || command.kind === 'models-refresh'
+        : command.kind === 'models-list' || command.kind === 'models-refresh' || command.kind === 'models-new' || command.kind === 'models-discover' || command.kind === 'models-download'
           ? 'model.routing'
         : command.kind === 'skill-create' || command.kind === 'skill-approve' || command.kind === 'agent-create'
           ? 'skill.register'
@@ -471,7 +474,7 @@ export const executeSlackIntent = async (
                 ? { compact: 'EVT-AGENT-UPDATED', expanded: command.name ?? '', kind: 'memory_pinned' }
                 : command.kind === 'review-run'
                   ? { compact: 'EVT-REVIEW-START', expanded: command.content ?? '', kind: 'memory_pinned' }
-                  : command.kind === 'models-list' || command.kind === 'models-refresh'
+                  : command.kind === 'models-list' || command.kind === 'models-refresh' || command.kind === 'models-new' || command.kind === 'models-discover' || command.kind === 'models-download'
                     ? { compact: 'EVT-MODEL-SELECTED', expanded: command.kind, kind: 'memory_pinned' }
           : undefined,
     });
@@ -650,6 +653,47 @@ export const executeSlackIntent = async (
           : ['*Model inventory*', ...models.map((entry) =>
             `• ${entry.displayName} \`${entry.nodeId}\` · ${entry.backend} · ${entry.reasoningDepth}/${entry.speedTier}${entry.contextLength ? ` · ${entry.contextLength} ctx` : ''}`,
           )].join('\n'),
+        projectId: project?.projectId,
+        backend: command.route.backend,
+      };
+    }
+    case 'models-new': {
+      const models = listDiscoveredModels({ newOnly: true }).slice(0, 12);
+      return {
+        text: models.length === 0
+          ? 'No newly discovered models are waiting for download.'
+          : ['*Newly discovered models*', ...models.map((entry) =>
+            `• ${entry.displayName} \`${entry.modelId}\` · ${entry.metadata.author ?? 'unknown author'} · ${entry.quantization ?? 'unknown quant'}`,
+          )].join('\n'),
+        projectId: project?.projectId,
+        backend: command.route.backend,
+      };
+    }
+    case 'models-discover': {
+      const discovery = await discoverModels({
+        projectId: project?.projectId,
+        force: true,
+        triggeredBy: 'slack',
+      });
+      return {
+        text: `Discovery complete. ${discovery.discovered.length} new models recorded, ${discovery.downloaded.length} downloaded automatically.`,
+        projectId: project?.projectId,
+        backend: command.route.backend,
+      };
+    }
+    case 'models-download': {
+      const modelId = command.content?.trim();
+      if (!modelId) {
+        return {
+          text: 'Missing model id.',
+          backend: command.route.backend,
+        };
+      }
+      const model = await downloadDiscoveredModel(modelId, {
+        triggeredBy: 'slack',
+      });
+      return {
+        text: `Downloaded model \`${model.displayName}\` and activated it for routing.`,
         projectId: project?.projectId,
         backend: command.route.backend,
       };

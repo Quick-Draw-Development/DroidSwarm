@@ -25,10 +25,39 @@ The router first evaluates the preferred backend, then falls back to the best av
 ## Inventory Flow
 
 - `DroidSwarm models refresh` rescans local models and updates the registry.
+- `DroidSwarm models discover` polls configured remote sources and records remote GGUF candidates as `discovered` until they are downloaded.
+- `DroidSwarm models new` shows newly discovered models waiting for onboarding.
+- `DroidSwarm models download <model-id>` downloads, validates, and activates a discovered model.
 - Swarm startup refreshes inventory through orchestrator config loading.
+- If model discovery is enabled, orchestrator startup also begins the optional discovery loop using the shared polling interval.
 - Slave roll-call includes model inventory; the master merges that snapshot into the global registry.
-- Slack supports `/droid models list` and `/droid models refresh`.
-- The dashboard exposes the shared inventory in the Models panel.
+- Slack supports `/droid models list`, `/droid models new`, `/droid models discover`, and `/droid models download <model-id>`.
+- The dashboard exposes the shared inventory plus recently discovered models in the Models panel.
+
+## Discovery Sources
+
+- Hugging Face GGUF API is the primary source.
+- Local AI Zone is an optional fallback source and is disabled by default.
+- Discovery remains off by default until explicitly enabled in config or via env.
+
+## Configuration
+
+Discovery settings are stored in the shared registry and can be inspected or updated with `DroidSwarm models config`.
+
+Example:
+
+```bash
+DroidSwarm models config --set --enabled true --trusted-authors bartowski,unsloth,mradermacher --auto-download-small false
+```
+
+Related env vars:
+
+- `DROIDSWARM_MODEL_DISCOVERY_ENABLED`
+- `DROIDSWARM_MODEL_DISCOVERY_INTERVAL_MS`
+- `DROIDSWARM_MODEL_DISCOVERY_TRUSTED_AUTHORS`
+- `DROIDSWARM_MODEL_DISCOVERY_BLOCKED_AUTHORS`
+- `DROIDSWARM_MODEL_DISCOVERY_AUTO_DOWNLOAD_SMALL`
+- `DROIDSWARM_MODEL_DISCOVERY_AUTO_DOWNLOAD_MAX_BYTES`
 
 ## Compatibility
 

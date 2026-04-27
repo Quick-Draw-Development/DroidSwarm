@@ -20,10 +20,12 @@ import {
   migrateLegacyProject,
   onboardProject,
   registerFederatedNode,
+  getModelDiscoverySettings,
   resolveCurrentProjectFile,
   resolveProjectLookup,
   setCurrentProject,
   listRegisteredModels,
+  upsertModelDiscoverySettings,
   upsertRegisteredModel,
   upsertRegisteredAgent,
   upsertCodeReviewRun,
@@ -187,5 +189,18 @@ describe('shared-projects registry', () => {
 
     assert.equal(listRegisteredModels({ nodeId: 'node-a' }).length, 1);
     assert.equal(listRegisteredModels({ nodeId: 'node-a' })[0]?.modelId, 'qwen2.5-coder-14b');
+  });
+
+  it('stores model discovery settings in the global registry', () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'droidswarm-model-settings-'));
+    tempDirs.push(home);
+    process.env.DROIDSWARM_HOME = home;
+
+    upsertModelDiscoverySettings('global', {
+      enabled: true,
+      trustedAuthors: ['bartowski'],
+    });
+
+    assert.equal(getModelDiscoverySettings('global')?.settings.enabled, true);
   });
 });

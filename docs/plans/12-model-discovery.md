@@ -129,3 +129,15 @@ After completion, update documentation (MODEL-ROUTING.md) with the discovery sou
 
 This plan gives DroidSwarm a proactive, low-maintenance way to stay on the cutting edge of new GGUF models while integrating cleanly with the intelligent model-router and the rest of the swarm.
 Start with Phase 0.
+
+## Completion
+
+Completed on 2026-04-27.
+
+- Added discovery configuration and registry-backed settings storage with global and project-scoped overrides.
+- Implemented remote GGUF discovery with Hugging Face as the primary source and optional Local AI Zone fallback parsing.
+- Recorded remote candidates in the shared model registry as disabled `discovered` models until download and validation.
+- Added manual discovery and onboarding flows through `DroidSwarm models discover|new|download`, Slack model discovery commands, and the dashboard Models panel.
+- Added GGUF download validation, checksum enforcement support, quarantine handling, and audit logging for discovery and onboarding events.
+- Hooked optional discovery polling into orchestrator startup and `DroidSwarm update` while keeping the feature off by default.
+- Updated `MODEL-ROUTING.md` with discovery sources and configuration examples.

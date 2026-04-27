@@ -132,7 +132,14 @@ export interface RegisteredModelRecord {
   enabled: boolean;
   tags: string[];
   metadata: Record<string, unknown>;
-  source: 'local-scan' | 'bootstrap-inventory' | 'federation-sync' | 'manual';
+  source:
+    | 'local-scan'
+    | 'bootstrap-inventory'
+    | 'federation-sync'
+    | 'manual'
+    | 'huggingface-discovery'
+    | 'local-ai-zone-discovery'
+    | 'downloaded';
   lastSeenAt: string;
   createdAt: string;
   updatedAt: string;
@@ -154,6 +161,14 @@ export interface UpsertRegisteredModelInput {
   tags?: string[];
   metadata?: Record<string, unknown>;
   source?: RegisteredModelRecord['source'];
+}
+
+export interface ModelDiscoverySettingsRecord {
+  scopeKey: string;
+  projectId?: string;
+  settings: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface UpsertRegisteredAgentInput {
@@ -356,6 +371,17 @@ export const openProjectRegistryDatabase = (dbPath = resolveProjectRegistryDbPat
 
     CREATE INDEX IF NOT EXISTS idx_registry_models_node
       ON models(node_id, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS model_discovery_settings (
+      scope_key TEXT PRIMARY KEY,
+      project_id TEXT,
+      settings_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    ) STRICT;
+
+    CREATE INDEX IF NOT EXISTS idx_registry_model_discovery_settings_project
+      ON model_discovery_settings(project_id, updated_at DESC);
 
     CREATE TABLE IF NOT EXISTS code_review_runs (
       review_id TEXT PRIMARY KEY,
@@ -685,8 +711,22 @@ const normalizeRegisteredModelRecord = (row: Record<string, unknown>): Registere
         ? 'federation-sync'
         : row.source === 'manual'
           ? 'manual'
-          : 'local-scan',
+          : row.source === 'huggingface-discovery'
+            ? 'huggingface-discovery'
+            : row.source === 'local-ai-zone-discovery'
+              ? 'local-ai-zone-discovery'
+              : row.source === 'downloaded'
+                ? 'downloaded'
+                : 'local-scan',
   lastSeenAt: String(row.last_seen_at),
+  createdAt: String(row.created_at),
+  updatedAt: String(row.updated_at),
+});
+
+const normalizeModelDiscoverySettingsRecord = (row: Record<string, unknown>): ModelDiscoverySettingsRecord => ({
+  scopeKey: String(row.scope_key),
+  projectId: typeof row.project_id === 'string' ? row.project_id : undefined,
+  settings: parseJsonObject(row.settings_json),
   createdAt: String(row.created_at),
   updatedAt: String(row.updated_at),
 });
@@ -1083,6 +1123,62 @@ export const getRegisteredModel = (
       LIMIT 1
     `).get(nodeId, modelId) as Record<string, unknown> | undefined;
     return row ? normalizeRegisteredModelRecord(row) : undefined;
+  } finally {
+    database.close();
+  }
+};
+
+export const upsertModelDiscoverySettings = (
+  scopeKey: string,
+  settings: Record<string, unknown>,
+  input?: { projectId?: string },
+  dbPath?: string,
+): ModelDiscoverySettingsRecord => {
+  const database = openProjectRegistryDatabase(dbPath);
+  try {
+    const now = new Date().toISOString();
+    database.prepare(`
+      INSERT INTO model_discovery_settings (
+        scope_key, project_id, settings_json, created_at, updated_at
+      ) VALUES (
+        @scopeKey, @projectId, @settingsJson, @createdAt, @updatedAt
+      )
+      ON CONFLICT(scope_key) DO UPDATE SET
+        project_id = excluded.project_id,
+        settings_json = excluded.settings_json,
+        updated_at = excluded.updated_at
+    `).run({
+      scopeKey,
+      projectId: input?.projectId ?? null,
+      settingsJson: JSON.stringify(settings),
+      createdAt: now,
+      updatedAt: now,
+    });
+    const row = database.prepare(`
+      SELECT *
+      FROM model_discovery_settings
+      WHERE scope_key = ?
+      LIMIT 1
+    `).get(scopeKey) as Record<string, unknown>;
+    return normalizeModelDiscoverySettingsRecord(row);
+  } finally {
+    database.close();
+  }
+};
+
+export const getModelDiscoverySettings = (
+  scopeKey: string,
+  dbPath?: string,
+): ModelDiscoverySettingsRecord | undefined => {
+  const database = openProjectRegistryDatabase(dbPath);
+  try {
+    const row = database.prepare(`
+      SELECT *
+      FROM model_discovery_settings
+      WHERE scope_key = ?
+      LIMIT 1
+    `).get(scopeKey) as Record<string, unknown> | undefined;
+    return row ? normalizeModelDiscoverySettingsRecord(row) : undefined;
   } finally {
     database.close();
   }

@@ -36,6 +36,13 @@ export interface ModelInventorySnapshot {
   generatedAt: string;
 }
 
+export type ModelLifecycleStatus =
+  | 'ready'
+  | 'discovered'
+  | 'downloaded'
+  | 'quarantined'
+  | 'validation-failed';
+
 const quantizationPattern = /(Q\d(?:_[A-Z0-9]+)+)/i;
 const contextPattern = /(?:^|[-_ ])(\d{1,3})k(?:[-_ ]|$)/i;
 
@@ -324,6 +331,31 @@ export const listRegisteredModels = (input?: {
   backend?: RegisteredModelRecord['backend'];
   enabledOnly?: boolean;
 }): RegisteredModelRecord[] => listRegisteredModelsFromRegistry(input);
+
+export const getModelLifecycleStatus = (model: RegisteredModelRecord): ModelLifecycleStatus => {
+  const value = model.metadata.lifecycleStatus;
+  if (value === 'discovered' || value === 'downloaded' || value === 'quarantined' || value === 'validation-failed') {
+    return value;
+  }
+  return 'ready';
+};
+
+export const listDiscoveredModels = (input?: {
+  nodeId?: string;
+  newOnly?: boolean;
+}): RegisteredModelRecord[] =>
+  listRegisteredModels({
+    ...(input?.nodeId ? { nodeId: input.nodeId } : {}),
+    enabledOnly: false,
+  })
+    .filter((model) => {
+      const status = getModelLifecycleStatus(model);
+      if (input?.newOnly) {
+        return status === 'discovered';
+      }
+      return status === 'discovered' || status === 'quarantined' || status === 'validation-failed';
+    })
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 
 export const chooseBestModel = (
   inventory: RegisteredModelRecord[],

@@ -11,6 +11,9 @@ export type SlackCommandKind =
   | 'law-approve'
   | 'law-override'
   | 'review-run'
+  | 'models-new'
+  | 'models-discover'
+  | 'models-download'
   | 'models-list'
   | 'models-refresh'
   | 'skills-list'
@@ -117,6 +120,23 @@ const parseSlashCommand = (text: string, route: ModelRouteDecision): ParsedSlack
 
   if (args[0] === 'models' && (args[1] === 'list' || args[1] === 'status')) {
     return buildCommand(text, route, { kind: 'models-list', args: args.slice(2), source: 'slash' });
+  }
+
+  if (args[0] === 'models' && args[1] === 'new') {
+    return buildCommand(text, route, { kind: 'models-new', args: args.slice(2), source: 'slash' });
+  }
+
+  if (args[0] === 'models' && args[1] === 'discover') {
+    return buildCommand(text, route, { kind: 'models-discover', args: args.slice(2), source: 'slash' });
+  }
+
+  if (args[0] === 'models' && args[1] === 'download' && args[2]) {
+    return buildCommand(text, route, {
+      kind: 'models-download',
+      args: args.slice(2),
+      content: args[2],
+      source: 'slash',
+    });
   }
 
   if (args[0] === 'models' && args[1] === 'refresh') {
@@ -233,6 +253,24 @@ const parseNaturalLanguage = (text: string, route: ModelRouteDecision): ParsedSl
 
   if (/^(show|list)\s+models\b/.test(lower)) {
     return buildCommand(text, route, { kind: 'models-list', args: [], source: 'natural-language' });
+  }
+
+  if (/^models\s+new$/i.test(trimmed)) {
+    return buildCommand(text, route, { kind: 'models-new', args: [], source: 'natural-language' });
+  }
+
+  if (/^models\s+discover$/i.test(trimmed)) {
+    return buildCommand(text, route, { kind: 'models-discover', args: [], source: 'natural-language' });
+  }
+
+  const modelDownloadMatch = trimmed.match(/^models\s+download\s+([a-z0-9-]+)$/i);
+  if (modelDownloadMatch?.[1]) {
+    return buildCommand(text, route, {
+      kind: 'models-download',
+      args: [modelDownloadMatch[1]],
+      content: modelDownloadMatch[1],
+      source: 'natural-language',
+    });
   }
 
   if (/^models\s+refresh$/i.test(trimmed)) {
@@ -382,6 +420,9 @@ export const renderSlackCommandResponse = (command: ParsedSlackCommand): SlackCo
           '`/droid override <proposal-id>` forces a human override for a proposal.',
           '`/droid review <pr-id>` runs the code-review-agent on a branch or PR identifier.',
           '`/droid models list` shows the shared model inventory.',
+          '`/droid models new` shows discovered models awaiting download.',
+          '`/droid models discover` polls discovery sources immediately.',
+          '`/droid models download <model-id>` downloads a discovered model.',
           '`/droid models refresh` rescans local models and updates the registry.',
           '`/droid skills list` lists registered skills and specialized agents.',
           '`/droid skill create <name> [template]` scaffolds a new skill.',
@@ -426,6 +467,18 @@ export const renderSlackCommandResponse = (command: ParsedSlackCommand): SlackCo
     case 'review-run':
       return {
         text: `Running a code review for \`${command.content ?? 'unknown'}\`.`,
+      };
+    case 'models-new':
+      return {
+        text: 'Listing newly discovered models.',
+      };
+    case 'models-discover':
+      return {
+        text: 'Running model discovery.',
+      };
+    case 'models-download':
+      return {
+        text: `Downloading model \`${command.content ?? 'unknown'}\`.`,
       };
     case 'models-list':
       return {

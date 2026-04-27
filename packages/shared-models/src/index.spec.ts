@@ -6,7 +6,9 @@ import test from 'node:test';
 
 import { listRegisteredModels } from '@shared-projects';
 
-import { chooseBestModel, refreshModelInventory, scanLocalModels } from './model-inventory';
+import { chooseBestModel, listDiscoveredModels, refreshModelInventory, scanLocalModels } from './model-inventory';
+import { discoverModels, downloadDiscoveredModel } from './model-discovery';
+import { saveModelDiscoveryConfig } from './discovery-config';
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -91,4 +93,83 @@ test('scores model choices according to reasoning and latency preferences', () =
   });
 
   assert.equal(best?.modelId, 'coder-heavy');
+});
+
+test('discovers new gguf models from configured remote sources', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'droidswarm-discovery-'));
+  process.env.DROIDSWARM_HOME = home;
+  process.env.DROIDSWARM_FEDERATION_NODE_ID = 'node-a';
+  saveModelDiscoveryConfig({
+    enabled: true,
+    trustedAuthors: ['bartowski'],
+    sources: [{
+      id: 'huggingface',
+      type: 'huggingface',
+      enabled: true,
+      endpoint: 'https://example.test/hf',
+    }],
+  });
+
+  const result = await discoverModels({
+    force: true,
+    triggeredBy: 'test',
+    fetchFn: async () => new Response(JSON.stringify([
+      {
+        id: 'bartowski/qwen2.5-coder',
+        author: 'bartowski',
+        lastModified: '2026-04-27T00:00:00.000Z',
+        tags: ['gguf', 'code'],
+        siblings: [
+          { rfilename: 'qwen2.5-coder-14b-16k-q4_k_m.gguf', size: 1024 },
+        ],
+      },
+    ]), { status: 200, headers: { 'content-type': 'application/json' } }),
+  });
+
+  assert.equal(result.discovered.length, 1);
+  assert.equal(listDiscoveredModels({ newOnly: true }).length, 1);
+  assert.equal(listDiscoveredModels({ newOnly: true })[0]?.source, 'huggingface-discovery');
+});
+
+test('downloads a discovered model into the local models directory', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'droidswarm-download-'));
+  const modelsDir = path.join(home, 'models');
+  process.env.DROIDSWARM_HOME = home;
+  process.env.DROIDSWARM_MODELS_DIR = modelsDir;
+  process.env.DROIDSWARM_FEDERATION_NODE_ID = 'node-a';
+  saveModelDiscoveryConfig({
+    enabled: true,
+    allowMissingReadme: true,
+    sources: [{
+      id: 'huggingface',
+      type: 'huggingface',
+      enabled: true,
+      endpoint: 'https://example.test/hf',
+    }],
+  });
+
+  await discoverModels({
+    force: true,
+    triggeredBy: 'test',
+    fetchFn: async () => new Response(JSON.stringify([
+      {
+        id: 'bartowski/qwen2.5-coder',
+        author: 'bartowski',
+        lastModified: '2026-04-27T00:00:00.000Z',
+        tags: ['gguf', 'code'],
+        siblings: [
+          { rfilename: 'qwen2.5-coder-14b-16k-q4_k_m.gguf', size: 1024 },
+        ],
+      },
+    ]), { status: 200, headers: { 'content-type': 'application/json' } }),
+  });
+
+  const downloaded = await downloadDiscoveredModel('bartowski-qwen2-5-coder-qwen2-5-coder-14b-16k-q4-k-m', {
+    fetchFn: async () => new Response(Buffer.from('GGUFpayload'), { status: 200 }),
+    triggeredBy: 'test',
+  });
+
+  assert.equal(downloaded.enabled, true);
+  assert.equal(fs.existsSync(downloaded.path ?? ''), true);
+  assert.equal(downloaded.metadata.lifecycleStatus, 'ready');
 });

@@ -8,7 +8,7 @@ import {
   listLawProposals,
   validateCompliance,
 } from '@shared-governance';
-import { listRegisteredModels } from '@shared-models';
+import { getModelLifecycleStatus, listDiscoveredModels, listRegisteredModels } from '@shared-models';
 import { listRegisteredSkillManifests, listSpecializedAgents } from '@shared-skills';
 import { listCodeReviewRuns } from '@shared-projects';
 
@@ -172,6 +172,7 @@ export default async function BoardPage({
     })(),
     modelInventory: (() => {
       const models = listRegisteredModels().slice(0, 12);
+      const discovered = listDiscoveredModels({ newOnly: false }).slice(0, 8);
       const backendCounts = new Map<string, number>();
       const nodes = new Set<string>();
       for (const model of models) {
@@ -181,6 +182,7 @@ export default async function BoardPage({
       return {
         totalModelCount: models.length,
         nodeCount: nodes.size,
+        discoveredModelCount: discovered.length,
         backends: [...backendCounts.entries()].map(([backend, count]) => ({ backend, count })),
         models: models.map((model) => ({
           nodeId: model.nodeId,
@@ -190,6 +192,15 @@ export default async function BoardPage({
           reasoningDepth: model.reasoningDepth,
           speedTier: model.speedTier,
           contextLength: model.contextLength,
+          updatedAt: model.updatedAt,
+        })),
+        discovered: discovered.map((model) => ({
+          nodeId: model.nodeId,
+          modelId: model.modelId,
+          displayName: model.displayName,
+          author: typeof model.metadata.author === 'string' ? model.metadata.author : undefined,
+          quantization: model.quantization,
+          lifecycleStatus: getModelLifecycleStatus(model),
           updatedAt: model.updatedAt,
         })),
       };

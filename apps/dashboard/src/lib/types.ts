@@ -280,6 +280,7 @@ export interface SkillsRegistrySummary {
 export interface ModelInventorySummary {
   totalModelCount: number;
   nodeCount: number;
+  discoveredModelCount: number;
   backends: Array<{
     backend: string;
     count: number;
@@ -292,6 +293,15 @@ export interface ModelInventorySummary {
     reasoningDepth: string;
     speedTier: string;
     contextLength?: number;
+    updatedAt: string;
+  }>;
+  discovered: Array<{
+    nodeId: string;
+    modelId: string;
+    displayName: string;
+    author?: string;
+    quantization?: string;
+    lifecycleStatus: string;
     updatedAt: string;
   }>;
 }

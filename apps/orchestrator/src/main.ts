@@ -1,13 +1,18 @@
 import '../../../packages/protocol-alias/src/index';
+import { startModelDiscoveryLoop } from '@shared-models';
 import { instrumentOrchestrator, tracer } from '@shared-tracing';
 import { DroidSwarmOrchestratorClient } from './OrchestratorClient';
 
 const startOrchestrator = (): void => {
   const orchestrator = instrumentOrchestrator(new DroidSwarmOrchestratorClient());
+  const stopModelDiscovery = startModelDiscoveryLoop({
+    projectId: process.env.DROIDSWARM_PROJECT_ID,
+  });
   const shutdown = (): void => {
     tracer.audit('ORCHESTRATOR_SIGNAL_STOP', {
       signal: 'shutdown',
     });
+    stopModelDiscovery();
     orchestrator.stop();
     process.exit(0);
   };

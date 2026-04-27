@@ -10,6 +10,7 @@ export type SlackCommandKind =
   | 'law-propose'
   | 'law-approve'
   | 'law-override'
+  | 'review-run'
   | 'skills-list'
   | 'skill-create'
   | 'skill-approve'
@@ -147,6 +148,15 @@ const parseSlashCommand = (text: string, route: ModelRouteDecision): ParsedSlack
     });
   }
 
+  if (args[0] === 'review' && args[1]) {
+    return buildCommand(text, route, {
+      kind: 'review-run',
+      args: args.slice(1),
+      content: args[1],
+      source: 'slash',
+    });
+  }
+
   if (args[0] === 'skill' && args[1] === 'create' && args[2]) {
     return buildCommand(text, route, {
       kind: 'skill-create',
@@ -249,6 +259,16 @@ const parseNaturalLanguage = (text: string, route: ModelRouteDecision): ParsedSl
     });
   }
 
+  const reviewMatch = trimmed.match(/^review\s+(.+)$/i);
+  if (reviewMatch?.[1]) {
+    return buildCommand(text, route, {
+      kind: 'review-run',
+      args: [reviewMatch[1]],
+      content: reviewMatch[1],
+      source: 'natural-language',
+    });
+  }
+
   const skillCreateMatch = trimmed.match(/^skill\s+create\s+([a-z0-9-]+)(?:\s+([a-z]+))?$/i);
   if (skillCreateMatch?.[1]) {
     return buildCommand(text, route, {
@@ -322,6 +342,7 @@ export const parseSlackIntent = (text: string, context?: SlackParseContext): Par
     'project',
     'law',
     'override',
+    'review',
   ].includes(args[0]?.toLowerCase() ?? '');
 
   if (trimmed.startsWith('/')) {
@@ -340,6 +361,7 @@ export const renderSlackCommandResponse = (command: ParsedSlackCommand): SlackCo
           '`/droid projects` lists registered projects.',
           '`/droid law status` shows law, consensus, and drift status.',
           '`/droid override <proposal-id>` forces a human override for a proposal.',
+          '`/droid review <pr-id>` runs the code-review-agent on a branch or PR identifier.',
           '`/droid skills list` lists registered skills and specialized agents.',
           '`/droid skill create <name> [template]` scaffolds a new skill.',
           '`/droid agent create <name> <skill1,skill2> [priority]` creates a specialized agent.',
@@ -379,6 +401,10 @@ export const renderSlackCommandResponse = (command: ParsedSlackCommand): SlackCo
     case 'law-override':
       return {
         text: `Overriding governance proposal \`${command.proposalId ?? 'unknown'}\`.`,
+      };
+    case 'review-run':
+      return {
+        text: `Running a code review for \`${command.content ?? 'unknown'}\`.`,
       };
     case 'skills-list':
       return {

@@ -12,6 +12,7 @@ import {
   getRegisteredSkill,
   getCurrentProject,
   listFederatedNodes,
+  listCodeReviewRuns,
   listRegisteredAgents,
   listRegisteredSkills,
   listRegisteredProjects,
@@ -23,6 +24,7 @@ import {
   resolveProjectLookup,
   setCurrentProject,
   upsertRegisteredAgent,
+  upsertCodeReviewRun,
   upsertRegisteredSkill,
 } from './index';
 
@@ -138,5 +140,25 @@ describe('shared-projects registry', () => {
     assert.equal(getRegisteredAgent('vision-agent')?.name, 'vision-agent');
     assert.equal(listRegisteredAgents()[0]?.skills[0], 'vision');
     assert.equal(listRegisteredAgents()[0]?.consensusRoles[0], 'reviewer');
+  });
+
+  it('stores code review runs in the global registry', () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'droidswarm-review-registry-'));
+    tempDirs.push(home);
+    process.env.DROIDSWARM_HOME = home;
+
+    upsertCodeReviewRun({
+      reviewId: 'review-1',
+      projectId: 'demo',
+      prId: 'feature/test',
+      title: 'Review feature/test',
+      status: 'completed',
+      summary: 'Two blocking findings.',
+      findings: [{ severity: 'blocking', filePath: 'src/app.ts' }],
+      findingsMarkdown: '## Blocking\n- issue',
+    });
+
+    assert.equal(listCodeReviewRuns()[0]?.reviewId, 'review-1');
+    assert.equal(listCodeReviewRuns()[0]?.status, 'completed');
   });
 });

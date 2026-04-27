@@ -38,3 +38,4 @@ Require explicit governance summaries at startup.
 - Guardian vetoes and human overrides must be preserved in the tamper-evident governance audit trail.
 - The system state hash includes active laws, registered skills, specialized agents, and the Droidspeak catalog and must be checked continuously across federated nodes.
 - Drift mismatches must be surfaced to operators through governance status surfaces before normal automation proceeds.
+- Code review outcomes that influence merge integrity on critical paths must emit review-specific Droidspeak events and run through the same consensus and tracing surfaces.

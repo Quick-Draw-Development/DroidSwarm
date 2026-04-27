@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
+import { execSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 
 import { onboardProject } from '@shared-projects';
@@ -258,6 +259,38 @@ test('returns governance status and supports human override from slack commands'
     channelId: 'C1',
   }, baseConfig());
   assert.match(overridden.text, /overridden and activated/i);
+});
+
+test('runs a code review from slack commands', async () => {
+  const home = makeTempHome();
+  const repoRoot = path.join(home, 'repo');
+  process.env.DROIDSWARM_HOME = home;
+  fs.mkdirSync(repoRoot, { recursive: true });
+  onboardProject({
+    projectId: 'demo',
+    name: 'Demo',
+    rootPath: repoRoot,
+    dbPath: path.join(home, 'projects', 'demo', 'droidswarm.db'),
+    wsPort: 9999,
+  });
+  fs.writeFileSync(path.join(repoRoot, 'app.ts'), 'export const value = 1;\n');
+  execSync('git init -b main', { cwd: repoRoot });
+  execSync('git config user.email test@example.com', { cwd: repoRoot });
+  execSync('git config user.name Tester', { cwd: repoRoot });
+  execSync('git add .', { cwd: repoRoot });
+  execSync('git commit -m initial', { cwd: repoRoot });
+  execSync('git checkout -b feature/review', { cwd: repoRoot });
+  fs.writeFileSync(path.join(repoRoot, 'app.ts'), 'export const value: any = 1;\n');
+  execSync('git add app.ts', { cwd: repoRoot });
+  execSync('git commit -m update', { cwd: repoRoot });
+
+  const result = await handleSlackInput({
+    text: 'review HEAD',
+    userId: 'U1',
+    username: 'alice',
+    channelId: 'C1',
+  }, baseConfig());
+  assert.match(result.text, /finished with status/i);
 });
 
 test('creates skill scaffolds and specialized agents from slack commands', async () => {

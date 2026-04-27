@@ -91,3 +91,37 @@ After completion, update SKILLS.md and AGENTS.md with full documentation and exa
 
 This plan creates a production-grade code review agent that is a seamless, first-class member of the DroidSwarm ecosystem while delivering exactly the high-quality, constructive, and thorough reviews you specified.
 Start with Phase 0.
+
+Completion Status
+
+Status: Implemented in repo on April 27, 2026
+
+Completed implementation summary
+
+- Phase 0: added a first-class `skills/code-review-agent` skill pack plus `skills/agents/code-review-agent.json`, with registry manifests, review-specific Droidspeak verbs, and discoverable agent metadata inside the dynamic skills framework.
+- Phase 1: implemented a reusable review engine in `packages/shared-skills/src/code-review.ts` covering PR description checks, bug heuristics, test coverage gaps, security findings, performance concerns, code quality issues, project-pattern enforcement, prioritized feedback, and actionable markdown suggestions with file and line references.
+- Phase 2: wired review execution into the existing git and PR workflow surface. `DroidSwarm review run <pr-id>` now runs the review agent manually, and PR automation triggers a review automatically after branch push/finalization.
+- Phase 3: review-specific Droidspeak verbs are now part of the shared catalog, critical-path reviews trigger lightweight consensus rounds, and completed reviews are stored durably with tamper-evident audit logging.
+- Phase 4: Slack now supports `/droid review <pr-id>`, the dashboard has a “Code Reviews” panel plus `/api/reviews`, and review runs persist in the shared project registry so every surface reads the same state.
+- Phase 5: added unit and integration coverage for the review engine, registry persistence, Slack review command flow, and orchestration compatibility.
+
+Verification run
+
+- `npx nx typecheck shared-projects`
+- `npx nx typecheck shared-skills`
+- `npx nx typecheck shared-governance`
+- `npx nx typecheck orchestrator`
+- `npx nx typecheck slack-bot`
+- `npx nx typecheck dashboard`
+- `npx nx test shared-projects`
+- `npx nx test shared-skills`
+- `npx nx test shared-governance`
+- `npx nx test orchestrator`
+- `npx nx test slack-bot`
+- `bash -n packages/bootstrap/bin/DroidSwarm`
+
+Implementation notes
+
+- Review analysis is heuristic and diff-driven rather than a full static-analysis pipeline; the goal is high-signal findings that are cheap enough to run locally and automatically.
+- Review runs are stored in the global DroidSwarm registry DB so CLI, Slack, dashboard, and automation all target the same durable state.
+- The built-in code-review-agent skill is marked as core-behavior-affecting and therefore enters the registry as approval-capable infrastructure while still remaining callable through the shared review engine.

@@ -1,5 +1,6 @@
 import { AddTaskForm } from './AddTaskForm';
 import { BoardClient } from './BoardClient';
+import { CodeReviewsPanel } from './CodeReviewsPanel';
 import { GovernancePanel } from './GovernancePanel';
 import { LiveConnectionStatus } from './LiveConnectionStatus';
 import { ProvideInstructionsModal } from './ProvideInstructionsModal';
@@ -48,6 +49,7 @@ export function BoardShell({
       <BoardClient username={username} tasks={tasks} />
       <GovernancePanel governance={insights.governance} />
       <SkillsRegistryPanel registry={insights.skillsRegistry} />
+      <CodeReviewsPanel reviews={insights.codeReviews} />
       <OrchestrationInsights data={insights} />
     </main>
   );

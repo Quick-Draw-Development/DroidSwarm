@@ -9,6 +9,7 @@ import {
   validateCompliance,
 } from '@shared-governance';
 import { listRegisteredSkillManifests, listSpecializedAgents } from '@shared-skills';
+import { listCodeReviewRuns } from '@shared-projects';
 
 import { BoardShell } from '../../components/BoardShell';
 import { ProjectSwitcher } from '../../components/project-switcher';
@@ -148,6 +149,23 @@ export default async function BoardPage({
           status: entry.status,
           skills: entry.skills,
           priority: entry.priority,
+        })),
+      };
+    })(),
+    codeReviews: (() => {
+      const reviews = listCodeReviewRuns({ projectId: selectedProjectId }).slice(0, 8);
+      return {
+        activeReviewCount: reviews.filter((entry) => entry.status === 'pending').length,
+        clarificationCount: reviews.filter((entry) => entry.status === 'clarification-needed').length,
+        completedReviewCount: reviews.filter((entry) => entry.status === 'completed').length,
+        reviews: reviews.map((entry) => ({
+          reviewId: entry.reviewId,
+          prId: entry.prId,
+          title: entry.title,
+          status: entry.status,
+          summary: entry.summary,
+          findingsMarkdown: entry.findingsMarkdown,
+          updatedAt: entry.updatedAt,
         })),
       };
     })(),

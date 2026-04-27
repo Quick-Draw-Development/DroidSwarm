@@ -37,8 +37,24 @@ Create a specialized agent that loads registered skills:
 DroidSwarm agent create vision-agent --skills vision,reviewer --priority high
 ```
 
+Run the dedicated code review agent:
+
+```bash
+DroidSwarm review run feature/my-branch
+```
+
+The built-in `code-review-agent` skill is registered from `skills/code-review-agent/` and exposes:
+
+- PR description validation
+- diff-aware bug finding with line references
+- test coverage gap detection
+- security and performance heuristics
+- categorized markdown review output
+- consensus-aware audit records when critical paths are touched
+
 ## Governance
 
 - Skills and specialized agents that mark `affectsCoreBehavior: true` enter the registry as `pending-approval`.
 - Operators can approve them through `DroidSwarm skill approve <name>`, `DroidSwarm agent approve <name>`, Slack, or the dashboard.
 - Skills must declare valid Droidspeak verbs in `manifest.json` before they can contribute to the runtime catalog.
+- Review automation can be triggered from CLI, Slack (`/droid review <pr-id>`), the dashboard “Code Reviews” panel, or automatically after PR automation pushes a branch.

@@ -194,6 +194,22 @@ export interface OrchestrationInsightsData {
   auditTrail?: AuditTrailSummary;
   governance?: GovernanceSummary;
   skillsRegistry?: SkillsRegistrySummary;
+  codeReviews?: CodeReviewSummary;
+}
+
+export interface CodeReviewSummary {
+  activeReviewCount: number;
+  clarificationCount: number;
+  completedReviewCount: number;
+  reviews: Array<{
+    reviewId: string;
+    prId: string;
+    title: string;
+    status: string;
+    summary: string;
+    findingsMarkdown: string;
+    updatedAt: string;
+  }>;
 }
 
 export interface GovernanceSummary {

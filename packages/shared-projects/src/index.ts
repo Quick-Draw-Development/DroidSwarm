@@ -133,6 +133,44 @@ export interface UpsertRegisteredAgentInput {
   manifest: Record<string, unknown>;
 }
 
+export interface CodeReviewRunRecord {
+  reviewId: string;
+  projectId: string;
+  prId: string;
+  title: string;
+  status: 'pending' | 'clarification-needed' | 'completed' | 'failed';
+  summary: string;
+  backend?: string;
+  reviewAgent?: string;
+  repoRoot?: string;
+  baseRef?: string;
+  headRef?: string;
+  findings: Array<Record<string, unknown>>;
+  findingsMarkdown: string;
+  consensusId?: string;
+  auditHash?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertCodeReviewRunInput {
+  reviewId: string;
+  projectId: string;
+  prId: string;
+  title: string;
+  status: CodeReviewRunRecord['status'];
+  summary: string;
+  backend?: string;
+  reviewAgent?: string;
+  repoRoot?: string;
+  baseRef?: string;
+  headRef?: string;
+  findings?: Array<Record<string, unknown>>;
+  findingsMarkdown?: string;
+  consensusId?: string;
+  auditHash?: string;
+}
+
 export const resolveDroidSwarmHome = (): string =>
   process.env.DROIDSWARM_HOME ?? path.resolve(process.env.HOME ?? process.cwd(), '.droidswarm');
 
@@ -251,6 +289,29 @@ export const openProjectRegistryDatabase = (dbPath = resolveProjectRegistryDbPat
 
     CREATE INDEX IF NOT EXISTS idx_registry_agents_status
       ON agent_registry(status, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS code_review_runs (
+      review_id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      pr_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      status TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      backend TEXT,
+      review_agent TEXT,
+      repo_root TEXT,
+      base_ref TEXT,
+      head_ref TEXT,
+      findings_json TEXT NOT NULL,
+      findings_markdown TEXT NOT NULL,
+      consensus_id TEXT,
+      audit_hash TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    ) STRICT;
+
+    CREATE INDEX IF NOT EXISTS idx_registry_code_reviews_project
+      ON code_review_runs(project_id, updated_at DESC);
   `);
   const ensureColumn = (tableName: string, columnName: string, definition: string): void => {
     const columns = database.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name?: string }>;
@@ -480,6 +541,42 @@ const normalizeAgentRecord = (row: Record<string, unknown>): RegisteredAgentReco
   consensusRoles: parseJsonArray(row.consensus_roles_json),
   resourceQuotas: parseJsonObject(row.resource_quotas_json),
   manifest: parseJsonObject(row.manifest_json),
+  createdAt: String(row.created_at),
+  updatedAt: String(row.updated_at),
+});
+
+const normalizeCodeReviewRunRecord = (row: Record<string, unknown>): CodeReviewRunRecord => ({
+  reviewId: String(row.review_id),
+  projectId: String(row.project_id),
+  prId: String(row.pr_id),
+  title: String(row.title),
+  status:
+    row.status === 'clarification-needed'
+      ? 'clarification-needed'
+      : row.status === 'completed'
+        ? 'completed'
+        : row.status === 'failed'
+          ? 'failed'
+          : 'pending',
+  summary: String(row.summary),
+  backend: typeof row.backend === 'string' ? row.backend : undefined,
+  reviewAgent: typeof row.review_agent === 'string' ? row.review_agent : undefined,
+  repoRoot: typeof row.repo_root === 'string' ? row.repo_root : undefined,
+  baseRef: typeof row.base_ref === 'string' ? row.base_ref : undefined,
+  headRef: typeof row.head_ref === 'string' ? row.head_ref : undefined,
+  findings: (() => {
+    try {
+      const parsed = JSON.parse(String(row.findings_json ?? '[]')) as unknown;
+      return Array.isArray(parsed)
+        ? parsed.filter((entry): entry is Record<string, unknown> => entry != null && typeof entry === 'object' && !Array.isArray(entry))
+        : [];
+    } catch {
+      return [];
+    }
+  })(),
+  findingsMarkdown: String(row.findings_markdown ?? ''),
+  consensusId: typeof row.consensus_id === 'string' ? row.consensus_id : undefined,
+  auditHash: typeof row.audit_hash === 'string' ? row.audit_hash : undefined,
   createdAt: String(row.created_at),
   updatedAt: String(row.updated_at),
 });
@@ -764,6 +861,97 @@ export const updateRegisteredAgentStatus = (
 
 export const listRegisteredAgentsByConsensusRole = (role: string, dbPath?: string): RegisteredAgentRecord[] =>
   listRegisteredAgents(dbPath).filter((entry) => entry.consensusRoles.includes(role));
+
+export const upsertCodeReviewRun = (input: UpsertCodeReviewRunInput, dbPath?: string): CodeReviewRunRecord => {
+  const database = openProjectRegistryDatabase(dbPath);
+  try {
+    const now = new Date().toISOString();
+    const record = {
+      reviewId: input.reviewId,
+      projectId: input.projectId,
+      prId: input.prId,
+      title: input.title,
+      status: input.status,
+      summary: input.summary,
+      backend: input.backend ?? null,
+      reviewAgent: input.reviewAgent ?? null,
+      repoRoot: input.repoRoot ?? null,
+      baseRef: input.baseRef ?? null,
+      headRef: input.headRef ?? null,
+      findingsJson: JSON.stringify(input.findings ?? []),
+      findingsMarkdown: input.findingsMarkdown ?? '',
+      consensusId: input.consensusId ?? null,
+      auditHash: input.auditHash ?? null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    database.prepare(`
+      INSERT INTO code_review_runs (
+        review_id, project_id, pr_id, title, status, summary, backend, review_agent, repo_root,
+        base_ref, head_ref, findings_json, findings_markdown, consensus_id, audit_hash, created_at, updated_at
+      ) VALUES (
+        @reviewId, @projectId, @prId, @title, @status, @summary, @backend, @reviewAgent, @repoRoot,
+        @baseRef, @headRef, @findingsJson, @findingsMarkdown, @consensusId, @auditHash, @createdAt, @updatedAt
+      )
+      ON CONFLICT(review_id) DO UPDATE SET
+        project_id = excluded.project_id,
+        pr_id = excluded.pr_id,
+        title = excluded.title,
+        status = excluded.status,
+        summary = excluded.summary,
+        backend = excluded.backend,
+        review_agent = excluded.review_agent,
+        repo_root = excluded.repo_root,
+        base_ref = excluded.base_ref,
+        head_ref = excluded.head_ref,
+        findings_json = excluded.findings_json,
+        findings_markdown = excluded.findings_markdown,
+        consensus_id = excluded.consensus_id,
+        audit_hash = excluded.audit_hash,
+        updated_at = excluded.updated_at
+    `).run(record);
+    const row = database.prepare(`SELECT * FROM code_review_runs WHERE review_id = ? LIMIT 1`).get(input.reviewId) as Record<string, unknown>;
+    return normalizeCodeReviewRunRecord(row);
+  } finally {
+    database.close();
+  }
+};
+
+export const listCodeReviewRuns = (input?: { projectId?: string; prId?: string }, dbPath?: string): CodeReviewRunRecord[] => {
+  const database = openProjectRegistryDatabase(dbPath);
+  try {
+    const clauses: string[] = [];
+    const values: unknown[] = [];
+    if (input?.projectId) {
+      clauses.push(`project_id = ?`);
+      values.push(input.projectId);
+    }
+    if (input?.prId) {
+      clauses.push(`pr_id = ?`);
+      values.push(input.prId);
+    }
+    const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    return (database.prepare(`
+      SELECT *
+      FROM code_review_runs
+      ${whereClause}
+      ORDER BY updated_at DESC, review_id DESC
+    `).all(...values) as Record<string, unknown>[])
+      .map(normalizeCodeReviewRunRecord);
+  } finally {
+    database.close();
+  }
+};
+
+export const getCodeReviewRun = (reviewId: string, dbPath?: string): CodeReviewRunRecord | undefined => {
+  const database = openProjectRegistryDatabase(dbPath);
+  try {
+    const row = database.prepare(`SELECT * FROM code_review_runs WHERE review_id = ? LIMIT 1`).get(reviewId) as Record<string, unknown> | undefined;
+    return row ? normalizeCodeReviewRunRecord(row) : undefined;
+  } finally {
+    database.close();
+  }
+};
 
 export const markFederatedNodeKicked = (nodeId: string, dbPath?: string): FederatedNodeRecord | undefined => {
   const database = openProjectRegistryDatabase(dbPath);

@@ -11,6 +11,7 @@ import {
   listSpecializedAgents,
   syncDiscoveredAgents,
 } from './agent-builder';
+import { runCodeReview } from './code-review';
 
 const command = process.argv[2];
 const args = process.argv.slice(3);
@@ -88,6 +89,19 @@ switch (command) {
       throw new Error('Missing --name');
     }
     output(approveSpecializedAgent(name));
+    break;
+  }
+  case 'review-run': {
+    const prId = readValue('--pr-id');
+    if (!prId) {
+      throw new Error('Missing --pr-id');
+    }
+    output(runCodeReview({
+      prId,
+      project: readValue('--project'),
+      repoRoot: readValue('--repo-root'),
+      prBody: readValue('--body'),
+    }));
     break;
   }
   default:

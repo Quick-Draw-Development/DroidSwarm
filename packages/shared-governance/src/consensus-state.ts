@@ -11,6 +11,7 @@ export const consensusProposalTypeSchema = z.enum([
   'agent-registration',
   'agent-spawn',
   'task-handoff',
+  'code-review',
   'human-override',
 ]);
 

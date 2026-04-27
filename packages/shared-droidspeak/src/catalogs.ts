@@ -66,7 +66,11 @@ export const DROIDSPEAK_CATALOGS = {
     'EVT-SKILL-REGISTERED': 'Skill Registered',
     'EVT-AGENT-UPDATED': 'Agent Updated',
     'EVT-CONSENSUS-ROUND': 'Consensus Round',
-    'EVT-DRIFT-DETECTED': 'Drift Detected'
+    'EVT-DRIFT-DETECTED': 'Drift Detected',
+    'EVT-REVIEW-START': 'Review Start',
+    'EVT-BUG-FLAG': 'Bug Flag',
+    'EVT-SECURITY-FINDING': 'Security Finding',
+    'EVT-CONSENSUS-REVIEW': 'Consensus Review'
   },
   
   // D11: Promotion (8 entries)

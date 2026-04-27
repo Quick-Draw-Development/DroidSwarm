@@ -10,6 +10,7 @@ test('parses supported slash commands', () => {
   assert.equal(parseSlackCommand('law propose Require audit trail for governance').kind, 'law-propose');
   assert.equal(parseSlackCommand('law approve proposal-123').kind, 'law-approve');
   assert.equal(parseSlackCommand('override proposal-123').kind, 'law-override');
+  assert.equal(parseSlackCommand('review feature/test').kind, 'review-run');
   assert.equal(parseSlackCommand('skill create vision research').kind, 'skill-create');
   assert.equal(parseSlackCommand('agent create vision-agent vision,reviewer high').kind, 'agent-create');
   assert.equal(parseSlackCommand('task-1234abcd: please retry').kind, 'task-message');
@@ -37,6 +38,9 @@ test('parses natural language relay intents and project selection', () => {
 
   const status = parseSlackIntent('law status');
   assert.equal(status.kind, 'law-status');
+
+  const review = parseSlackIntent('review feature/test');
+  assert.equal(review.kind, 'review-run');
 });
 
 test('defaults arbitrary messages to operator relay', () => {

@@ -1,0 +1,25 @@
+{
+  "name": "code-review-agent",
+  "version": "0.1.0",
+  "description": "Specialized code review agent for pull request analysis and merge-risk assessment.",
+  "skills": [
+    "code-review-agent"
+  ],
+  "priority": "high",
+  "projectScoped": false,
+  "affectsCoreBehavior": true,
+  "modelRouting": {
+    "preferredBackend": "apple-intelligence",
+    "modelTier": "local-cheap"
+  },
+  "consensusRoles": [
+    "proposer",
+    "reviewer",
+    "verifier",
+    "guardian"
+  ],
+  "governanceParticipation": "guardian",
+  "resourceQuotas": {
+    "maxConcurrentTasks": 2
+  }
+}

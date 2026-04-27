@@ -22,6 +22,7 @@ import {
   createSkillScaffold,
   listRegisteredSkillManifests,
   listSpecializedAgents,
+  runCodeReview,
   resolveSkillsRoot,
 } from '@shared-skills';
 import {
@@ -438,6 +439,8 @@ export const executeSlackIntent = async (
     const report = validateCompliance({
       eventType: command.kind === 'law-propose' || command.kind === 'law-approve' || command.kind === 'law-override' || command.kind === 'law-status'
         ? 'governance.proposal'
+        : command.kind === 'review-run'
+          ? 'review.request'
         : command.kind === 'skill-create' || command.kind === 'skill-approve' || command.kind === 'agent-create'
           ? 'skill.register'
           : 'slack.command',
@@ -460,6 +463,8 @@ export const executeSlackIntent = async (
               ? { compact: 'EVT-HUMAN-APPROVAL', expanded: command.name ?? '', kind: 'audit_delta' }
               : command.kind === 'agent-create'
                 ? { compact: 'EVT-AGENT-UPDATED', expanded: command.name ?? '', kind: 'memory_pinned' }
+                : command.kind === 'review-run'
+                  ? { compact: 'EVT-REVIEW-START', expanded: command.content ?? '', kind: 'memory_pinned' }
           : undefined,
     });
     if (!report.ok) {
@@ -607,6 +612,24 @@ export const executeSlackIntent = async (
       });
       return {
         text: `Governance proposal \`${approved.proposalId}\` overridden and activated as ${approved.lawId}.`,
+        projectId: project?.projectId,
+        backend: command.route.backend,
+      };
+    }
+    case 'review-run': {
+      const prId = command.content?.trim();
+      if (!prId) {
+        return {
+          text: 'Missing review target.',
+          backend: command.route.backend,
+        };
+      }
+      const review = runCodeReview({
+        prId,
+        project: project?.projectId,
+      });
+      return {
+        text: `Review \`${review.reviewId}\` for \`${review.prId}\` finished with status *${review.status}*.\n${review.summary}`,
         projectId: project?.projectId,
         backend: command.route.backend,
       };

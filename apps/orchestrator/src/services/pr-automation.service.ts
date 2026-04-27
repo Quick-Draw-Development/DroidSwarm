@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
+import { runCodeReview } from '@shared-skills';
+
 import type { OrchestratorConfig, PersistedTask } from '../types';
 
 export class PRAutomationService {
@@ -31,6 +33,15 @@ export class PRAutomationService {
       execFileSync('git', ['-C', workspacePath, 'push', '-u', this.config.prRemoteName, task.branch], { stdio: 'ignore' });
     } catch {
       return;
+    }
+
+    try {
+      runCodeReview({
+        prId: task.branch,
+        repoRoot: workspacePath,
+      });
+    } catch {
+      // Review automation is additive and should not block task finalization.
     }
 
     if (process.env.GITHUB_TOKEN || process.env.GH_TOKEN) {

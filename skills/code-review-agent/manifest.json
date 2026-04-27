@@ -1,0 +1,39 @@
+{
+  "name": "code-review-agent",
+  "version": "0.1.0",
+  "description": "Production code review skill for pull requests and high-signal diff analysis.",
+  "capabilities": [
+    "code-review",
+    "security-review",
+    "test-coverage-analysis",
+    "performance-review"
+  ],
+  "requiredBackends": [
+    "apple-intelligence",
+    "mlx",
+    "local-llama",
+    "codex-cli"
+  ],
+  "droidspeakVerbs": [
+    {
+      "code": "EVT-REVIEW-START",
+      "label": "Review Start"
+    },
+    {
+      "code": "EVT-BUG-FLAG",
+      "label": "Bug Flag"
+    },
+    {
+      "code": "EVT-SECURITY-FINDING",
+      "label": "Security Finding"
+    },
+    {
+      "code": "EVT-CONSENSUS-REVIEW",
+      "label": "Consensus Review"
+    }
+  ],
+  "projectScoped": false,
+  "affectsCoreBehavior": true,
+  "entry": "index.ts",
+  "instructionsFile": "SKILL.md"
+}

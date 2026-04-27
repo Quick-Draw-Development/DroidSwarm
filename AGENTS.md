@@ -4,6 +4,7 @@
 
 The built-in `code-review-agent` is the canonical specialized reviewer for diff and PR analysis. Use the registered skill/agent flow and `DroidSwarm review run <pr-id>` rather than ad hoc review scripts when extending review automation.
 Use `DroidSwarm models refresh|status` and the shared model registry instead of bespoke llama inventory parsing when extending local model behavior.
+Use the shared Hermes surfaces for durable memory and skill evolution: `DroidSwarm memory ...` for retrieval/pruning and `DroidSwarm evolve ...` for governed reflection proposals. If `DROIDSWARM_ENABLE_HERMES_LOOP=true` is enabled, treat reflected memory and evolution proposals as first-class operator surfaces rather than ad hoc local state.
 
 ## Nx commands (mandatory)
 

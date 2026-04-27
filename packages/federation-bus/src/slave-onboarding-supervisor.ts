@@ -1,9 +1,10 @@
 import { loadFederationNodeConfig, loadSharedConfig } from '@shared-config';
 import { buildDroidspeakCatalogs } from '@shared-droidspeak';
 import { computeLawManifestHash, computeSystemStateHash, createDriftSnapshot, listActiveLaws, validateCompliance } from '@shared-governance';
+import { createLongTermMemory, listLongTermMemories } from '@shared-memory';
 import { refreshModelInventory } from '@shared-models';
-import { registerFederatedNode, upsertRegisteredModel } from '@shared-projects';
-import { buildDynamicSkillVerbCatalog, listRegisteredSkillManifests, listSpecializedAgents } from '@shared-skills';
+import { registerFederatedNode, upsertRegisteredModel, upsertSkillEvolutionProposal } from '@shared-projects';
+import { buildDynamicSkillVerbCatalog, listEvolutionProposals, listRegisteredSkillManifests, listSpecializedAgents } from '@shared-skills';
 import { appendAuditEvent } from '@shared-tracing';
 
 import { rollCallSlave, type FederationSigningKey, type SlaveRollCallPayload, type SlaveWelcomeResponse } from './index';
@@ -39,6 +40,11 @@ export const createSlaveOnboardingWelcome = (payload: SlaveRollCallPayload): Sla
     metadata: model.metadata,
     source: 'federation-sync',
   })),
+  recentMemories: listLongTermMemories({
+    projectId: payload.projectId ?? loadSharedConfig().projectId,
+    limit: 12,
+  }),
+  evolutionProposals: listEvolutionProposals(payload.projectId ?? loadSharedConfig().projectId).slice(0, 12),
 });
 
 export const registerSlaveRollCall = (payload: SlaveRollCallPayload): SlaveWelcomeResponse => {
@@ -203,6 +209,44 @@ export const beginSlaveOnboarding = async (input?: {
       ...model,
       nodeId: model.nodeId,
       source: 'federation-sync',
+    });
+  }
+  for (const memory of welcome.recentMemories ?? []) {
+    createLongTermMemory({
+      projectId: memory.projectId,
+      sessionId: memory.sessionId,
+      scope: memory.scope,
+      memoryType: memory.memoryType,
+      droidspeakSummary: memory.droidspeakSummary,
+      englishTranslation: memory.englishTranslation,
+      sourceEventHash: memory.sourceEventHash,
+      sourceTaskId: memory.sourceTaskId,
+      sourceRunId: memory.sourceRunId,
+      relevanceScore: memory.relevanceScore,
+      embedding: memory.embedding,
+      metadata: {
+        ...memory.metadata,
+        source: 'federation-sync',
+        remoteMemoryId: memory.memoryId,
+      },
+      expiresAt: memory.expiresAt,
+    });
+  }
+  for (const proposal of welcome.evolutionProposals ?? []) {
+    upsertSkillEvolutionProposal({
+      proposalId: proposal.proposalId,
+      projectId: proposal.projectId,
+      proposalType: proposal.proposalType,
+      targetSkill: proposal.targetSkill,
+      title: proposal.title,
+      description: proposal.description,
+      rationale: proposal.rationale,
+      proposedBy: proposal.proposedBy,
+      status: proposal.status,
+      manifest: proposal.manifest,
+      stubFiles: proposal.stubFiles,
+      consensusId: proposal.consensusId,
+      auditHash: proposal.auditHash,
     });
   }
   return welcome;

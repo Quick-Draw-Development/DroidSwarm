@@ -30,6 +30,10 @@ export const buildAgentPrompt = (input: {
     requiredReads: string[];
     droidspeak?: { compact: string; expanded: string };
   };
+  memoryContext?: Array<{
+    droidspeakSummary: string;
+    englishTranslation: string;
+  }>;
 }): string => {
   const { task, role, agentName, projectName, projectId, parentSummary } = input;
   const normalizedRole = role.toLowerCase();
@@ -67,6 +71,14 @@ export const buildAgentPrompt = (input: {
         : '',
       '',
     ].filter(Boolean)
+    : [];
+  const memorySection = (input.memoryContext?.length ?? 0) > 0
+    ? [
+      'Relevant long-term memory:',
+      ...input.memoryContext!.map((memory, index) =>
+        `${index + 1}. ${memory.droidspeakSummary} (${memory.englishTranslation})`),
+      '',
+    ]
     : [];
   const roleSpecificSection = normalizedRole.includes('arbiter')
     ? [
@@ -107,6 +119,7 @@ export const buildAgentPrompt = (input: {
     ...parentDroidspeakSection,
     ...digestSection,
     ...handoffSection,
+    ...memorySection,
     '',
     'Already requested follow-on roles:',
     formatRequestedAgents(input.requestedAgents ?? []),

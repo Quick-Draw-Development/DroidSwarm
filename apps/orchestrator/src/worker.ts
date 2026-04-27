@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import WebSocket from 'ws';
 import { COMPACT_VERB_DICTIONARY, type CompactVerb, type RoutingTelemetry } from '@shared-types';
+import { retrieveRelevantMemories } from '@shared-memory';
 
 import { loadConfig } from './config';
 import { buildAgentPrompt } from './agent-prompt';
@@ -187,6 +188,14 @@ export const runWorker = async (): Promise<void> => {
     parentDroidspeak: options.parentDroidspeak,
     taskDigest: options.taskDigest,
     handoffPacket: options.handoffPacket,
+    memoryContext: retrieveRelevantMemories({
+      query: `${options.task.title} ${options.task.description} ${options.role}`,
+      projectId: config.projectId,
+      limit: 5,
+    }).map((entry) => ({
+      droidspeakSummary: entry.droidspeakSummary,
+      englishTranslation: entry.englishTranslation,
+    })),
     projectId: config.projectId,
     projectName: config.projectName,
     specRules: config.agentRules,

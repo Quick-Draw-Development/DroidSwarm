@@ -8,7 +8,8 @@ import {
 } from 'node:crypto';
 
 import { envelopeV2Schema, type EnvelopeV2 } from '@shared-types';
-import type { UpsertRegisteredModelInput } from '@shared-projects';
+import type { SkillEvolutionProposalRecord, UpsertRegisteredModelInput } from '@shared-projects';
+import type { LongTermMemoryEntry } from '@shared-memory';
 import { z } from 'zod';
 
 const heartbeatPayloadSchema = z.object({
@@ -195,6 +196,8 @@ export interface SlaveWelcomeResponse {
   systemStateHash?: string;
   projectId?: string;
   modelInventory?: FederationModelSnapshot[];
+  recentMemories?: LongTermMemoryEntry[];
+  evolutionProposals?: SkillEvolutionProposalRecord[];
   reason?: string;
 }
 

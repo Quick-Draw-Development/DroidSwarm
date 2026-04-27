@@ -90,3 +90,18 @@ After completion, update SYSTEM_LAWS.md, SKILLS.md, and AGENTS.md with the new m
 
 This plan brings the best of Hermes’ self-improving nature into DroidSwarm while staying true to our governance, federation, and efficiency principles.
 Start with Phase 0.
+
+## Completion
+
+Completed on 2026-04-27.
+
+Implemented:
+
+- `packages/shared-persistence` long-term memory database support and a real `packages/shared-memory` library for storage, retrieval, pruning, procedural memory, reflection, and CLI access.
+- Orchestrator prompt injection plus checkpoint-to-memory bridging so relevant long-term memories are available at task start.
+- Governed skill evolution in `packages/shared-skills`, including proposal persistence, consensus-backed proposal generation, human approval, and scaffold registration.
+- Operator surfaces for Hermes flows in the bootstrap CLI (`DroidSwarm memory ...`, `DroidSwarm evolve ...`), Slack (`/droid memory search`, `/droid evolve status`, `/droid evolve run`, `/droid skill approve <proposal-id>`), and the dashboard (Long-Term Memory and Evolution Proposals panels).
+- Federation onboarding sync for recent memories and governed evolution proposals so slave nodes inherit current signals instead of starting cold.
+- Documentation updates in `SYSTEM_LAWS.md`, `SKILLS.md`, and `AGENTS.md`.
+
+Validation completed with Nx typechecks/tests for the touched packages and `bash -n packages/bootstrap/bin/DroidSwarm`.

@@ -26,11 +26,16 @@ Slave swarms must not host the dashboard or claim master governance authority.
 
 Require explicit governance summaries at startup.
 
+## LAW-007
+
+Long-term memory writes, reflection cycles, and governed skill-evolution proposals must emit Droidspeak-compatible audit events and remain reviewable by a human operator before capability activation.
+
 ## Skill And Agent Extension Rules
 
 - New skills and specialized agents must register through the shared skills registry before they are treated as active runtime capabilities.
 - Skill manifests must declare valid Droidspeak verbs for any new internal event surface they introduce.
 - Skill packs or agents that affect core behavior may remain pending until explicit human approval.
+- Reflection-driven skill evolution proposals remain `pending-human-approval` until a human approves them from the CLI, Slack, or dashboard.
 
 ## Role-Based Consensus And Drift Rules
 
@@ -39,3 +44,10 @@ Require explicit governance summaries at startup.
 - The system state hash includes active laws, registered skills, specialized agents, and the Droidspeak catalog and must be checked continuously across federated nodes.
 - Drift mismatches must be surfaced to operators through governance status surfaces before normal automation proceeds.
 - Code review outcomes that influence merge integrity on critical paths must emit review-specific Droidspeak events and run through the same consensus and tracing surfaces.
+- Federated onboarding must share recent governed evolution proposals and durable memory signals so slave nodes do not boot cold.
+
+## Memory And Reflection Rules
+
+- Long-term memory is project-scoped by default and may only become `global` or `personal` when the writer marks that scope explicitly.
+- Reflection and pruning loops must stay behind `DROIDSWARM_ENABLE_HERMES_LOOP` and remain low-impact background maintenance, not mandatory boot blockers.
+- Task startup may inject retrieved long-term memory into prompts, but stored memory remains an advisory substrate rather than an unchecked source of authority.

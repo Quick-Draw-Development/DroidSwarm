@@ -12,6 +12,7 @@ import {
   syncDiscoveredAgents,
 } from './agent-builder';
 import { runCodeReview } from './code-review';
+import { approveEvolutionProposal, getEvolutionStatus, proposeSkillEvolution } from './skill-evolution-loop';
 
 const command = process.argv[2];
 const args = process.argv.slice(3);
@@ -102,6 +103,24 @@ switch (command) {
       repoRoot: readValue('--repo-root'),
       prBody: readValue('--body'),
     }));
+    break;
+  }
+  case 'evolve-status':
+    output(getEvolutionStatus(readValue('--project')));
+    break;
+  case 'evolve-propose':
+    output(proposeSkillEvolution({
+      projectId: readValue('--project'),
+      proposedBy: process.env.USER ?? 'cli',
+      targetSkill: readValue('--target-skill'),
+    }));
+    break;
+  case 'evolve-approve': {
+    const proposalId = readValue('--proposal-id');
+    if (!proposalId) {
+      throw new Error('Missing --proposal-id');
+    }
+    output(approveEvolutionProposal(proposalId));
     break;
   }
   default:

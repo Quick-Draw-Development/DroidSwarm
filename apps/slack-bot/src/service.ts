@@ -25,13 +25,17 @@ import {
 import {
   approveRegisteredSkill,
   approveSpecializedAgent,
+  approveEvolutionProposal,
   createAgentManifest,
   createSkillScaffold,
+  getEvolutionStatus,
   listRegisteredSkillManifests,
   listSpecializedAgents,
+  proposeSkillEvolution,
   runCodeReview,
   resolveSkillsRoot,
 } from '@shared-skills';
+import { searchLongTermMemories } from '@shared-memory';
 import {
   getCurrentProject,
   listRegisteredProjects,
@@ -706,6 +710,57 @@ export const executeSlackIntent = async (
         backend: command.route.backend,
       };
     }
+    case 'memory-search': {
+      const query = command.content?.trim();
+      if (!query) {
+        return {
+          text: 'Missing memory search query.',
+          backend: command.route.backend,
+        };
+      }
+      const memories = searchLongTermMemories({
+        query,
+        projectId: project?.projectId,
+        limit: 8,
+      });
+      return {
+        text: memories.length === 0
+          ? 'No matching long-term memory entries were found.'
+          : [
+            `*Long-term memory matches for:* ${query}`,
+            ...memories.map((entry) => `• ${entry.memoryType} · ${entry.englishTranslation}`),
+          ].join('\n'),
+        projectId: project?.projectId,
+        backend: command.route.backend,
+      };
+    }
+    case 'evolve-status': {
+      const status = getEvolutionStatus(project?.projectId);
+      return {
+        text: status.proposals.length === 0
+          ? 'No governed skill evolution proposals are pending.'
+          : [
+            '*Governed skill evolution*',
+            ...status.proposals.slice(0, 8).map((proposal) =>
+              `• ${proposal.proposalId} · ${proposal.status} · ${proposal.title}`,
+            ),
+          ].join('\n'),
+        projectId: project?.projectId,
+        backend: command.route.backend,
+      };
+    }
+    case 'evolve-propose': {
+      const proposal = proposeSkillEvolution({
+        projectId: project?.projectId,
+        proposedBy: user.username,
+        targetSkill: command.name,
+      });
+      return {
+        text: `Created governed evolution proposal \`${proposal.proposalId}\` with status *${proposal.status}*.`,
+        projectId: project?.projectId,
+        backend: command.route.backend,
+      };
+    }
     case 'skills-list': {
       const skills = listRegisteredSkillManifests();
       const agents = listSpecializedAgents();
@@ -743,6 +798,19 @@ export const executeSlackIntent = async (
       if (!command.name) {
         return {
           text: 'Missing skill name.',
+          backend: command.route.backend,
+        };
+      }
+      let approvedEvolution = null;
+      try {
+        approvedEvolution = approveEvolutionProposal(command.name);
+      } catch {
+        approvedEvolution = null;
+      }
+      if (approvedEvolution) {
+        return {
+          text: `Evolution proposal \`${approvedEvolution.proposalId}\` approved and registered as skill \`${String(approvedEvolution.manifest.name)}\`.`,
+          projectId: project?.projectId,
           backend: command.route.backend,
         };
       }

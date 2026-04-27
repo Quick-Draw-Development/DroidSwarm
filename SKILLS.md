@@ -52,9 +52,31 @@ The built-in `code-review-agent` skill is registered from `skills/code-review-ag
 - categorized markdown review output
 - consensus-aware audit records when critical paths are touched
 
+## Governed Evolution
+
+Hermes-style skill evolution is available through the shared registry and remains human-gated.
+
+Generate or inspect proposals:
+
+```bash
+DroidSwarm evolve status
+DroidSwarm evolve propose --target-skill code-review-agent
+```
+
+Approve a reflected proposal:
+
+```bash
+DroidSwarm evolve approve <proposal-id>
+```
+
+Slack mirrors the same flow with `/droid evolve status`, `/droid evolve run [skill]`, and `/droid skill approve <proposal-id>`. The dashboard exposes an “Evolution Proposals” panel for proposal approval and stub inspection.
+
+When `DROIDSWARM_ENABLE_HERMES_LOOP=true`, the orchestrator periodically reflects on procedural memory, stores new pattern memories, and proposes governed skill changes through the same registry.
+
 ## Governance
 
 - Skills and specialized agents that mark `affectsCoreBehavior: true` enter the registry as `pending-approval`.
 - Operators can approve them through `DroidSwarm skill approve <name>`, `DroidSwarm agent approve <name>`, Slack, or the dashboard.
+- Reflection-generated skill proposals also require explicit human approval before their scaffolded files become active runtime skills.
 - Skills must declare valid Droidspeak verbs in `manifest.json` before they can contribute to the runtime catalog.
 - Review automation can be triggered from CLI, Slack (`/droid review <pr-id>`), the dashboard “Code Reviews” panel, or automatically after PR automation pushes a branch.

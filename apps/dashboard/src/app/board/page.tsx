@@ -9,7 +9,8 @@ import {
   validateCompliance,
 } from '@shared-governance';
 import { getModelLifecycleStatus, listDiscoveredModels, listRegisteredModels } from '@shared-models';
-import { listRegisteredSkillManifests, listSpecializedAgents } from '@shared-skills';
+import { listLongTermMemories } from '@shared-memory';
+import { getEvolutionStatus, listRegisteredSkillManifests, listSpecializedAgents } from '@shared-skills';
 import { listCodeReviewRuns } from '@shared-projects';
 
 import { BoardShell } from '../../components/BoardShell';
@@ -202,6 +203,40 @@ export default async function BoardPage({
           quantization: model.quantization,
           lifecycleStatus: getModelLifecycleStatus(model),
           updatedAt: model.updatedAt,
+        })),
+      };
+    })(),
+    longTermMemory: (() => {
+      const recent = listLongTermMemories({ projectId: selectedProjectId, limit: 12 });
+      return {
+        totalCount: recent.length,
+        patternCount: recent.filter((entry) => entry.memoryType === 'pattern').length,
+        proceduralCount: recent.filter((entry) => entry.memoryType === 'procedural').length,
+        recent: recent.map((entry) => ({
+          memoryId: entry.memoryId,
+          memoryType: entry.memoryType,
+          englishTranslation: entry.englishTranslation,
+          relevanceScore: entry.relevanceScore,
+          timestamp: entry.timestamp,
+        })),
+      };
+    })(),
+    evolution: (() => {
+      const status = getEvolutionStatus(selectedProjectId);
+      return {
+        pendingCount: status.proposals.filter((entry) => entry.status === 'pending-human-approval').length,
+        approvedCount: status.proposals.filter((entry) => entry.status === 'approved').length,
+        proposals: status.proposals.slice(0, 8).map((proposal) => ({
+          proposalId: proposal.proposalId,
+          proposalType: proposal.proposalType,
+          targetSkill: proposal.targetSkill,
+          title: proposal.title,
+          description: proposal.description,
+          rationale: proposal.rationale,
+          status: proposal.status,
+          proposedBy: proposal.proposedBy,
+          manifestName: typeof proposal.manifest.name === 'string' ? proposal.manifest.name : undefined,
+          updatedAt: proposal.updatedAt,
         })),
       };
     })(),

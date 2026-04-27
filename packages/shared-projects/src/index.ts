@@ -187,6 +187,40 @@ export interface UpsertRegisteredAgentInput {
   manifest: Record<string, unknown>;
 }
 
+export interface SkillEvolutionProposalRecord {
+  proposalId: string;
+  projectId?: string;
+  proposalType: 'new-skill' | 'update-skill';
+  targetSkill?: string;
+  title: string;
+  description: string;
+  rationale: string;
+  proposedBy: string;
+  status: 'pending-consensus' | 'pending-human-approval' | 'approved' | 'rejected';
+  manifest: Record<string, unknown>;
+  stubFiles: Record<string, string>;
+  consensusId?: string;
+  auditHash?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertSkillEvolutionProposalInput {
+  proposalId: string;
+  projectId?: string;
+  proposalType: SkillEvolutionProposalRecord['proposalType'];
+  targetSkill?: string;
+  title: string;
+  description: string;
+  rationale: string;
+  proposedBy: string;
+  status: SkillEvolutionProposalRecord['status'];
+  manifest: Record<string, unknown>;
+  stubFiles: Record<string, string>;
+  consensusId?: string;
+  auditHash?: string;
+}
+
 export interface CodeReviewRunRecord {
   reviewId: string;
   projectId: string;
@@ -382,6 +416,27 @@ export const openProjectRegistryDatabase = (dbPath = resolveProjectRegistryDbPat
 
     CREATE INDEX IF NOT EXISTS idx_registry_model_discovery_settings_project
       ON model_discovery_settings(project_id, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS skill_evolution_proposals (
+      proposal_id TEXT PRIMARY KEY,
+      project_id TEXT,
+      proposal_type TEXT NOT NULL,
+      target_skill TEXT,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      rationale TEXT NOT NULL,
+      proposed_by TEXT NOT NULL,
+      status TEXT NOT NULL,
+      manifest_json TEXT NOT NULL,
+      stub_files_json TEXT NOT NULL,
+      consensus_id TEXT,
+      audit_hash TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    ) STRICT;
+
+    CREATE INDEX IF NOT EXISTS idx_skill_evolution_proposals_project
+      ON skill_evolution_proposals(project_id, updated_at DESC);
 
     CREATE TABLE IF NOT EXISTS code_review_runs (
       review_id TEXT PRIMARY KEY,
@@ -668,6 +723,34 @@ const normalizeCodeReviewRunRecord = (row: Record<string, unknown>): CodeReviewR
     }
   })(),
   findingsMarkdown: String(row.findings_markdown ?? ''),
+  consensusId: typeof row.consensus_id === 'string' ? row.consensus_id : undefined,
+  auditHash: typeof row.audit_hash === 'string' ? row.audit_hash : undefined,
+  createdAt: String(row.created_at),
+  updatedAt: String(row.updated_at),
+});
+
+const normalizeSkillEvolutionProposalRecord = (row: Record<string, unknown>): SkillEvolutionProposalRecord => ({
+  proposalId: String(row.proposal_id),
+  projectId: typeof row.project_id === 'string' ? row.project_id : undefined,
+  proposalType: row.proposal_type === 'update-skill' ? 'update-skill' : 'new-skill',
+  targetSkill: typeof row.target_skill === 'string' ? row.target_skill : undefined,
+  title: String(row.title),
+  description: String(row.description),
+  rationale: String(row.rationale),
+  proposedBy: String(row.proposed_by),
+  status:
+    row.status === 'pending-human-approval'
+      ? 'pending-human-approval'
+      : row.status === 'approved'
+        ? 'approved'
+        : row.status === 'rejected'
+          ? 'rejected'
+          : 'pending-consensus',
+  manifest: parseJsonObject(row.manifest_json),
+  stubFiles: (() => {
+    const parsed = parseJsonObject(row.stub_files_json);
+    return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
+  })(),
   consensusId: typeof row.consensus_id === 'string' ? row.consensus_id : undefined,
   auditHash: typeof row.audit_hash === 'string' ? row.audit_hash : undefined,
   createdAt: String(row.created_at),
@@ -1179,6 +1262,111 @@ export const getModelDiscoverySettings = (
       LIMIT 1
     `).get(scopeKey) as Record<string, unknown> | undefined;
     return row ? normalizeModelDiscoverySettingsRecord(row) : undefined;
+  } finally {
+    database.close();
+  }
+};
+
+export const upsertSkillEvolutionProposal = (
+  input: UpsertSkillEvolutionProposalInput,
+  dbPath?: string,
+): SkillEvolutionProposalRecord => {
+  const database = openProjectRegistryDatabase(dbPath);
+  try {
+    const now = new Date().toISOString();
+    database.prepare(`
+      INSERT INTO skill_evolution_proposals (
+        proposal_id, project_id, proposal_type, target_skill, title, description, rationale, proposed_by,
+        status, manifest_json, stub_files_json, consensus_id, audit_hash, created_at, updated_at
+      ) VALUES (
+        @proposalId, @projectId, @proposalType, @targetSkill, @title, @description, @rationale, @proposedBy,
+        @status, @manifestJson, @stubFilesJson, @consensusId, @auditHash, @createdAt, @updatedAt
+      )
+      ON CONFLICT(proposal_id) DO UPDATE SET
+        project_id = excluded.project_id,
+        proposal_type = excluded.proposal_type,
+        target_skill = excluded.target_skill,
+        title = excluded.title,
+        description = excluded.description,
+        rationale = excluded.rationale,
+        proposed_by = excluded.proposed_by,
+        status = excluded.status,
+        manifest_json = excluded.manifest_json,
+        stub_files_json = excluded.stub_files_json,
+        consensus_id = excluded.consensus_id,
+        audit_hash = excluded.audit_hash,
+        updated_at = excluded.updated_at
+    `).run({
+      proposalId: input.proposalId,
+      projectId: input.projectId ?? null,
+      proposalType: input.proposalType,
+      targetSkill: input.targetSkill ?? null,
+      title: input.title,
+      description: input.description,
+      rationale: input.rationale,
+      proposedBy: input.proposedBy,
+      status: input.status,
+      manifestJson: JSON.stringify(input.manifest),
+      stubFilesJson: JSON.stringify(input.stubFiles),
+      consensusId: input.consensusId ?? null,
+      auditHash: input.auditHash ?? null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const row = database.prepare(`
+      SELECT *
+      FROM skill_evolution_proposals
+      WHERE proposal_id = ?
+      LIMIT 1
+    `).get(input.proposalId) as Record<string, unknown>;
+    return normalizeSkillEvolutionProposalRecord(row);
+  } finally {
+    database.close();
+  }
+};
+
+export const listSkillEvolutionProposals = (input?: {
+  projectId?: string;
+  status?: SkillEvolutionProposalRecord['status'];
+}, dbPath?: string): SkillEvolutionProposalRecord[] => {
+  const database = openProjectRegistryDatabase(dbPath);
+  try {
+    const clauses: string[] = [];
+    const values: unknown[] = [];
+    if (input?.projectId) {
+      clauses.push('project_id = ?');
+      values.push(input.projectId);
+    }
+    if (input?.status) {
+      clauses.push('status = ?');
+      values.push(input.status);
+    }
+    const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    return (database.prepare(`
+      SELECT *
+      FROM skill_evolution_proposals
+      ${whereClause}
+      ORDER BY updated_at DESC, title ASC
+    `).all(...values) as Record<string, unknown>[])
+      .map(normalizeSkillEvolutionProposalRecord);
+  } finally {
+    database.close();
+  }
+};
+
+export const getSkillEvolutionProposal = (
+  proposalId: string,
+  dbPath?: string,
+): SkillEvolutionProposalRecord | undefined => {
+  const database = openProjectRegistryDatabase(dbPath);
+  try {
+    const row = database.prepare(`
+      SELECT *
+      FROM skill_evolution_proposals
+      WHERE proposal_id = ?
+      LIMIT 1
+    `).get(proposalId) as Record<string, unknown> | undefined;
+    return row ? normalizeSkillEvolutionProposalRecord(row) : undefined;
   } finally {
     database.close();
   }

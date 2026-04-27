@@ -16,6 +16,9 @@ export type SlackCommandKind =
   | 'models-download'
   | 'models-list'
   | 'models-refresh'
+  | 'memory-search'
+  | 'evolve-status'
+  | 'evolve-propose'
   | 'skills-list'
   | 'skill-create'
   | 'skill-approve'
@@ -141,6 +144,28 @@ const parseSlashCommand = (text: string, route: ModelRouteDecision): ParsedSlack
 
   if (args[0] === 'models' && args[1] === 'refresh') {
     return buildCommand(text, route, { kind: 'models-refresh', args: args.slice(2), source: 'slash' });
+  }
+
+  if (args[0] === 'memory' && args[1] === 'search' && args.length > 2) {
+    return buildCommand(text, route, {
+      kind: 'memory-search',
+      args: args.slice(2),
+      content: trimmed.replace(/^memory\s+search\s+/i, ''),
+      source: 'slash',
+    });
+  }
+
+  if (args[0] === 'evolve' && args[1] === 'status') {
+    return buildCommand(text, route, { kind: 'evolve-status', args: [], source: 'slash' });
+  }
+
+  if (args[0] === 'evolve' && (args[1] === 'propose' || args[1] === 'run')) {
+    return buildCommand(text, route, {
+      kind: 'evolve-propose',
+      args: args.slice(2),
+      name: args[2],
+      source: 'slash',
+    });
   }
 
   if (args[0] === 'law' && args[1] === 'propose' && args.length > 2) {
@@ -277,6 +302,30 @@ const parseNaturalLanguage = (text: string, route: ModelRouteDecision): ParsedSl
     return buildCommand(text, route, { kind: 'models-refresh', args: [], source: 'natural-language' });
   }
 
+  const memorySearchMatch = trimmed.match(/^memory\s+search\s+(.+)$/i);
+  if (memorySearchMatch?.[1]) {
+    return buildCommand(text, route, {
+      kind: 'memory-search',
+      args: tokenize(memorySearchMatch[1]),
+      content: memorySearchMatch[1],
+      source: 'natural-language',
+    });
+  }
+
+  if (/^evolve\s+status$/i.test(trimmed)) {
+    return buildCommand(text, route, { kind: 'evolve-status', args: [], source: 'natural-language' });
+  }
+
+  const evolveRunMatch = trimmed.match(/^evolve\s+(?:propose|run)(?:\s+([a-z0-9-]+))?$/i);
+  if (evolveRunMatch) {
+    return buildCommand(text, route, {
+      kind: 'evolve-propose',
+      args: evolveRunMatch[1] ? [evolveRunMatch[1]] : [],
+      name: evolveRunMatch[1],
+      source: 'natural-language',
+    });
+  }
+
   const lawProposalMatch = trimmed.match(/^law\s+propose\s+(.+)$/i);
   if (lawProposalMatch?.[1]) {
     return buildCommand(text, route, {
@@ -400,6 +449,8 @@ export const parseSlackIntent = (text: string, context?: SlackParseContext): Par
     'override',
     'review',
     'models',
+    'memory',
+    'evolve',
   ].includes(args[0]?.toLowerCase() ?? '');
 
   if (trimmed.startsWith('/')) {
@@ -424,6 +475,10 @@ export const renderSlackCommandResponse = (command: ParsedSlackCommand): SlackCo
           '`/droid models discover` polls discovery sources immediately.',
           '`/droid models download <model-id>` downloads a discovered model.',
           '`/droid models refresh` rescans local models and updates the registry.',
+          '`/droid memory search <query>` searches long-term memory.',
+          '`/droid evolve status` shows pending governed skill evolution proposals.',
+          '`/droid evolve run [skill]` generates a governed evolution proposal.',
+          '`/droid skill approve <proposal-id>` approves an evolution proposal or pending skill.',
           '`/droid skills list` lists registered skills and specialized agents.',
           '`/droid skill create <name> [template]` scaffolds a new skill.',
           '`/droid agent create <name> <skill1,skill2> [priority]` creates a specialized agent.',
@@ -487,6 +542,20 @@ export const renderSlackCommandResponse = (command: ParsedSlackCommand): SlackCo
     case 'models-refresh':
       return {
         text: 'Refreshing local model inventory.',
+      };
+    case 'memory-search':
+      return {
+        text: `Searching long-term memory for \`${command.content ?? 'unknown'}\`.`,
+      };
+    case 'evolve-status':
+      return {
+        text: 'Fetching governed skill evolution status.',
+      };
+    case 'evolve-propose':
+      return {
+        text: command.name
+          ? `Generating an evolution proposal for \`${command.name}\`.`
+          : 'Generating a governed skill evolution proposal.',
       };
     case 'skills-list':
       return {

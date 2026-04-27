@@ -21,11 +21,14 @@ import {
   onboardProject,
   registerFederatedNode,
   getModelDiscoverySettings,
+  getSkillEvolutionProposal,
   resolveCurrentProjectFile,
   resolveProjectLookup,
   setCurrentProject,
   listRegisteredModels,
+  listSkillEvolutionProposals,
   upsertModelDiscoverySettings,
+  upsertSkillEvolutionProposal,
   upsertRegisteredModel,
   upsertRegisteredAgent,
   upsertCodeReviewRun,
@@ -202,5 +205,27 @@ describe('shared-projects registry', () => {
     });
 
     assert.equal(getModelDiscoverySettings('global')?.settings.enabled, true);
+  });
+
+  it('stores skill evolution proposals in the global registry', () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'droidswarm-evolution-proposals-'));
+    tempDirs.push(home);
+    process.env.DROIDSWARM_HOME = home;
+
+    upsertSkillEvolutionProposal({
+      proposalId: 'proposal-1',
+      projectId: 'demo',
+      proposalType: 'new-skill',
+      title: 'Add memory assistant',
+      description: 'Create a skill for durable memory retrieval.',
+      rationale: 'Repeated failures show missing memory recall.',
+      proposedBy: 'reflection-engine',
+      status: 'pending-human-approval',
+      manifest: { name: 'memory-assistant' },
+      stubFiles: { 'SKILL.md': '# memory-assistant' },
+    });
+
+    assert.equal(getSkillEvolutionProposal('proposal-1')?.proposalId, 'proposal-1');
+    assert.equal(listSkillEvolutionProposals({ projectId: 'demo' }).length, 1);
   });
 });

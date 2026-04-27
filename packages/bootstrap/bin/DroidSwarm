@@ -73,6 +73,8 @@ Commands:
   laws        Inspect and operate the governance law system
   governance  Governance status and role inspection shortcuts
   models      Refresh and inspect model inventory
+  memory      Inspect, search, and prune long-term memory
+  evolve      Inspect and approve governed skill evolution proposals
   skill       Create, build, approve, and list skill packs
   agent       Create, approve, and list specialized agents
   review      Run the code-review-agent on a branch or PR id
@@ -371,6 +373,25 @@ Options:
 EOF
 }
 
+print_memory_help() {
+  cat <<'EOF'
+Usage:
+  DroidSwarm memory list [--project NAME|ID] [--limit N]
+  DroidSwarm memory search <query> [--project NAME|ID] [--limit N]
+  DroidSwarm memory reflect [--project NAME|ID]
+  DroidSwarm memory prune [--older-than ISO] [--max-per-project N]
+EOF
+}
+
+print_evolve_help() {
+  cat <<'EOF'
+Usage:
+  DroidSwarm evolve status [--project NAME|ID]
+  DroidSwarm evolve propose [--project NAME|ID] [--target-skill NAME]
+  DroidSwarm evolve approve <proposal-id>
+EOF
+}
+
 print_skill_help() {
   cat <<'EOF'
 Usage:
@@ -411,6 +432,10 @@ run_shared_skills_cli() {
 
 run_shared_models_cli() {
   node --import tsx "$ROOT_DIR/../shared-models/src/cli.ts" "$@"
+}
+
+run_shared_memory_cli() {
+  node --import tsx "$ROOT_DIR/../shared-memory/src/cli.ts" "$@"
 }
 
 json_field() {
@@ -2436,6 +2461,77 @@ cmd_models() {
   esac
 }
 
+cmd_memory() {
+  local action="${1:-list}"
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
+
+  case "$action" in
+    list)
+      run_shared_memory_cli list "$@"
+      ;;
+    search)
+      local query="${1:-}"
+      if [[ -z "$query" ]]; then
+        err "Missing memory search query."
+        print_memory_help
+        return 1
+      fi
+      shift
+      run_shared_memory_cli search --query "$query" "$@"
+      ;;
+    reflect)
+      run_shared_memory_cli reflect "$@"
+      ;;
+    prune)
+      run_shared_memory_cli prune "$@"
+      ;;
+    help|-h|--help)
+      print_memory_help
+      ;;
+    *)
+      err "Unknown memory command: $action"
+      print_memory_help
+      return 1
+      ;;
+  esac
+}
+
+cmd_evolve() {
+  local action="${1:-status}"
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
+
+  case "$action" in
+    status)
+      run_shared_skills_cli evolve-status "$@"
+      ;;
+    propose)
+      run_shared_skills_cli evolve-propose "$@"
+      ;;
+    approve)
+      local proposal_id="${1:-}"
+      if [[ -z "$proposal_id" ]]; then
+        err "Missing evolution proposal id."
+        print_evolve_help
+        return 1
+      fi
+      shift
+      run_shared_skills_cli evolve-approve --proposal-id "$proposal_id" "$@"
+      ;;
+    help|-h|--help)
+      print_evolve_help
+      ;;
+    *)
+      err "Unknown evolve command: $action"
+      print_evolve_help
+      return 1
+      ;;
+  esac
+}
+
 cmd_review() {
   local action="${1:-run}"
   if [[ $# -gt 0 ]]; then
@@ -3361,6 +3457,12 @@ case "$COMMAND" in
     ;;
   models)
     cmd_models "$@"
+    ;;
+  memory)
+    cmd_memory "$@"
+    ;;
+  evolve)
+    cmd_evolve "$@"
     ;;
   review)
     cmd_review "$@"

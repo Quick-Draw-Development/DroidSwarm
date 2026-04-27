@@ -196,6 +196,8 @@ export interface OrchestrationInsightsData {
   skillsRegistry?: SkillsRegistrySummary;
   codeReviews?: CodeReviewSummary;
   modelInventory?: ModelInventorySummary;
+  longTermMemory?: LongTermMemorySummary;
+  evolution?: SkillEvolutionSummary;
 }
 
 export interface CodeReviewSummary {
@@ -318,6 +320,36 @@ export interface AuditTrailSummary {
     runId?: string;
     detail: string;
     hash: string;
+  }>;
+}
+
+export interface LongTermMemorySummary {
+  totalCount: number;
+  patternCount: number;
+  proceduralCount: number;
+  recent: Array<{
+    memoryId: string;
+    memoryType: string;
+    englishTranslation: string;
+    relevanceScore: number;
+    timestamp: string;
+  }>;
+}
+
+export interface SkillEvolutionSummary {
+  pendingCount: number;
+  approvedCount: number;
+  proposals: Array<{
+    proposalId: string;
+    proposalType: string;
+    targetSkill?: string;
+    title: string;
+    description: string;
+    rationale: string;
+    status: string;
+    proposedBy: string;
+    manifestName?: string;
+    updatedAt: string;
   }>;
 }
 export interface ProjectIdentity {

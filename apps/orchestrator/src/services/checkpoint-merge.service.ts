@@ -1,4 +1,11 @@
-import { buildProjectCheckpoint, buildProjectDecisions, buildProjectFacts, mergeCheckpointDelta } from '@shared-memory';
+import {
+  buildProjectCheckpoint,
+  buildProjectDecisions,
+  buildProjectFacts,
+  createLongTermMemory,
+  mergeCheckpointDelta,
+  recordProceduralMemory,
+} from '@shared-memory';
 import type { OrchestratorPersistenceService } from '../persistence/service';
 import type { WorkerResult } from '../types';
 
@@ -26,5 +33,29 @@ export class CheckpointMergeService {
       delta,
       createdAt,
     }));
+    createLongTermMemory({
+      projectId: run.projectId,
+      sessionId: run.runId,
+      memoryType: 'semantic',
+      droidspeakSummary: `memory:pinned ${result.summary}`,
+      englishTranslation: result.summary,
+      relevanceScore: result.success ? 0.8 : 0.6,
+      metadata: {
+        checkpointDelta: delta,
+      },
+    });
+    recordProceduralMemory({
+      projectId: run.projectId,
+      sessionId: run.runId,
+      sourceRunId: run.runId,
+      outcome: result.success ? 'success' : 'failure',
+      droidspeakSummary: result.success ? 'summary_emitted procedural' : 'blocked procedural',
+      englishTranslation: result.summary,
+      trajectory: {
+        engine: result.engine,
+        model: result.model,
+        activity: result.activity,
+      },
+    });
   }
 }

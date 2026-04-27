@@ -1,5 +1,10 @@
 import type { CheckpointDelta, ProjectCheckpoint, ProjectDecision, ProjectFact, WorkerResult } from '@shared-types';
 
+export * from './memory-store';
+export * from './memory-retrieval';
+export * from './procedural-memory';
+export * from './reflection-engine';
+
 export const mergeCheckpointDelta = (result: WorkerResult): CheckpointDelta => ({
   factsAdded: [...new Set(result.checkpointDelta.factsAdded)],
   decisionsAdded: [...new Set(result.checkpointDelta.decisionsAdded)],

@@ -1,8 +1,10 @@
 import { AddTaskForm } from './AddTaskForm';
 import { BoardClient } from './BoardClient';
 import { CodeReviewsPanel } from './CodeReviewsPanel';
+import { EvolutionPanel } from './EvolutionPanel';
 import { GovernancePanel } from './GovernancePanel';
 import { LiveConnectionStatus } from './LiveConnectionStatus';
+import { MemoryPanel } from './MemoryPanel';
 import { ModelInventoryPanel } from './ModelInventoryPanel';
 import { ProvideInstructionsModal } from './ProvideInstructionsModal';
 import { OrchestrationInsights } from './OrchestrationInsights';
@@ -50,6 +52,8 @@ export function BoardShell({
       <BoardClient username={username} tasks={tasks} />
       <GovernancePanel governance={insights.governance} />
       <ModelInventoryPanel inventory={insights.modelInventory} />
+      <MemoryPanel memory={insights.longTermMemory} />
+      <EvolutionPanel evolution={insights.evolution} />
       <SkillsRegistryPanel registry={insights.skillsRegistry} />
       <CodeReviewsPanel reviews={insights.codeReviews} />
       <OrchestrationInsights data={insights} />

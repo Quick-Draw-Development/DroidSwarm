@@ -1,6 +1,7 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 
 import Database from 'better-sqlite3';
 import type { RepoTarget, TaskScope } from '@shared-types';
@@ -70,6 +71,66 @@ export interface RegisterFederatedNodeInput {
   capabilities?: string[];
 }
 
+export interface RegisteredSkillRecord {
+  name: string;
+  version: string;
+  description: string;
+  hash: string;
+  status: 'active' | 'pending-approval' | 'disabled' | 'failed';
+  projectScoped: boolean;
+  capabilities: string[];
+  requiredBackends: string[];
+  droidspeakVerbs: Array<{ code: string; label: string }>;
+  manifest: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertRegisteredSkillInput {
+  name: string;
+  version: string;
+  description: string;
+  status?: RegisteredSkillRecord['status'];
+  projectScoped?: boolean;
+  capabilities?: string[];
+  requiredBackends?: string[];
+  droidspeakVerbs?: Array<{ code: string; label: string }>;
+  manifest: Record<string, unknown>;
+}
+
+export interface RegisteredAgentRecord {
+  name: string;
+  version: string;
+  description: string;
+  hash: string;
+  status: 'active' | 'pending-approval' | 'disabled' | 'failed';
+  projectScoped: boolean;
+  skills: string[];
+  priority: 'low' | 'medium' | 'high';
+  preferredBackend?: string;
+  modelTier?: string;
+  governanceParticipation: 'observer' | 'participant' | 'guardian';
+  resourceQuotas: Record<string, unknown>;
+  manifest: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertRegisteredAgentInput {
+  name: string;
+  version: string;
+  description: string;
+  status?: RegisteredAgentRecord['status'];
+  projectScoped?: boolean;
+  skills: string[];
+  priority?: RegisteredAgentRecord['priority'];
+  preferredBackend?: string;
+  modelTier?: string;
+  governanceParticipation?: RegisteredAgentRecord['governanceParticipation'];
+  resourceQuotas?: Record<string, unknown>;
+  manifest: Record<string, unknown>;
+}
+
 export const resolveDroidSwarmHome = (): string =>
   process.env.DROIDSWARM_HOME ?? path.resolve(process.env.HOME ?? process.cwd(), '.droidswarm');
 
@@ -90,6 +151,20 @@ const ensureDirectory = (target: string): void => {
     fs.mkdirSync(target, { recursive: true });
   }
 };
+
+const stableSerialize = (input: unknown): string => {
+  if (input == null || typeof input !== 'object') {
+    return JSON.stringify(input);
+  }
+  if (Array.isArray(input)) {
+    return `[${input.map((entry) => stableSerialize(entry)).join(',')}]`;
+  }
+  const record = input as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableSerialize(record[key])}`).join(',')}}`;
+};
+
+const computeRegistryHash = (input: unknown): string =>
+  createHash('sha256').update(stableSerialize(input)).digest('hex');
 
 export const openProjectRegistryDatabase = (dbPath = resolveProjectRegistryDbPath()): Database.Database => {
   ensureDirectory(path.dirname(dbPath));
@@ -134,6 +209,45 @@ export const openProjectRegistryDatabase = (dbPath = resolveProjectRegistryDbPat
 
     CREATE INDEX IF NOT EXISTS idx_registry_federated_nodes_project
       ON federated_nodes(project_id, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS skill_registry (
+      name TEXT PRIMARY KEY,
+      version TEXT NOT NULL,
+      description TEXT NOT NULL,
+      hash TEXT NOT NULL,
+      status TEXT NOT NULL,
+      project_scoped INTEGER NOT NULL,
+      capabilities_json TEXT NOT NULL,
+      required_backends_json TEXT NOT NULL,
+      droidspeak_verbs_json TEXT NOT NULL,
+      manifest_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    ) STRICT;
+
+    CREATE INDEX IF NOT EXISTS idx_registry_skills_status
+      ON skill_registry(status, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS agent_registry (
+      name TEXT PRIMARY KEY,
+      version TEXT NOT NULL,
+      description TEXT NOT NULL,
+      hash TEXT NOT NULL,
+      status TEXT NOT NULL,
+      project_scoped INTEGER NOT NULL,
+      skills_json TEXT NOT NULL,
+      priority TEXT NOT NULL,
+      preferred_backend TEXT,
+      model_tier TEXT,
+      governance_participation TEXT NOT NULL,
+      resource_quotas_json TEXT NOT NULL,
+      manifest_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    ) STRICT;
+
+    CREATE INDEX IF NOT EXISTS idx_registry_agents_status
+      ON agent_registry(status, updated_at DESC);
   `);
   return database;
 };
@@ -274,6 +388,91 @@ const normalizeNodeRecord = (row: Record<string, unknown>): FederatedNodeRecord 
   kickedAt: typeof row.kicked_at === 'string' ? row.kicked_at : undefined,
 });
 
+const parseJsonArray = (value: unknown): string[] => {
+  try {
+    const parsed = JSON.parse(String(value ?? '[]')) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === 'string') : [];
+  } catch {
+    return [];
+  }
+};
+
+const parseJsonObject = (value: unknown): Record<string, unknown> => {
+  try {
+    const parsed = JSON.parse(String(value ?? '{}')) as unknown;
+    return parsed != null && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+};
+
+const normalizeSkillRecord = (row: Record<string, unknown>): RegisteredSkillRecord => ({
+  name: String(row.name),
+  version: String(row.version),
+  description: String(row.description),
+  hash: String(row.hash),
+  status:
+    row.status === 'pending-approval'
+      ? 'pending-approval'
+      : row.status === 'disabled'
+        ? 'disabled'
+        : row.status === 'failed'
+          ? 'failed'
+          : 'active',
+  projectScoped: Number(row.project_scoped ?? 0) === 1,
+  capabilities: parseJsonArray(row.capabilities_json),
+  requiredBackends: parseJsonArray(row.required_backends_json),
+  droidspeakVerbs: (() => {
+    try {
+      const parsed = JSON.parse(String(row.droidspeak_verbs_json ?? '[]')) as unknown;
+      return Array.isArray(parsed)
+        ? parsed.filter((entry): entry is { code: string; label: string } =>
+          entry != null
+          && typeof entry === 'object'
+          && typeof (entry as { code?: unknown }).code === 'string'
+          && typeof (entry as { label?: unknown }).label === 'string')
+        : [];
+    } catch {
+      return [];
+    }
+  })(),
+  manifest: parseJsonObject(row.manifest_json),
+  createdAt: String(row.created_at),
+  updatedAt: String(row.updated_at),
+});
+
+const normalizeAgentRecord = (row: Record<string, unknown>): RegisteredAgentRecord => ({
+  name: String(row.name),
+  version: String(row.version),
+  description: String(row.description),
+  hash: String(row.hash),
+  status:
+    row.status === 'pending-approval'
+      ? 'pending-approval'
+      : row.status === 'disabled'
+        ? 'disabled'
+        : row.status === 'failed'
+          ? 'failed'
+          : 'active',
+  projectScoped: Number(row.project_scoped ?? 0) === 1,
+  skills: parseJsonArray(row.skills_json),
+  priority: row.priority === 'low' ? 'low' : row.priority === 'high' ? 'high' : 'medium',
+  preferredBackend: typeof row.preferred_backend === 'string' ? row.preferred_backend : undefined,
+  modelTier: typeof row.model_tier === 'string' ? row.model_tier : undefined,
+  governanceParticipation:
+    row.governance_participation === 'observer'
+      ? 'observer'
+      : row.governance_participation === 'guardian'
+        ? 'guardian'
+        : 'participant',
+  resourceQuotas: parseJsonObject(row.resource_quotas_json),
+  manifest: parseJsonObject(row.manifest_json),
+  createdAt: String(row.created_at),
+  updatedAt: String(row.updated_at),
+});
+
 export const registerFederatedNode = (input: RegisterFederatedNodeInput, dbPath?: string): FederatedNodeRecord => {
   const database = openProjectRegistryDatabase(dbPath);
   try {
@@ -361,6 +560,190 @@ export const getFederatedNode = (nodeId: string, dbPath?: string): FederatedNode
   try {
     const row = database.prepare(`SELECT * FROM federated_nodes WHERE node_id = ? LIMIT 1`).get(nodeId) as Record<string, unknown> | undefined;
     return row ? normalizeNodeRecord(row) : undefined;
+  } finally {
+    database.close();
+  }
+};
+
+export const upsertRegisteredSkill = (input: UpsertRegisteredSkillInput, dbPath?: string): RegisteredSkillRecord => {
+  const database = openProjectRegistryDatabase(dbPath);
+  try {
+    const now = new Date().toISOString();
+    const record = {
+      name: input.name,
+      version: input.version,
+      description: input.description,
+      hash: computeRegistryHash(input.manifest),
+      status: input.status ?? 'active',
+      projectScoped: input.projectScoped ? 1 : 0,
+      capabilitiesJson: JSON.stringify(input.capabilities ?? []),
+      requiredBackendsJson: JSON.stringify(input.requiredBackends ?? []),
+      droidspeakVerbsJson: JSON.stringify(input.droidspeakVerbs ?? []),
+      manifestJson: JSON.stringify(input.manifest),
+      createdAt: now,
+      updatedAt: now,
+    };
+    database.prepare(`
+      INSERT INTO skill_registry (
+        name, version, description, hash, status, project_scoped, capabilities_json, required_backends_json,
+        droidspeak_verbs_json, manifest_json, created_at, updated_at
+      ) VALUES (
+        @name, @version, @description, @hash, @status, @projectScoped, @capabilitiesJson, @requiredBackendsJson,
+        @droidspeakVerbsJson, @manifestJson, @createdAt, @updatedAt
+      )
+      ON CONFLICT(name) DO UPDATE SET
+        version = excluded.version,
+        description = excluded.description,
+        hash = excluded.hash,
+        status = excluded.status,
+        project_scoped = excluded.project_scoped,
+        capabilities_json = excluded.capabilities_json,
+        required_backends_json = excluded.required_backends_json,
+        droidspeak_verbs_json = excluded.droidspeak_verbs_json,
+        manifest_json = excluded.manifest_json,
+        updated_at = excluded.updated_at
+    `).run(record);
+    const row = database.prepare(`SELECT * FROM skill_registry WHERE name = ? LIMIT 1`).get(input.name) as Record<string, unknown>;
+    return normalizeSkillRecord(row);
+  } finally {
+    database.close();
+  }
+};
+
+export const listRegisteredSkills = (dbPath?: string): RegisteredSkillRecord[] => {
+  const database = openProjectRegistryDatabase(dbPath);
+  try {
+    return (database.prepare(`
+      SELECT *
+      FROM skill_registry
+      ORDER BY updated_at DESC, name ASC
+    `).all() as Record<string, unknown>[])
+      .map(normalizeSkillRecord);
+  } finally {
+    database.close();
+  }
+};
+
+export const getRegisteredSkill = (name: string, dbPath?: string): RegisteredSkillRecord | undefined => {
+  const database = openProjectRegistryDatabase(dbPath);
+  try {
+    const row = database.prepare(`SELECT * FROM skill_registry WHERE name = ? LIMIT 1`).get(name) as Record<string, unknown> | undefined;
+    return row ? normalizeSkillRecord(row) : undefined;
+  } finally {
+    database.close();
+  }
+};
+
+export const updateRegisteredSkillStatus = (
+  name: string,
+  status: RegisteredSkillRecord['status'],
+  dbPath?: string,
+): RegisteredSkillRecord | undefined => {
+  const database = openProjectRegistryDatabase(dbPath);
+  try {
+    const updatedAt = new Date().toISOString();
+    database.prepare(`
+      UPDATE skill_registry
+      SET status = ?, updated_at = ?
+      WHERE name = ?
+    `).run(status, updatedAt, name);
+    const row = database.prepare(`SELECT * FROM skill_registry WHERE name = ? LIMIT 1`).get(name) as Record<string, unknown> | undefined;
+    return row ? normalizeSkillRecord(row) : undefined;
+  } finally {
+    database.close();
+  }
+};
+
+export const upsertRegisteredAgent = (input: UpsertRegisteredAgentInput, dbPath?: string): RegisteredAgentRecord => {
+  const database = openProjectRegistryDatabase(dbPath);
+  try {
+    const now = new Date().toISOString();
+    const record = {
+      name: input.name,
+      version: input.version,
+      description: input.description,
+      hash: computeRegistryHash(input.manifest),
+      status: input.status ?? 'active',
+      projectScoped: input.projectScoped ? 1 : 0,
+      skillsJson: JSON.stringify(input.skills),
+      priority: input.priority ?? 'medium',
+      preferredBackend: input.preferredBackend ?? null,
+      modelTier: input.modelTier ?? null,
+      governanceParticipation: input.governanceParticipation ?? 'participant',
+      resourceQuotasJson: JSON.stringify(input.resourceQuotas ?? {}),
+      manifestJson: JSON.stringify(input.manifest),
+      createdAt: now,
+      updatedAt: now,
+    };
+    database.prepare(`
+      INSERT INTO agent_registry (
+        name, version, description, hash, status, project_scoped, skills_json, priority, preferred_backend,
+        model_tier, governance_participation, resource_quotas_json, manifest_json, created_at, updated_at
+      ) VALUES (
+        @name, @version, @description, @hash, @status, @projectScoped, @skillsJson, @priority, @preferredBackend,
+        @modelTier, @governanceParticipation, @resourceQuotasJson, @manifestJson, @createdAt, @updatedAt
+      )
+      ON CONFLICT(name) DO UPDATE SET
+        version = excluded.version,
+        description = excluded.description,
+        hash = excluded.hash,
+        status = excluded.status,
+        project_scoped = excluded.project_scoped,
+        skills_json = excluded.skills_json,
+        priority = excluded.priority,
+        preferred_backend = excluded.preferred_backend,
+        model_tier = excluded.model_tier,
+        governance_participation = excluded.governance_participation,
+        resource_quotas_json = excluded.resource_quotas_json,
+        manifest_json = excluded.manifest_json,
+        updated_at = excluded.updated_at
+    `).run(record);
+    const row = database.prepare(`SELECT * FROM agent_registry WHERE name = ? LIMIT 1`).get(input.name) as Record<string, unknown>;
+    return normalizeAgentRecord(row);
+  } finally {
+    database.close();
+  }
+};
+
+export const listRegisteredAgents = (dbPath?: string): RegisteredAgentRecord[] => {
+  const database = openProjectRegistryDatabase(dbPath);
+  try {
+    return (database.prepare(`
+      SELECT *
+      FROM agent_registry
+      ORDER BY updated_at DESC, name ASC
+    `).all() as Record<string, unknown>[])
+      .map(normalizeAgentRecord);
+  } finally {
+    database.close();
+  }
+};
+
+export const getRegisteredAgent = (name: string, dbPath?: string): RegisteredAgentRecord | undefined => {
+  const database = openProjectRegistryDatabase(dbPath);
+  try {
+    const row = database.prepare(`SELECT * FROM agent_registry WHERE name = ? LIMIT 1`).get(name) as Record<string, unknown> | undefined;
+    return row ? normalizeAgentRecord(row) : undefined;
+  } finally {
+    database.close();
+  }
+};
+
+export const updateRegisteredAgentStatus = (
+  name: string,
+  status: RegisteredAgentRecord['status'],
+  dbPath?: string,
+): RegisteredAgentRecord | undefined => {
+  const database = openProjectRegistryDatabase(dbPath);
+  try {
+    const updatedAt = new Date().toISOString();
+    database.prepare(`
+      UPDATE agent_registry
+      SET status = ?, updated_at = ?
+      WHERE name = ?
+    `).run(status, updatedAt, name);
+    const row = database.prepare(`SELECT * FROM agent_registry WHERE name = ? LIMIT 1`).get(name) as Record<string, unknown> | undefined;
+    return row ? normalizeAgentRecord(row) : undefined;
   } finally {
     database.close();
   }

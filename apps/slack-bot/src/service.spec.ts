@@ -215,3 +215,32 @@ test('creates and approves governance proposals from slack commands', async () =
   }, baseConfig());
   assert.match(approved.text, /approved and activated/i);
 });
+
+test('creates skill scaffolds and specialized agents from slack commands', async () => {
+  const home = makeTempHome();
+  process.env.DROIDSWARM_HOME = home;
+  process.env.DROIDSWARM_SKILLS_DIR = path.join(home, 'skills');
+  onboardProject({
+    projectId: 'demo',
+    name: 'Demo',
+    rootPath: path.join(home, 'repo'),
+    dbPath: path.join(home, 'projects', 'demo', 'droidswarm.db'),
+    wsPort: 9999,
+  });
+
+  const createdSkill = await handleSlackInput({
+    text: 'skill create vision research',
+    userId: 'U1',
+    username: 'alice',
+    channelId: 'C1',
+  }, baseConfig());
+  assert.match(createdSkill.text, /scaffolded and registered/i);
+
+  const createdAgent = await handleSlackInput({
+    text: 'agent create vision-agent vision medium',
+    userId: 'U1',
+    username: 'alice',
+    channelId: 'C1',
+  }, baseConfig());
+  assert.match(createdAgent.text, /registered and activated|registered/i);
+});

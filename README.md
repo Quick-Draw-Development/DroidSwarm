@@ -112,6 +112,16 @@ DroidSwarm laws status
 DroidSwarm laws propose --title "Require startup governance summaries" --description "Require a startup governance summary in operator-facing surfaces." --rationale "Operators need a visible compliance snapshot at boot."
 ```
 
+Manage dynamic skills and specialized agents:
+
+```bash
+DroidSwarm skill create vision --template research
+DroidSwarm skill build vision
+DroidSwarm skill list
+DroidSwarm agent create vision-agent --skills vision,reviewer --priority high
+DroidSwarm agent list
+```
+
 ## Current Scope
 
 The repo now carries the shared contracts and persistence scaffolding for multi-project runs, repo-target/workspace scoping, canonical task chat, worker results and heartbeats, project memory, skill packs, local-first routing, EnvelopeV2 compatibility, TaskStateDigest/HandoffPacket durability, and strict git-flow enforcement. Existing durable runs/tasks/checkpoints are preserved and extended rather than replaced.
@@ -168,6 +178,12 @@ The shared governance package provides:
 - Slack commands for `law propose` and `law approve <proposal-id>`
 - dashboard governance views and approval controls
 - federation law hash sync during slave onboarding
+
+## Skills Registry
+
+The shared skills registry discovers skill manifests from `skills/`, persists them in the global registry DB, and exposes specialized agent manifests built from skill combinations. Skills and agents can be created from the CLI, Slack, or the dashboard board.
+
+When `DROIDSWARM_ENABLE_SKILL_WATCH=1`, the orchestrator watches the skills directory and reloads the registry on file changes. Specialized agents become available to the skill-pack resolver as soon as their manifests are active in the registry.
 
 Optional provider/runtime env:
 

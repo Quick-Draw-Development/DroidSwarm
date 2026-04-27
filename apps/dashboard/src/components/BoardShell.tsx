@@ -4,6 +4,7 @@ import { GovernancePanel } from './GovernancePanel';
 import { LiveConnectionStatus } from './LiveConnectionStatus';
 import { ProvideInstructionsModal } from './ProvideInstructionsModal';
 import { OrchestrationInsights } from './OrchestrationInsights';
+import { SkillsRegistryPanel } from './SkillsRegistryPanel';
 import type { MessageRecord, TaskRecord, OrchestrationInsightsData } from '../lib/types';
 
 export function BoardShell({
@@ -46,6 +47,7 @@ export function BoardShell({
       </section>
       <BoardClient username={username} tasks={tasks} />
       <GovernancePanel governance={insights.governance} />
+      <SkillsRegistryPanel registry={insights.skillsRegistry} />
       <OrchestrationInsights data={insights} />
     </main>
   );

@@ -18,6 +18,7 @@ import { finalizeRunOnShutdown } from './run-shutdown';
 import { ToolService } from './tools/ToolService';
 import { ProjectRegistryService } from './services/project-registry.service';
 import { GovernanceSupervisorService } from './services/governance-supervisor.service';
+import { DynamicSkillRegistryService } from './services/dynamic-skill-registry.service';
 import type { PersistedTask, TaskRecord } from './types';
 import { onboardPeer } from '@federation-bus';
 import { validateCompliance } from '@shared-governance';
@@ -35,6 +36,7 @@ export class DroidSwarmOrchestratorClient {
   private persistenceService?: OrchestratorPersistenceService;
   private engine?: OrchestratorEngine;
   private governanceSupervisor?: GovernanceSupervisorService;
+  private dynamicSkillRegistry?: DynamicSkillRegistryService;
 
   constructor(private readonly config: OrchestratorConfig = loadConfig()) {
     this.database = openPersistenceDatabase(this.config.dbPath);
@@ -146,6 +148,8 @@ export class DroidSwarmOrchestratorClient {
     this.gateway.setMessageHandler(this.engine.handleMessage.bind(this.engine));
     this.gateway.start();
     void this.announceFederationPresence();
+    this.dynamicSkillRegistry = new DynamicSkillRegistryService(this.config);
+    this.dynamicSkillRegistry.start();
     this.governanceSupervisor = new GovernanceSupervisorService(this.config);
     this.governanceSupervisor.start();
 
@@ -173,6 +177,7 @@ export class DroidSwarmOrchestratorClient {
   }
 
   stop(): void {
+    this.dynamicSkillRegistry?.stop();
     this.governanceSupervisor?.stop();
     if (this.currentRun) {
       finalizeRunOnShutdown(this.persistence, this.runLifecycle, this.currentRun.runId);

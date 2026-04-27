@@ -8,8 +8,12 @@ import { tmpdir } from 'node:os';
 import {
   detectProjectMetadata,
   getFederatedNode,
+  getRegisteredAgent,
+  getRegisteredSkill,
   getCurrentProject,
   listFederatedNodes,
+  listRegisteredAgents,
+  listRegisteredSkills,
   listRegisteredProjects,
   markFederatedNodeKicked,
   migrateLegacyProject,
@@ -18,6 +22,8 @@ import {
   resolveCurrentProjectFile,
   resolveProjectLookup,
   setCurrentProject,
+  upsertRegisteredAgent,
+  upsertRegisteredSkill,
 } from './index';
 
 const tempDirs: string[] = [];
@@ -95,5 +101,40 @@ describe('shared-projects registry', () => {
     const kicked = markFederatedNodeKicked('slave-a');
     assert.equal(kicked?.status, 'kicked');
     assert.equal(listFederatedNodes({ status: 'kicked' }).length, 1);
+  });
+
+  it('stores registered skills and specialized agents in the global registry', () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'droidswarm-skill-registry-'));
+    tempDirs.push(home);
+    process.env.DROIDSWARM_HOME = home;
+
+    upsertRegisteredSkill({
+      name: 'vision',
+      version: '0.1.0',
+      description: 'Vision skill',
+      capabilities: ['vision'],
+      requiredBackends: ['apple-intelligence'],
+      droidspeakVerbs: [{ code: 'EVT-SKILL-VISION', label: 'Vision skill activity' }],
+      manifest: {
+        name: 'vision',
+        version: '0.1.0',
+      },
+    });
+    upsertRegisteredAgent({
+      name: 'vision-agent',
+      version: '0.1.0',
+      description: 'Vision agent',
+      skills: ['vision'],
+      preferredBackend: 'apple-intelligence',
+      manifest: {
+        name: 'vision-agent',
+        version: '0.1.0',
+      },
+    });
+
+    assert.equal(getRegisteredSkill('vision')?.name, 'vision');
+    assert.equal(listRegisteredSkills().length, 1);
+    assert.equal(getRegisteredAgent('vision-agent')?.name, 'vision-agent');
+    assert.equal(listRegisteredAgents()[0]?.skills[0], 'vision');
   });
 });

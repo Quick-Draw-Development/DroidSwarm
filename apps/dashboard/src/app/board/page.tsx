@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers';
 import { listActiveLaws, listLawProposals, validateCompliance } from '@shared-governance';
+import { listRegisteredSkillManifests, listSpecializedAgents } from '@shared-skills';
 
 import { BoardShell } from '../../components/BoardShell';
 import { ProjectSwitcher } from '../../components/project-switcher';
@@ -98,6 +99,29 @@ export default async function BoardPage({
           status: proposal.status,
           proposedBy: proposal.proposedBy,
           updatedAt: proposal.updatedAt,
+        })),
+      };
+    })(),
+    skillsRegistry: (() => {
+      const skills = listRegisteredSkillManifests();
+      const agents = listSpecializedAgents();
+      return {
+        activeSkillCount: skills.filter((entry) => entry.status === 'active').length,
+        pendingSkillCount: skills.filter((entry) => entry.status === 'pending-approval').length,
+        activeAgentCount: agents.filter((entry) => entry.status === 'active').length,
+        pendingAgentCount: agents.filter((entry) => entry.status === 'pending-approval').length,
+        skills: skills.slice(0, 8).map((entry) => ({
+          name: entry.name,
+          version: entry.version,
+          status: entry.status,
+          capabilities: entry.capabilities,
+        })),
+        agents: agents.slice(0, 8).map((entry) => ({
+          name: entry.name,
+          version: entry.version,
+          status: entry.status,
+          skills: entry.skills,
+          priority: entry.priority,
         })),
       };
     })(),

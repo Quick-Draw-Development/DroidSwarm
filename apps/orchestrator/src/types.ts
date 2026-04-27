@@ -46,6 +46,7 @@ export interface OrchestratorConfig {
   defaultBranch: string;
   developBranch: string;
   allowedRepoRoots: string[];
+  skillsDir?: string;
   workspaceRoot: string;
   workerHostEntry?: string;
   operatorToken?: string;
@@ -106,6 +107,7 @@ export interface OrchestratorConfig {
   federationRemoteWorkersFile?: string;
   federationRemoteWorkers?: FederationRemoteWorkerTarget[];
   governanceEnabled?: boolean;
+  enableSkillWatch?: boolean;
 }
 
 export interface FederationRemoteWorkerTarget {

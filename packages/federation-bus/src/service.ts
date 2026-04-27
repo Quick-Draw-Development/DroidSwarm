@@ -1,6 +1,7 @@
 import { loadFederationNodeConfig } from '@shared-config';
-import { DROIDSPEAK_CATALOGS } from '@shared-droidspeak';
+import { buildDroidspeakCatalogs } from '@shared-droidspeak';
 import { computeLawManifestHash, listActiveLaws } from '@shared-governance';
+import { buildDynamicSkillVerbCatalog, listRegisteredSkillManifests, listSpecializedAgents } from '@shared-skills';
 
 import { startFederationBus } from './index';
 import { beginSlaveOnboarding, registerSlaveRollCall } from './slave-onboarding-supervisor';
@@ -28,8 +29,10 @@ export const startFederationBusService = () => {
       .filter(Boolean),
     swarmRole: node.swarmRole,
     rulesHash: computeLawManifestHash(listActiveLaws()),
-    droidspeakCatalog: DROIDSPEAK_CATALOGS as unknown as Record<string, unknown>,
+    droidspeakCatalog: buildDroidspeakCatalogs({ verbs: buildDynamicSkillVerbCatalog() }) as unknown as Record<string, unknown>,
     lawManifest: { laws: listActiveLaws() } as unknown as Record<string, unknown>,
+    skillManifest: { skills: listRegisteredSkillManifests() } as unknown as Record<string, unknown>,
+    agentManifest: { agents: listSpecializedAgents() } as unknown as Record<string, unknown>,
     onSlaveRollCall: async (payload) => registerSlaveRollCall(payload),
   });
   console.log(`Federation Bus service listening on ${host}:${busPort} (admin ${adminPort})`);

@@ -71,6 +71,8 @@ Commands:
   federation  Inspect federation state and onboard peer devices
   nodes       List or kick federated slave nodes
   laws        Inspect and operate the governance law system
+  skill       Create, build, approve, and list skill packs
+  agent       Create, approve, and list specialized agents
   slack       Inspect or restart the optional Slack bot service
   orchestrator Inspect orchestrator state and send task-channel messages
   list        List tracked swarms running on this machine
@@ -342,12 +344,35 @@ Usage:
 EOF
 }
 
+print_skill_help() {
+  cat <<'EOF'
+Usage:
+  DroidSwarm skill list
+  DroidSwarm skill create <name> [--template basic|research|code|review|custom]
+  DroidSwarm skill build <name>
+  DroidSwarm skill approve <name>
+EOF
+}
+
+print_agent_help() {
+  cat <<'EOF'
+Usage:
+  DroidSwarm agent list
+  DroidSwarm agent create <name> --skills skill1,skill2 [--priority low|medium|high]
+  DroidSwarm agent approve <name>
+EOF
+}
+
 run_shared_projects_cli() {
   node --import tsx "$ROOT_DIR/../shared-projects/src/cli.ts" "$@"
 }
 
 run_shared_governance_cli() {
   node --import tsx "$ROOT_DIR/../shared-governance/src/cli.ts" "$@"
+}
+
+run_shared_skills_cli() {
+  node --import tsx "$ROOT_DIR/../shared-skills/src/cli.ts" "$@"
 }
 
 json_field() {
@@ -2296,6 +2321,133 @@ cmd_laws() {
   esac
 }
 
+cmd_skill() {
+  local action="${1:-list}"
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
+
+  case "$action" in
+    list)
+      run_shared_skills_cli list "$@"
+      ;;
+    create)
+      local name="${1:-}"
+      if [[ -z "$name" ]]; then
+        err "Provide the skill name."
+        print_skill_help
+        return 1
+      fi
+      shift
+      run_shared_skills_cli create --name "$name" "$@"
+      ;;
+    build)
+      local name="${1:-}"
+      if [[ -z "$name" ]]; then
+        err "Provide the skill name."
+        print_skill_help
+        return 1
+      fi
+      shift
+      run_shared_skills_cli build --name "$name" "$@"
+      ;;
+    approve)
+      local name="${1:-}"
+      if [[ -z "$name" ]]; then
+        err "Provide the skill name."
+        print_skill_help
+        return 1
+      fi
+      shift
+      run_shared_skills_cli approve-skill --name "$name" "$@"
+      ;;
+    help|-h|--help)
+      print_skill_help
+      ;;
+    *)
+      err "Unknown skill command: $action"
+      print_skill_help
+      return 1
+      ;;
+  esac
+}
+
+cmd_agent() {
+  local action="${1:-list}"
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
+
+  case "$action" in
+    list)
+      run_shared_skills_cli agents "$@"
+      ;;
+    create)
+      local name="${1:-}"
+      local skills=""
+      local priority=""
+      if [[ -z "$name" ]]; then
+        err "Provide the agent name."
+        print_agent_help
+        return 1
+      fi
+      shift
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --skills)
+            shift
+            require_value "--skills" "${1:-}"
+            skills="$1"
+            ;;
+          --priority)
+            shift
+            require_value "--priority" "${1:-}"
+            priority="$1"
+            ;;
+          --help|-h)
+            print_agent_help
+            return 0
+            ;;
+          *)
+            err "Unknown agent create option: $1"
+            print_agent_help
+            return 1
+            ;;
+        esac
+        shift
+      done
+      if [[ -z "$skills" ]]; then
+        err "Provide --skills skill1,skill2"
+        print_agent_help
+        return 1
+      fi
+      if [[ -n "$priority" ]]; then
+        run_shared_skills_cli agent-create --name "$name" --skills "$skills" --priority "$priority"
+      else
+        run_shared_skills_cli agent-create --name "$name" --skills "$skills"
+      fi
+      ;;
+    approve)
+      local name="${1:-}"
+      if [[ -z "$name" ]]; then
+        err "Provide the agent name."
+        print_agent_help
+        return 1
+      fi
+      shift
+      run_shared_skills_cli approve-agent --name "$name" "$@"
+      ;;
+    help|-h|--help)
+      print_agent_help
+      ;;
+    *)
+      err "Unknown agent command: $action"
+      print_agent_help
+      return 1
+      ;;
+  esac
+}
+
 slack_token_source_status() {
   local service_name="${DROIDSWARM_SLACK_KEYCHAIN_SERVICE:-DroidSwarm Slack}"
 
@@ -3056,6 +3208,12 @@ case "$COMMAND" in
     ;;
   laws)
     cmd_laws "$@"
+    ;;
+  skill)
+    cmd_skill "$@"
+    ;;
+  agent)
+    cmd_agent "$@"
     ;;
   slack)
     cmd_slack "$@"

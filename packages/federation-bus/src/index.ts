@@ -134,6 +134,8 @@ export interface FederationBusConfig {
   rulesHash?: string;
   droidspeakCatalog?: Record<string, unknown>;
   lawManifest?: Record<string, unknown>;
+  skillManifest?: Record<string, unknown>;
+  agentManifest?: Record<string, unknown>;
   onSlaveRollCall?: (payload: SlaveRollCallPayload) => Promise<SlaveWelcomeResponse | undefined> | SlaveWelcomeResponse | undefined;
 }
 
@@ -166,6 +168,8 @@ export interface SlaveWelcomeResponse {
   rulesHash: string;
   droidspeakCatalog: Record<string, unknown>;
   lawManifest: Record<string, unknown>;
+  skillManifest?: Record<string, unknown>;
+  agentManifest?: Record<string, unknown>;
   projectId?: string;
   reason?: string;
 }

@@ -25,3 +25,9 @@ Slave swarms must not host the dashboard or claim master governance authority.
 ## LAW-006
 
 Require explicit governance summaries at startup.
+
+## Skill And Agent Extension Rules
+
+- New skills and specialized agents must register through the shared skills registry before they are treated as active runtime capabilities.
+- Skill manifests must declare valid Droidspeak verbs for any new internal event surface they introduce.
+- Skill packs or agents that affect core behavior may remain pending until explicit human approval.

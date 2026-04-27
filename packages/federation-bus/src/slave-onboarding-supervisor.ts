@@ -1,7 +1,8 @@
 import { loadFederationNodeConfig, loadSharedConfig } from '@shared-config';
-import { DROIDSPEAK_CATALOGS } from '@shared-droidspeak';
+import { buildDroidspeakCatalogs } from '@shared-droidspeak';
 import { computeLawManifestHash, listActiveLaws, validateCompliance } from '@shared-governance';
 import { registerFederatedNode } from '@shared-projects';
+import { buildDynamicSkillVerbCatalog, listRegisteredSkillManifests, listSpecializedAgents } from '@shared-skills';
 import { appendAuditEvent } from '@shared-tracing';
 
 import { rollCallSlave, type FederationSigningKey, type SlaveRollCallPayload, type SlaveWelcomeResponse } from './index';
@@ -11,8 +12,10 @@ export const createSlaveOnboardingWelcome = (payload: SlaveRollCallPayload): Sla
   nodeId: loadFederationNodeConfig().nodeId,
   swarmRole: 'master',
   rulesHash: computeLawManifestHash(listActiveLaws()),
-  droidspeakCatalog: DROIDSPEAK_CATALOGS as unknown as Record<string, unknown>,
+  droidspeakCatalog: buildDroidspeakCatalogs({ verbs: buildDynamicSkillVerbCatalog() }) as unknown as Record<string, unknown>,
   lawManifest: { laws: listActiveLaws() } as unknown as Record<string, unknown>,
+  skillManifest: { skills: listRegisteredSkillManifests() } as unknown as Record<string, unknown>,
+  agentManifest: { agents: listSpecializedAgents() } as unknown as Record<string, unknown>,
   projectId: payload.projectId ?? loadSharedConfig().projectId,
 });
 
@@ -37,8 +40,10 @@ export const registerSlaveRollCall = (payload: SlaveRollCallPayload): SlaveWelco
       nodeId: loadFederationNodeConfig().nodeId,
       swarmRole: 'master',
       rulesHash: enforcement.lawHash,
-      droidspeakCatalog: DROIDSPEAK_CATALOGS as unknown as Record<string, unknown>,
+      droidspeakCatalog: buildDroidspeakCatalogs({ verbs: buildDynamicSkillVerbCatalog() }) as unknown as Record<string, unknown>,
       lawManifest: { laws: listActiveLaws() } as unknown as Record<string, unknown>,
+      skillManifest: { skills: listRegisteredSkillManifests() } as unknown as Record<string, unknown>,
+      agentManifest: { agents: listSpecializedAgents() } as unknown as Record<string, unknown>,
       projectId: payload.projectId ?? shared.projectId,
       reason: enforcement.laws.filter((entry) => !entry.ok).map((entry) => entry.violations.join(' ')).join(' '),
     };

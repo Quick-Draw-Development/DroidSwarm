@@ -1,0 +1,34 @@
+{
+  "name": "shared-skills",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "root": "packages/shared-skills",
+  "sourceRoot": "packages/shared-skills/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc -p packages/shared-skills/tsconfig.json"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc --noEmit -p packages/shared-skills/tsconfig.json"
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc --noEmit -p packages/shared-skills/tsconfig.json"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node --import tsx --test packages/shared-skills/src/**/*.spec.ts"
+      }
+    }
+  },
+  "tags": []
+}

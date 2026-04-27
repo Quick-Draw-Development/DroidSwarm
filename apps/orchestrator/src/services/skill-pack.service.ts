@@ -1,7 +1,8 @@
 import path from 'node:path';
 
 import { getSwarmRoleDefinition } from '@shared-routing';
-import { loadSkillPacks } from '@shared-skills';
+import { loadSkillPacks, resolveAgentSkillPacks, syncDiscoveredAgents, syncDiscoveredSkills } from '@shared-skills';
+import { tracer } from '@shared-tracing';
 import type { OrchestratorConfig } from '../types';
 
 export class SkillPackService {
@@ -9,6 +10,15 @@ export class SkillPackService {
 
   constructor(private readonly config: OrchestratorConfig) {
     this.skillsRoot = path.resolve(this.config.projectRoot, 'skills');
+    try {
+      syncDiscoveredSkills(this.skillsRoot);
+      syncDiscoveredAgents(this.skillsRoot);
+    } catch (error) {
+      tracer.warn('skills.registry.bootstrap_failed', {
+        skillsRoot: this.skillsRoot,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   resolve(role: string, requested: string[] = []): string[] {
@@ -18,7 +28,18 @@ export class SkillPackService {
   }
 
   resolveNames(role: string, requested: string[] = []): string[] {
-    return [...new Set([...requested, ...this.inferRoleSkills(role)])];
+    const dynamicAgentSkills = (() => {
+      try {
+        return resolveAgentSkillPacks(role);
+      } catch (error) {
+        tracer.warn('skills.registry.resolve_failed', {
+          role,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return [];
+      }
+    })();
+    return [...new Set([...requested, ...this.inferRoleSkills(role), ...dynamicAgentSkills])];
   }
 
   private inferRoleSkills(role: string): string[] {

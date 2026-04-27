@@ -193,6 +193,7 @@ export interface OrchestrationInsightsData {
   federation?: FederationStatusSummary;
   auditTrail?: AuditTrailSummary;
   governance?: GovernanceSummary;
+  skillsRegistry?: SkillsRegistrySummary;
 }
 
 export interface GovernanceSummary {
@@ -214,6 +215,26 @@ export interface GovernanceSummary {
     status: string;
     proposedBy: string;
     updatedAt: string;
+  }>;
+}
+
+export interface SkillsRegistrySummary {
+  activeSkillCount: number;
+  pendingSkillCount: number;
+  activeAgentCount: number;
+  pendingAgentCount: number;
+  skills: Array<{
+    name: string;
+    version: string;
+    status: string;
+    capabilities: string[];
+  }>;
+  agents: Array<{
+    name: string;
+    version: string;
+    status: string;
+    skills: string[];
+    priority: string;
   }>;
 }
 

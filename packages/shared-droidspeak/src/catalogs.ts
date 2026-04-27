@@ -62,7 +62,9 @@ export const DROIDSPEAK_CATALOGS = {
     'EVT-HUMAN-APPROVAL': 'Human Approval',
     'EVT-LAW-UPDATE': 'Law Update',
     'EVT-COMPLIANCE-CHECK': 'Compliance Check',
-    'EVT-GUARDIAN-VETO': 'Guardian Veto'
+    'EVT-GUARDIAN-VETO': 'Guardian Veto',
+    'EVT-SKILL-REGISTERED': 'Skill Registered',
+    'EVT-AGENT-UPDATED': 'Agent Updated'
   },
   
   // D11: Promotion (8 entries)
@@ -101,6 +103,16 @@ export const DROIDSPEAK_CATALOGS = {
     'vwx234': 'Project Theta'
   }
 };
+
+export const buildDroidspeakCatalogs = (input?: {
+  verbs?: Record<string, string>;
+}): typeof DROIDSPEAK_CATALOGS => ({
+  ...DROIDSPEAK_CATALOGS,
+  D2: {
+    ...DROIDSPEAK_CATALOGS.D2,
+    ...(input?.verbs ?? {}),
+  },
+});
 
 // Type definitions for Droidspeak axes
 export type D1Axis = keyof typeof DROIDSPEAK_CATALOGS.D1;

@@ -7,7 +7,11 @@ export type SlackCommandKind =
   | 'task-message'
   | 'operator-message'
   | 'law-propose'
-  | 'law-approve';
+  | 'law-approve'
+  | 'skills-list'
+  | 'skill-create'
+  | 'skill-approve'
+  | 'agent-create';
 
 export interface SlackParseContext {
   preferAppleIntelligence?: boolean;
@@ -25,6 +29,10 @@ export interface ParsedSlackCommand {
   taskId?: string;
   content?: string;
   proposalId?: string;
+  name?: string;
+  skills?: string[];
+  template?: string;
+  priority?: 'low' | 'medium' | 'high';
   source: 'slash' | 'natural-language';
   route: ModelRouteDecision;
 }
@@ -98,6 +106,10 @@ const parseSlashCommand = (text: string, route: ModelRouteDecision): ParsedSlack
     return buildCommand(text, route, { kind: 'projects', args: [], source: 'slash' });
   }
 
+  if (args[0] === 'skills' && args[1] === 'list') {
+    return buildCommand(text, route, { kind: 'skills-list', args: [], source: 'slash' });
+  }
+
   if (args[0] === 'law' && args[1] === 'propose' && args.length > 2) {
     return buildCommand(text, route, {
       kind: 'law-propose',
@@ -112,6 +124,36 @@ const parseSlashCommand = (text: string, route: ModelRouteDecision): ParsedSlack
       kind: 'law-approve',
       args: args.slice(2),
       proposalId: args[2],
+      source: 'slash',
+    });
+  }
+
+  if (args[0] === 'skill' && args[1] === 'create' && args[2]) {
+    return buildCommand(text, route, {
+      kind: 'skill-create',
+      args: args.slice(2),
+      name: args[2],
+      template: args[3],
+      source: 'slash',
+    });
+  }
+
+  if (args[0] === 'skill' && args[1] === 'approve' && args[2]) {
+    return buildCommand(text, route, {
+      kind: 'skill-approve',
+      args: args.slice(2),
+      name: args[2],
+      source: 'slash',
+    });
+  }
+
+  if (args[0] === 'agent' && args[1] === 'create' && args[2] && args[3]) {
+    return buildCommand(text, route, {
+      kind: 'agent-create',
+      args: args.slice(2),
+      name: args[2],
+      skills: args[3].split(',').map((entry) => entry.trim()).filter(Boolean),
+      priority: args[4] === 'low' || args[4] === 'high' ? args[4] : 'medium',
       source: 'slash',
     });
   }
@@ -146,6 +188,10 @@ const parseNaturalLanguage = (text: string, route: ModelRouteDecision): ParsedSl
     return buildCommand(text, route, { kind: 'projects', args: [], source: 'natural-language' });
   }
 
+  if (/^(show|list)\s+skills\b/.test(lower)) {
+    return buildCommand(text, route, { kind: 'skills-list', args: [], source: 'natural-language' });
+  }
+
   const lawProposalMatch = trimmed.match(/^law\s+propose\s+(.+)$/i);
   if (lawProposalMatch?.[1]) {
     return buildCommand(text, route, {
@@ -162,6 +208,39 @@ const parseNaturalLanguage = (text: string, route: ModelRouteDecision): ParsedSl
       kind: 'law-approve',
       args: [lawApproveMatch[1]],
       proposalId: lawApproveMatch[1],
+      source: 'natural-language',
+    });
+  }
+
+  const skillCreateMatch = trimmed.match(/^skill\s+create\s+([a-z0-9-]+)(?:\s+([a-z]+))?$/i);
+  if (skillCreateMatch?.[1]) {
+    return buildCommand(text, route, {
+      kind: 'skill-create',
+      args: skillCreateMatch.slice(1).filter((entry): entry is string => typeof entry === 'string'),
+      name: skillCreateMatch[1],
+      template: skillCreateMatch[2],
+      source: 'natural-language',
+    });
+  }
+
+  const skillApproveMatch = trimmed.match(/^skill\s+approve\s+([a-z0-9-]+)$/i);
+  if (skillApproveMatch?.[1]) {
+    return buildCommand(text, route, {
+      kind: 'skill-approve',
+      args: [skillApproveMatch[1]],
+      name: skillApproveMatch[1],
+      source: 'natural-language',
+    });
+  }
+
+  const agentCreateMatch = trimmed.match(/^agent\s+create\s+([a-z0-9-]+)\s+([a-z0-9,-]+)(?:\s+(low|medium|high))?$/i);
+  if (agentCreateMatch?.[1] && agentCreateMatch[2]) {
+    return buildCommand(text, route, {
+      kind: 'agent-create',
+      args: agentCreateMatch.slice(1).filter((entry): entry is string => typeof entry === 'string'),
+      name: agentCreateMatch[1],
+      skills: agentCreateMatch[2].split(',').map((entry) => entry.trim()).filter(Boolean),
+      priority: agentCreateMatch[3] === 'low' || agentCreateMatch[3] === 'high' ? agentCreateMatch[3] : 'medium',
       source: 'natural-language',
     });
   }
@@ -221,6 +300,9 @@ export const renderSlackCommandResponse = (command: ParsedSlackCommand): SlackCo
           '*DroidSwarm Slack relay*',
           '`/droid use <project>` selects the active project.',
           '`/droid projects` lists registered projects.',
+          '`/droid skills list` lists registered skills and specialized agents.',
+          '`/droid skill create <name> [template]` scaffolds a new skill.',
+          '`/droid agent create <name> <skill1,skill2> [priority]` creates a specialized agent.',
           '`/droid <message>` forwards a message to the orchestrator operator room.',
           '`/droid <task-id>: <message>` forwards a message to a task room.',
           'Direct messages and mentions use the same parsing rules.',
@@ -249,6 +331,22 @@ export const renderSlackCommandResponse = (command: ParsedSlackCommand): SlackCo
     case 'law-approve':
       return {
         text: `Approving governance proposal \`${command.proposalId ?? 'unknown'}\`.`,
+      };
+    case 'skills-list':
+      return {
+        text: 'Listing registered skills and specialized agents.',
+      };
+    case 'skill-create':
+      return {
+        text: `Creating skill \`${command.name ?? 'unknown'}\`.`,
+      };
+    case 'skill-approve':
+      return {
+        text: `Approving skill \`${command.name ?? 'unknown'}\`.`,
+      };
+    case 'agent-create':
+      return {
+        text: `Creating specialized agent \`${command.name ?? 'unknown'}\`.`,
       };
   }
 };

@@ -60,6 +60,9 @@
     "@shared-skills": [
       "packages/shared-skills/src/index.ts"
     ],
+    "@shared-skills/*": [
+      "packages/shared-skills/src/*"
+    ],
     "@shared-config": [
       "packages/shared-config/src/index.ts"
     ],

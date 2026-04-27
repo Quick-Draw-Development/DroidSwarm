@@ -9,6 +9,7 @@ import type {
   OrchestrationInsightsData,
   RunSummary,
   RunTimelineEntry,
+  SkillsRegistrySummary,
   TaskNode,
   VerificationTaskSummary,
 } from '../lib/types';
@@ -158,6 +159,13 @@ const renderAuditEntry = (entry: AuditTrailSummary['latestEvents'][number], inde
   </li>
 );
 
+const renderRegisteredSkillEntry = (entry: SkillsRegistrySummary['skills'][number], index: number) => (
+  <li key={`${entry.name}-${index}`} className="insight-item">
+    <strong>{entry.name}</strong>
+    <span>{entry.status} · {entry.capabilities.join(', ') || 'no capabilities declared'}</span>
+  </li>
+);
+
 const schedulerEventTypes = new Set([
   'run_started',
   'run_recovered',
@@ -192,6 +200,7 @@ export function OrchestrationInsights({ data }: { data: OrchestrationInsightsDat
   const federation = data.federation;
   const auditTrail = data.auditTrail;
   const governance = data.governance;
+  const skillsRegistry = data.skillsRegistry;
   const runSummary = (() => {
     if (!latestRun?.metadata) {
       return undefined;
@@ -499,6 +508,24 @@ export function OrchestrationInsights({ data }: { data: OrchestrationInsightsDat
             </ul>
           ) : (
             <p className="empty-copy">Governance status unavailable.</p>
+          )}
+        </article>
+        <article className="insight-card">
+          <p className="section-title">Skills registry</p>
+          {skillsRegistry ? (
+            <ul className="insight-list">
+              <li className="insight-item">
+                <strong>Counts</strong>
+                <span>
+                  skills {skillsRegistry.activeSkillCount} active / {skillsRegistry.pendingSkillCount} pending · agents {skillsRegistry.activeAgentCount} active / {skillsRegistry.pendingAgentCount} pending
+                </span>
+              </li>
+              {skillsRegistry.skills.length > 0
+                ? skillsRegistry.skills.slice(0, 4).map(renderRegisteredSkillEntry)
+                : <li className="insight-empty">No registered skills.</li>}
+            </ul>
+          ) : (
+            <p className="empty-copy">Skills registry unavailable.</p>
           )}
         </article>
         <article className="insight-card">

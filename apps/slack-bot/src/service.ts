@@ -6,6 +6,15 @@ import WebSocket from 'ws';
 import { appendAuditEvent, tracer } from '@shared-tracing';
 import { approveLawProposal, listLawProposals, runGovernanceDebate, validateCompliance } from '@shared-governance';
 import {
+  approveRegisteredSkill,
+  approveSpecializedAgent,
+  createAgentManifest,
+  createSkillScaffold,
+  listRegisteredSkillManifests,
+  listSpecializedAgents,
+  resolveSkillsRoot,
+} from '@shared-skills';
+import {
   getCurrentProject,
   listRegisteredProjects,
   resolveProjectLookup,
@@ -417,7 +426,11 @@ export const executeSlackIntent = async (
 
   if (config.governanceEnabled) {
     const report = validateCompliance({
-      eventType: command.kind === 'law-propose' || command.kind === 'law-approve' ? 'governance.proposal' : 'slack.command',
+      eventType: command.kind === 'law-propose' || command.kind === 'law-approve'
+        ? 'governance.proposal'
+        : command.kind === 'skill-create' || command.kind === 'skill-approve' || command.kind === 'agent-create'
+          ? 'skill.register'
+          : 'slack.command',
       actorRole: 'slack-bot',
       swarmRole: 'master',
       projectId: project?.projectId ?? config.defaultProjectId,
@@ -427,6 +440,12 @@ export const executeSlackIntent = async (
         ? { compact: 'EVT-LAW-PROPOSAL', expanded: command.content ?? '', kind: 'memory_pinned' }
         : command.kind === 'law-approve'
           ? { compact: 'EVT-HUMAN-APPROVAL', expanded: command.proposalId ?? '', kind: 'audit_delta' }
+          : command.kind === 'skill-create'
+            ? { compact: 'EVT-SKILL-REGISTERED', expanded: command.name ?? '', kind: 'memory_pinned' }
+            : command.kind === 'skill-approve'
+              ? { compact: 'EVT-HUMAN-APPROVAL', expanded: command.name ?? '', kind: 'audit_delta' }
+              : command.kind === 'agent-create'
+                ? { compact: 'EVT-AGENT-UPDATED', expanded: command.name ?? '', kind: 'memory_pinned' }
           : undefined,
     });
     if (!report.ok) {
@@ -533,6 +552,77 @@ export const executeSlackIntent = async (
       });
       return {
         text: `Governance proposal \`${approved.proposalId}\` approved and activated as ${approved.lawId}.`,
+        projectId: project?.projectId,
+        backend: command.route.backend,
+      };
+    }
+    case 'skills-list': {
+      const skills = listRegisteredSkillManifests();
+      const agents = listSpecializedAgents();
+      const skillLines = skills.length > 0
+        ? skills.slice(0, 8).map((entry) => `• skill \`${entry.name}\` · ${entry.status}`)
+        : ['• no skills registered'];
+      const agentLines = agents.length > 0
+        ? agents.slice(0, 8).map((entry) => `• agent \`${entry.name}\` · ${entry.status} · skills ${entry.skills.join(', ')}`)
+        : ['• no specialized agents registered'];
+      return {
+        text: ['*Skills & Agents*', ...skillLines, ...agentLines].join('\n'),
+        projectId: project?.projectId,
+        backend: command.route.backend,
+      };
+    }
+    case 'skill-create': {
+      if (!command.name) {
+        return {
+          text: 'Missing skill name.',
+          backend: command.route.backend,
+        };
+      }
+      const manifest = createSkillScaffold({
+        rootDir: resolveSkillsRoot(),
+        name: command.name,
+        template: (command.template as 'basic' | 'research' | 'code' | 'review' | 'custom' | undefined) ?? 'basic',
+      });
+      return {
+        text: `Skill \`${manifest.name}\` scaffolded and registered.`,
+        projectId: project?.projectId,
+        backend: command.route.backend,
+      };
+    }
+    case 'skill-approve': {
+      if (!command.name) {
+        return {
+          text: 'Missing skill name.',
+          backend: command.route.backend,
+        };
+      }
+      const approved = approveRegisteredSkill(command.name);
+      return {
+        text: approved
+          ? `Skill \`${approved.name}\` approved and activated.`
+          : `Skill \`${command.name}\` was not found.`,
+        projectId: project?.projectId,
+        backend: command.route.backend,
+      };
+    }
+    case 'agent-create': {
+      if (!command.name || !command.skills || command.skills.length === 0) {
+        return {
+          text: 'Missing agent name or skill list.',
+          backend: command.route.backend,
+        };
+      }
+      const manifest = createAgentManifest({
+        skillsRoot: resolveSkillsRoot(),
+        name: command.name,
+        skills: command.skills,
+        priority: command.priority,
+      });
+      const approved = manifest.affectsCoreBehavior ? null : approveSpecializedAgent(manifest.name);
+      return {
+        text: approved
+          ? `Specialized agent \`${approved.name}\` registered and activated.`
+          : `Specialized agent \`${manifest.name}\` registered.`,
         projectId: project?.projectId,
         backend: command.route.backend,
       };

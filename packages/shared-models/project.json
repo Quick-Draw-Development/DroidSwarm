@@ -1,0 +1,33 @@
+{
+  "name": "shared-models",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "root": "packages/shared-models",
+  "sourceRoot": "packages/shared-models/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc -p packages/shared-models/tsconfig.json"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc --noEmit -p packages/shared-models/tsconfig.json"
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc --noEmit -p packages/shared-models/tsconfig.json"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node --import tsx --test packages/shared-models/src/**/*.spec.ts"
+      }
+    }
+  }
+}

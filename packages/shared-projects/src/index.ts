@@ -117,6 +117,45 @@ export interface RegisteredAgentRecord {
   updatedAt: string;
 }
 
+export interface RegisteredModelRecord {
+  nodeId: string;
+  modelId: string;
+  displayName: string;
+  backend: 'apple-intelligence' | 'mlx' | 'local-llama';
+  path?: string;
+  quantization?: string;
+  contextLength?: number;
+  sizeBytes?: number;
+  toolUse: boolean;
+  reasoningDepth: 'low' | 'medium' | 'high';
+  speedTier: 'fast' | 'balanced' | 'heavy';
+  enabled: boolean;
+  tags: string[];
+  metadata: Record<string, unknown>;
+  source: 'local-scan' | 'bootstrap-inventory' | 'federation-sync' | 'manual';
+  lastSeenAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertRegisteredModelInput {
+  nodeId: string;
+  modelId: string;
+  displayName: string;
+  backend: RegisteredModelRecord['backend'];
+  path?: string;
+  quantization?: string;
+  contextLength?: number;
+  sizeBytes?: number;
+  toolUse?: boolean;
+  reasoningDepth?: RegisteredModelRecord['reasoningDepth'];
+  speedTier?: RegisteredModelRecord['speedTier'];
+  enabled?: boolean;
+  tags?: string[];
+  metadata?: Record<string, unknown>;
+  source?: RegisteredModelRecord['source'];
+}
+
 export interface UpsertRegisteredAgentInput {
   name: string;
   version: string;
@@ -289,6 +328,34 @@ export const openProjectRegistryDatabase = (dbPath = resolveProjectRegistryDbPat
 
     CREATE INDEX IF NOT EXISTS idx_registry_agents_status
       ON agent_registry(status, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS models (
+      node_id TEXT NOT NULL,
+      model_id TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      backend TEXT NOT NULL,
+      path TEXT,
+      quantization TEXT,
+      context_length INTEGER,
+      size_bytes INTEGER,
+      tool_use INTEGER NOT NULL,
+      reasoning_depth TEXT NOT NULL,
+      speed_tier TEXT NOT NULL,
+      enabled INTEGER NOT NULL,
+      tags_json TEXT NOT NULL,
+      metadata_json TEXT NOT NULL,
+      source TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (node_id, model_id)
+    ) STRICT;
+
+    CREATE INDEX IF NOT EXISTS idx_registry_models_backend
+      ON models(backend, enabled, updated_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_registry_models_node
+      ON models(node_id, updated_at DESC);
 
     CREATE TABLE IF NOT EXISTS code_review_runs (
       review_id TEXT PRIMARY KEY,
@@ -581,6 +648,49 @@ const normalizeCodeReviewRunRecord = (row: Record<string, unknown>): CodeReviewR
   updatedAt: String(row.updated_at),
 });
 
+const normalizeRegisteredModelRecord = (row: Record<string, unknown>): RegisteredModelRecord => ({
+  nodeId: String(row.node_id),
+  modelId: String(row.model_id),
+  displayName: String(row.display_name),
+  backend:
+    row.backend === 'apple-intelligence'
+      ? 'apple-intelligence'
+      : row.backend === 'mlx'
+        ? 'mlx'
+        : 'local-llama',
+  path: typeof row.path === 'string' ? row.path : undefined,
+  quantization: typeof row.quantization === 'string' ? row.quantization : undefined,
+  contextLength: typeof row.context_length === 'number' ? row.context_length : undefined,
+  sizeBytes: typeof row.size_bytes === 'number' ? row.size_bytes : undefined,
+  toolUse: Number(row.tool_use ?? 0) === 1,
+  reasoningDepth:
+    row.reasoning_depth === 'low'
+      ? 'low'
+      : row.reasoning_depth === 'high'
+        ? 'high'
+        : 'medium',
+  speedTier:
+    row.speed_tier === 'fast'
+      ? 'fast'
+      : row.speed_tier === 'heavy'
+        ? 'heavy'
+        : 'balanced',
+  enabled: Number(row.enabled ?? 0) === 1,
+  tags: parseJsonArray(row.tags_json),
+  metadata: parseJsonObject(row.metadata_json),
+  source:
+    row.source === 'bootstrap-inventory'
+      ? 'bootstrap-inventory'
+      : row.source === 'federation-sync'
+        ? 'federation-sync'
+        : row.source === 'manual'
+          ? 'manual'
+          : 'local-scan',
+  lastSeenAt: String(row.last_seen_at),
+  createdAt: String(row.created_at),
+  updatedAt: String(row.updated_at),
+});
+
 export const registerFederatedNode = (input: RegisterFederatedNodeInput, dbPath?: string): FederatedNodeRecord => {
   const database = openProjectRegistryDatabase(dbPath);
   try {
@@ -861,6 +971,122 @@ export const updateRegisteredAgentStatus = (
 
 export const listRegisteredAgentsByConsensusRole = (role: string, dbPath?: string): RegisteredAgentRecord[] =>
   listRegisteredAgents(dbPath).filter((entry) => entry.consensusRoles.includes(role));
+
+export const upsertRegisteredModel = (input: UpsertRegisteredModelInput, dbPath?: string): RegisteredModelRecord => {
+  const database = openProjectRegistryDatabase(dbPath);
+  try {
+    const now = new Date().toISOString();
+    const record = {
+      nodeId: input.nodeId,
+      modelId: input.modelId,
+      displayName: input.displayName,
+      backend: input.backend,
+      path: input.path ?? null,
+      quantization: input.quantization ?? null,
+      contextLength: input.contextLength ?? null,
+      sizeBytes: input.sizeBytes ?? null,
+      toolUse: input.toolUse === true ? 1 : 0,
+      reasoningDepth: input.reasoningDepth ?? 'medium',
+      speedTier: input.speedTier ?? 'balanced',
+      enabled: input.enabled === false ? 0 : 1,
+      tagsJson: JSON.stringify(input.tags ?? []),
+      metadataJson: JSON.stringify(input.metadata ?? {}),
+      source: input.source ?? 'local-scan',
+      lastSeenAt: now,
+      createdAt: now,
+      updatedAt: now,
+    };
+    database.prepare(`
+      INSERT INTO models (
+        node_id, model_id, display_name, backend, path, quantization, context_length, size_bytes, tool_use,
+        reasoning_depth, speed_tier, enabled, tags_json, metadata_json, source, last_seen_at, created_at, updated_at
+      ) VALUES (
+        @nodeId, @modelId, @displayName, @backend, @path, @quantization, @contextLength, @sizeBytes, @toolUse,
+        @reasoningDepth, @speedTier, @enabled, @tagsJson, @metadataJson, @source, @lastSeenAt, @createdAt, @updatedAt
+      )
+      ON CONFLICT(node_id, model_id) DO UPDATE SET
+        display_name = excluded.display_name,
+        backend = excluded.backend,
+        path = excluded.path,
+        quantization = excluded.quantization,
+        context_length = excluded.context_length,
+        size_bytes = excluded.size_bytes,
+        tool_use = excluded.tool_use,
+        reasoning_depth = excluded.reasoning_depth,
+        speed_tier = excluded.speed_tier,
+        enabled = excluded.enabled,
+        tags_json = excluded.tags_json,
+        metadata_json = excluded.metadata_json,
+        source = excluded.source,
+        last_seen_at = excluded.last_seen_at,
+        updated_at = excluded.updated_at
+    `).run(record);
+    const row = database.prepare(`
+      SELECT *
+      FROM models
+      WHERE node_id = ? AND model_id = ?
+      LIMIT 1
+    `).get(input.nodeId, input.modelId) as Record<string, unknown>;
+    return normalizeRegisteredModelRecord(row);
+  } finally {
+    database.close();
+  }
+};
+
+export const listRegisteredModels = (
+  input?: {
+    nodeId?: string;
+    backend?: RegisteredModelRecord['backend'];
+    enabledOnly?: boolean;
+  },
+  dbPath?: string,
+): RegisteredModelRecord[] => {
+  const database = openProjectRegistryDatabase(dbPath);
+  try {
+    const clauses: string[] = [];
+    const values: unknown[] = [];
+    if (input?.nodeId) {
+      clauses.push('node_id = ?');
+      values.push(input.nodeId);
+    }
+    if (input?.backend) {
+      clauses.push('backend = ?');
+      values.push(input.backend);
+    }
+    if (input?.enabledOnly) {
+      clauses.push('enabled = 1');
+    }
+    const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    return (database.prepare(`
+      SELECT *
+      FROM models
+      ${whereClause}
+      ORDER BY updated_at DESC, display_name ASC
+    `).all(...values) as Record<string, unknown>[])
+      .map(normalizeRegisteredModelRecord);
+  } finally {
+    database.close();
+  }
+};
+
+export const getRegisteredModel = (
+  nodeId: string,
+  modelId: string,
+  dbPath?: string,
+): RegisteredModelRecord | undefined => {
+  const database = openProjectRegistryDatabase(dbPath);
+  try {
+    const row = database.prepare(`
+      SELECT *
+      FROM models
+      WHERE node_id = ? AND model_id = ?
+      LIMIT 1
+    `).get(nodeId, modelId) as Record<string, unknown> | undefined;
+    return row ? normalizeRegisteredModelRecord(row) : undefined;
+  } finally {
+    database.close();
+  }
+};
 
 export const upsertCodeReviewRun = (input: UpsertCodeReviewRunInput, dbPath?: string): CodeReviewRunRecord => {
   const database = openProjectRegistryDatabase(dbPath);

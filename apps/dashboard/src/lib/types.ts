@@ -195,6 +195,7 @@ export interface OrchestrationInsightsData {
   governance?: GovernanceSummary;
   skillsRegistry?: SkillsRegistrySummary;
   codeReviews?: CodeReviewSummary;
+  modelInventory?: ModelInventorySummary;
 }
 
 export interface CodeReviewSummary {
@@ -273,6 +274,25 @@ export interface SkillsRegistrySummary {
     status: string;
     skills: string[];
     priority: string;
+  }>;
+}
+
+export interface ModelInventorySummary {
+  totalModelCount: number;
+  nodeCount: number;
+  backends: Array<{
+    backend: string;
+    count: number;
+  }>;
+  models: Array<{
+    nodeId: string;
+    modelId: string;
+    displayName: string;
+    backend: string;
+    reasoningDepth: string;
+    speedTier: string;
+    contextLength?: number;
+    updatedAt: string;
   }>;
 }
 

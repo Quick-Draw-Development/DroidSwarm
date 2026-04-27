@@ -1,5 +1,8 @@
 export type ModelBackend = 'apple-intelligence' | 'mlx' | 'local-llama';
 
+import { chooseBestModel, listRegisteredModels, type ModelPreferenceProfile } from '@shared-models';
+import type { RegisteredModelRecord } from '@shared-projects';
+
 export interface ModelRouterContext {
   platform?: string;
   arch?: string;
@@ -19,6 +22,17 @@ export interface ModelRouteDecision {
   prefersAppleSilicon: boolean;
   appleRuntimeAvailable: boolean;
   mlxAvailable: boolean;
+}
+
+export interface RoleModelSelectionInput extends ModelRouterContext {
+  role?: string;
+  useCase?: string;
+  requirements?: ModelPreferenceProfile;
+  inventory?: RegisteredModelRecord[];
+}
+
+export interface RoleModelSelectionDecision extends ModelRouteDecision {
+  model?: RegisteredModelRecord;
 }
 
 const heavyTaskHints = ['vision', 'embedding', 'analysis', 'summary', 'checkpoint', 'compress'];
@@ -87,3 +101,60 @@ export const chooseBackendDecision = (context: ModelRouterContext = {}): ModelRo
 
 export const chooseBackend = (context: ModelRouterContext = {}): ModelBackend =>
   chooseBackendDecision(context).backend;
+
+const roleProfileDefaults = (role: string, useCase?: string): ModelPreferenceProfile => {
+  const normalized = `${role} ${useCase ?? ''}`.toLowerCase();
+  if (normalized.includes('review')) {
+    return { reasoningDepth: 'high', minContextLength: 16_000, toolUse: true, role, useCase, tags: ['review', 'code'] };
+  }
+  if (normalized.includes('plan') || normalized.includes('research')) {
+    return { reasoningDepth: 'high', minContextLength: 12_000, speedPriority: 'balanced', role, useCase };
+  }
+  if (normalized.includes('verif') || normalized.includes('guardian')) {
+    return { reasoningDepth: 'medium', speedPriority: 'latency', role, useCase };
+  }
+  if (normalized.includes('code') || normalized.includes('coder') || normalized.includes('dev')) {
+    return { reasoningDepth: 'high', toolUse: true, minContextLength: 12_000, role, useCase, tags: ['code'] };
+  }
+  return { reasoningDepth: 'medium', speedPriority: 'balanced', role, useCase };
+};
+
+export const loadModelInventory = (nodeId?: string): RegisteredModelRecord[] =>
+  (() => {
+    try {
+      return listRegisteredModels({ ...(nodeId ? { nodeId } : {}), enabledOnly: true });
+    } catch {
+      return [];
+    }
+  })();
+
+export const selectModelForRole = (input: RoleModelSelectionInput = {}): RoleModelSelectionDecision => {
+  const backendDecision = chooseBackendDecision(input);
+  const inventory = input.inventory ?? loadModelInventory();
+  const role = input.role ?? input.taskType ?? 'general';
+  const requirements = {
+    ...roleProfileDefaults(role, input.useCase),
+    ...input.requirements,
+  };
+
+  const preferredBackend = backendDecision.backend;
+  const preferredModel = chooseBestModel(
+    inventory.filter((entry) => entry.backend === preferredBackend),
+    { ...requirements, backend: preferredBackend },
+  );
+  if (preferredModel) {
+    return {
+      ...backendDecision,
+      model: preferredModel,
+    };
+  }
+
+  const fallbackModel = chooseBestModel(inventory, requirements);
+  return {
+    ...backendDecision,
+    reason: fallbackModel
+      ? `${backendDecision.reason} Selected best available fallback model from the shared inventory.`
+      : backendDecision.reason,
+    ...(fallbackModel ? { model: fallbackModel, backend: fallbackModel.backend } : {}),
+  };
+};

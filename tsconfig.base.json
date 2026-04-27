@@ -51,6 +51,12 @@
     "@shared-projects": [
       "packages/shared-projects/src/index.ts"
     ],
+    "@shared-models": [
+      "packages/shared-models/src/index.ts"
+    ],
+    "@shared-models/*": [
+      "packages/shared-models/src/*"
+    ],
     "@model-router": [
       "packages/model-router/src/index.ts"
     ],

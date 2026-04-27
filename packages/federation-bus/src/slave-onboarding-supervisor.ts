@@ -1,7 +1,8 @@
 import { loadFederationNodeConfig, loadSharedConfig } from '@shared-config';
 import { buildDroidspeakCatalogs } from '@shared-droidspeak';
 import { computeLawManifestHash, computeSystemStateHash, createDriftSnapshot, listActiveLaws, validateCompliance } from '@shared-governance';
-import { registerFederatedNode } from '@shared-projects';
+import { refreshModelInventory } from '@shared-models';
+import { registerFederatedNode, upsertRegisteredModel } from '@shared-projects';
 import { buildDynamicSkillVerbCatalog, listRegisteredSkillManifests, listSpecializedAgents } from '@shared-skills';
 import { appendAuditEvent } from '@shared-tracing';
 
@@ -18,6 +19,26 @@ export const createSlaveOnboardingWelcome = (payload: SlaveRollCallPayload): Sla
   agentManifest: { agents: listSpecializedAgents() } as unknown as Record<string, unknown>,
   systemStateHash: computeSystemStateHash(),
   projectId: payload.projectId ?? loadSharedConfig().projectId,
+  modelInventory: refreshModelInventory({
+    nodeId: loadFederationNodeConfig().nodeId,
+    persist: true,
+  }).models.map((model) => ({
+    nodeId: model.nodeId,
+    modelId: model.modelId,
+    displayName: model.displayName,
+    backend: model.backend,
+    path: model.path,
+    quantization: model.quantization,
+    contextLength: model.contextLength,
+    sizeBytes: model.sizeBytes,
+    toolUse: model.toolUse,
+    reasoningDepth: model.reasoningDepth,
+    speedTier: model.speedTier,
+    enabled: model.enabled,
+    tags: model.tags,
+    metadata: model.metadata,
+    source: 'federation-sync',
+  })),
 });
 
 export const registerSlaveRollCall = (payload: SlaveRollCallPayload): SlaveWelcomeResponse => {
@@ -73,10 +94,18 @@ export const registerSlaveRollCall = (payload: SlaveRollCallPayload): SlaveWelco
     hardwareFingerprintHash: payload.hardwareFingerprintHash,
     capabilities: payload.capabilities,
   });
+  for (const model of payload.modelInventory ?? []) {
+    upsertRegisteredModel({
+      ...model,
+      nodeId: payload.nodeId,
+      source: 'federation-sync',
+    });
+  }
   appendAuditEvent('FEDERATION_SLAVE_ROLL_CALL', {
     nodeId: payload.nodeId,
     projectId: payload.projectId ?? shared.projectId,
     host: payload.host,
+    modelCount: payload.modelInventory?.length ?? 0,
   });
   return createSlaveOnboardingWelcome(payload);
 };
@@ -107,6 +136,26 @@ export const beginSlaveOnboarding = async (input?: {
     hardwareFingerprintHash: node.hardwareFingerprintHash,
     publicKey: node.keyPair.publicKeyPem,
     capabilities: ['envelope-v2', 'slave-onboarding', 'audit-log'],
+    modelInventory: refreshModelInventory({
+      nodeId: node.nodeId,
+      persist: true,
+    }).models.map((model) => ({
+      nodeId: model.nodeId,
+      modelId: model.modelId,
+      displayName: model.displayName,
+      backend: model.backend,
+      path: model.path,
+      quantization: model.quantization,
+      contextLength: model.contextLength,
+      sizeBytes: model.sizeBytes,
+      toolUse: model.toolUse,
+      reasoningDepth: model.reasoningDepth,
+      speedTier: model.speedTier,
+      enabled: model.enabled,
+      tags: model.tags,
+      metadata: model.metadata,
+      source: 'federation-sync',
+    })),
     role: 'slave',
     systemStateHash: computeSystemStateHash(),
     ts: new Date().toISOString(),
@@ -147,6 +196,14 @@ export const beginSlaveOnboarding = async (input?: {
     accepted: welcome.accepted,
     rulesHash: welcome.rulesHash,
     systemStateHash: welcome.systemStateHash,
+    modelCount: welcome.modelInventory?.length ?? 0,
   });
+  for (const model of welcome.modelInventory ?? []) {
+    upsertRegisteredModel({
+      ...model,
+      nodeId: model.nodeId,
+      source: 'federation-sync',
+    });
+  }
   return welcome;
 };

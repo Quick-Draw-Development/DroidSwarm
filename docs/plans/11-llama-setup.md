@@ -85,3 +85,16 @@ After completion, update documentation (MODEL-ROUTING.md and AGENTS.md) with the
 
 This plan makes llama.cpp model management fully automatic and intelligent, giving every agent the best available model for its role and workload while staying tightly integrated with the rest of the DroidSwarm ecosystem.
 Start with Phase 0.
+
+## Completion
+
+Completed on 2026-04-27.
+
+- Added `packages/shared-models` with local scan, bootstrap cache normalization, registry persistence, CLI support, and scoring helpers.
+- Added durable `models` registry storage in `packages/shared-projects`.
+- Extended `packages/model-router` with shared inventory loading and `selectModelForRole()`.
+- Wired orchestrator startup and routing through the shared inventory while preserving `DROIDSWARM_MODEL_*` and `DROIDSWARM_LLAMA_*` fallbacks.
+- Added optional manifest-level `modelPreferences` for skills and specialized agents.
+- Synced model inventory during slave onboarding and master welcome flows.
+- Added `EVT-MODEL-SELECTED` audit logging, lightweight consensus on critical routed model changes, Slack `models list|refresh`, dashboard Models panel, and `DroidSwarm models status|refresh`.
+- Added unit and integration coverage for inventory persistence, scoring, and Slack model operations.

@@ -16,6 +16,10 @@ import {
   validateCompliance,
 } from '@shared-governance';
 import {
+  listRegisteredModels,
+  refreshModelInventory,
+} from '@shared-models';
+import {
   approveRegisteredSkill,
   approveSpecializedAgent,
   createAgentManifest,
@@ -441,6 +445,8 @@ export const executeSlackIntent = async (
         ? 'governance.proposal'
         : command.kind === 'review-run'
           ? 'review.request'
+        : command.kind === 'models-list' || command.kind === 'models-refresh'
+          ? 'model.routing'
         : command.kind === 'skill-create' || command.kind === 'skill-approve' || command.kind === 'agent-create'
           ? 'skill.register'
           : 'slack.command',
@@ -465,6 +471,8 @@ export const executeSlackIntent = async (
                 ? { compact: 'EVT-AGENT-UPDATED', expanded: command.name ?? '', kind: 'memory_pinned' }
                 : command.kind === 'review-run'
                   ? { compact: 'EVT-REVIEW-START', expanded: command.content ?? '', kind: 'memory_pinned' }
+                  : command.kind === 'models-list' || command.kind === 'models-refresh'
+                    ? { compact: 'EVT-MODEL-SELECTED', expanded: command.kind, kind: 'memory_pinned' }
           : undefined,
     });
     if (!report.ok) {
@@ -630,6 +638,26 @@ export const executeSlackIntent = async (
       });
       return {
         text: `Review \`${review.reviewId}\` for \`${review.prId}\` finished with status *${review.status}*.\n${review.summary}`,
+        projectId: project?.projectId,
+        backend: command.route.backend,
+      };
+    }
+    case 'models-list': {
+      const models = listRegisteredModels().slice(0, 12);
+      return {
+        text: models.length === 0
+          ? 'No models are registered yet.'
+          : ['*Model inventory*', ...models.map((entry) =>
+            `• ${entry.displayName} \`${entry.nodeId}\` · ${entry.backend} · ${entry.reasoningDepth}/${entry.speedTier}${entry.contextLength ? ` · ${entry.contextLength} ctx` : ''}`,
+          )].join('\n'),
+        projectId: project?.projectId,
+        backend: command.route.backend,
+      };
+    }
+    case 'models-refresh': {
+      const snapshot = refreshModelInventory();
+      return {
+        text: `Model inventory refreshed for \`${snapshot.nodeId}\` with ${snapshot.models.length} registered models.`,
         projectId: project?.projectId,
         backend: command.route.backend,
       };

@@ -1,8 +1,9 @@
 # AGENTS root instructions
 
-`SYSTEM_CANON.md` is the root canon for repository identity, boot order, continuity, scan -> seek -> find, handoffs, digests, and role rules. `SYSTEM_LAWS.md` is the numbered governance companion for enforcement-oriented runtime law. `SKILLS.md` documents the dynamic skill and specialized-agent registry surface. Runtime-branded adapters must remain thin and reversible.
+`SYSTEM_CANON.md` is the root canon for repository identity, boot order, continuity, scan -> seek -> find, handoffs, digests, and role rules. `SYSTEM_LAWS.md` is the numbered governance companion for enforcement-oriented runtime law. `SKILLS.md` documents the dynamic skill and specialized-agent registry surface. `MODEL-ROUTING.md` documents shared inventory refresh and role-to-model selection rules. Runtime-branded adapters must remain thin and reversible.
 
 The built-in `code-review-agent` is the canonical specialized reviewer for diff and PR analysis. Use the registered skill/agent flow and `DroidSwarm review run <pr-id>` rather than ad hoc review scripts when extending review automation.
+Use `DroidSwarm models refresh|status` and the shared model registry instead of bespoke llama inventory parsing when extending local model behavior.
 
 ## Nx commands (mandatory)
 

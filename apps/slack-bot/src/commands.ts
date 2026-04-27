@@ -11,6 +11,8 @@ export type SlackCommandKind =
   | 'law-approve'
   | 'law-override'
   | 'review-run'
+  | 'models-list'
+  | 'models-refresh'
   | 'skills-list'
   | 'skill-create'
   | 'skill-approve'
@@ -111,6 +113,14 @@ const parseSlashCommand = (text: string, route: ModelRouteDecision): ParsedSlack
 
   if (args[0] === 'skills' && args[1] === 'list') {
     return buildCommand(text, route, { kind: 'skills-list', args: [], source: 'slash' });
+  }
+
+  if (args[0] === 'models' && (args[1] === 'list' || args[1] === 'status')) {
+    return buildCommand(text, route, { kind: 'models-list', args: args.slice(2), source: 'slash' });
+  }
+
+  if (args[0] === 'models' && args[1] === 'refresh') {
+    return buildCommand(text, route, { kind: 'models-refresh', args: args.slice(2), source: 'slash' });
   }
 
   if (args[0] === 'law' && args[1] === 'propose' && args.length > 2) {
@@ -219,6 +229,14 @@ const parseNaturalLanguage = (text: string, route: ModelRouteDecision): ParsedSl
 
   if (/^(show|list)\s+skills\b/.test(lower)) {
     return buildCommand(text, route, { kind: 'skills-list', args: [], source: 'natural-language' });
+  }
+
+  if (/^(show|list)\s+models\b/.test(lower)) {
+    return buildCommand(text, route, { kind: 'models-list', args: [], source: 'natural-language' });
+  }
+
+  if (/^models\s+refresh$/i.test(trimmed)) {
+    return buildCommand(text, route, { kind: 'models-refresh', args: [], source: 'natural-language' });
   }
 
   const lawProposalMatch = trimmed.match(/^law\s+propose\s+(.+)$/i);
@@ -343,6 +361,7 @@ export const parseSlackIntent = (text: string, context?: SlackParseContext): Par
     'law',
     'override',
     'review',
+    'models',
   ].includes(args[0]?.toLowerCase() ?? '');
 
   if (trimmed.startsWith('/')) {
@@ -362,6 +381,8 @@ export const renderSlackCommandResponse = (command: ParsedSlackCommand): SlackCo
           '`/droid law status` shows law, consensus, and drift status.',
           '`/droid override <proposal-id>` forces a human override for a proposal.',
           '`/droid review <pr-id>` runs the code-review-agent on a branch or PR identifier.',
+          '`/droid models list` shows the shared model inventory.',
+          '`/droid models refresh` rescans local models and updates the registry.',
           '`/droid skills list` lists registered skills and specialized agents.',
           '`/droid skill create <name> [template]` scaffolds a new skill.',
           '`/droid agent create <name> <skill1,skill2> [priority]` creates a specialized agent.',
@@ -405,6 +426,14 @@ export const renderSlackCommandResponse = (command: ParsedSlackCommand): SlackCo
     case 'review-run':
       return {
         text: `Running a code review for \`${command.content ?? 'unknown'}\`.`,
+      };
+    case 'models-list':
+      return {
+        text: 'Listing registered models.',
+      };
+    case 'models-refresh':
+      return {
+        text: 'Refreshing local model inventory.',
       };
     case 'skills-list':
       return {

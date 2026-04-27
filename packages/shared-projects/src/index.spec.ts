@@ -23,6 +23,8 @@ import {
   resolveCurrentProjectFile,
   resolveProjectLookup,
   setCurrentProject,
+  listRegisteredModels,
+  upsertRegisteredModel,
   upsertRegisteredAgent,
   upsertCodeReviewRun,
   upsertRegisteredSkill,
@@ -160,5 +162,30 @@ describe('shared-projects registry', () => {
 
     assert.equal(listCodeReviewRuns()[0]?.reviewId, 'review-1');
     assert.equal(listCodeReviewRuns()[0]?.status, 'completed');
+  });
+
+  it('stores registered model inventory in the global registry', () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'droidswarm-model-registry-'));
+    tempDirs.push(home);
+    process.env.DROIDSWARM_HOME = home;
+
+    upsertRegisteredModel({
+      nodeId: 'node-a',
+      modelId: 'qwen2.5-coder-14b',
+      displayName: 'qwen2.5-coder-14b',
+      backend: 'local-llama',
+      path: '/models/qwen2.5-coder-14b.gguf',
+      quantization: 'Q4_K_M',
+      contextLength: 16_384,
+      sizeBytes: 1234,
+      toolUse: true,
+      reasoningDepth: 'high',
+      speedTier: 'balanced',
+      tags: ['code'],
+      metadata: { origin: 'test' },
+    });
+
+    assert.equal(listRegisteredModels({ nodeId: 'node-a' }).length, 1);
+    assert.equal(listRegisteredModels({ nodeId: 'node-a' })[0]?.modelId, 'qwen2.5-coder-14b');
   });
 });

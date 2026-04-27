@@ -3,6 +3,7 @@ import { BoardClient } from './BoardClient';
 import { CodeReviewsPanel } from './CodeReviewsPanel';
 import { GovernancePanel } from './GovernancePanel';
 import { LiveConnectionStatus } from './LiveConnectionStatus';
+import { ModelInventoryPanel } from './ModelInventoryPanel';
 import { ProvideInstructionsModal } from './ProvideInstructionsModal';
 import { OrchestrationInsights } from './OrchestrationInsights';
 import { SkillsRegistryPanel } from './SkillsRegistryPanel';
@@ -48,6 +49,7 @@ export function BoardShell({
       </section>
       <BoardClient username={username} tasks={tasks} />
       <GovernancePanel governance={insights.governance} />
+      <ModelInventoryPanel inventory={insights.modelInventory} />
       <SkillsRegistryPanel registry={insights.skillsRegistry} />
       <CodeReviewsPanel reviews={insights.codeReviews} />
       <OrchestrationInsights data={insights} />

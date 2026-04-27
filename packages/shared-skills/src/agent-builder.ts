@@ -41,6 +41,7 @@ export const createAgentManifest = (input: {
   consensusRoles?: AgentManifest['consensusRoles'];
   projectScoped?: boolean;
   affectsCoreBehavior?: boolean;
+  modelPreferences?: AgentManifest['modelPreferences'];
 }): AgentManifest => {
   const normalizedName = normalizeAgentName(input.name);
   const manifest = agentManifestSchema.parse({
@@ -55,6 +56,7 @@ export const createAgentManifest = (input: {
       preferredBackend: input.preferredBackend,
       modelTier: input.modelTier,
     },
+    modelPreferences: input.modelPreferences,
     consensusRoles: input.consensusRoles
       ?? (input.governanceParticipation === 'guardian'
         ? ['proposer', 'reviewer', 'verifier', 'guardian']

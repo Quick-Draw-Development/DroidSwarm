@@ -8,6 +8,7 @@ import {
   listLawProposals,
   validateCompliance,
 } from '@shared-governance';
+import { listRegisteredModels } from '@shared-models';
 import { listRegisteredSkillManifests, listSpecializedAgents } from '@shared-skills';
 import { listCodeReviewRuns } from '@shared-projects';
 
@@ -166,6 +167,30 @@ export default async function BoardPage({
           summary: entry.summary,
           findingsMarkdown: entry.findingsMarkdown,
           updatedAt: entry.updatedAt,
+        })),
+      };
+    })(),
+    modelInventory: (() => {
+      const models = listRegisteredModels().slice(0, 12);
+      const backendCounts = new Map<string, number>();
+      const nodes = new Set<string>();
+      for (const model of models) {
+        backendCounts.set(model.backend, (backendCounts.get(model.backend) ?? 0) + 1);
+        nodes.add(model.nodeId);
+      }
+      return {
+        totalModelCount: models.length,
+        nodeCount: nodes.size,
+        backends: [...backendCounts.entries()].map(([backend, count]) => ({ backend, count })),
+        models: models.map((model) => ({
+          nodeId: model.nodeId,
+          modelId: model.modelId,
+          displayName: model.displayName,
+          backend: model.backend,
+          reasoningDepth: model.reasoningDepth,
+          speedTier: model.speedTier,
+          contextLength: model.contextLength,
+          updatedAt: model.updatedAt,
         })),
       };
     })(),

@@ -8,6 +8,7 @@ import {
 } from 'node:crypto';
 
 import { envelopeV2Schema, type EnvelopeV2 } from '@shared-types';
+import type { UpsertRegisteredModelInput } from '@shared-projects';
 import { z } from 'zod';
 
 const heartbeatPayloadSchema = z.object({
@@ -40,6 +41,23 @@ const slaveRollCallPayloadSchema = z.object({
   publicKey: z.string().optional(),
   systemStateHash: z.string().optional(),
   capabilities: z.array(z.string()).default([]),
+  modelInventory: z.array(z.object({
+    nodeId: z.string().min(1),
+    modelId: z.string().min(1),
+    displayName: z.string().min(1),
+    backend: z.enum(['apple-intelligence', 'mlx', 'local-llama']),
+    path: z.string().optional(),
+    quantization: z.string().optional(),
+    contextLength: z.number().int().positive().optional(),
+    sizeBytes: z.number().int().positive().optional(),
+    toolUse: z.boolean().optional(),
+    reasoningDepth: z.enum(['low', 'medium', 'high']).optional(),
+    speedTier: z.enum(['fast', 'balanced', 'heavy']).optional(),
+    enabled: z.boolean().optional(),
+    tags: z.array(z.string()).default([]),
+    metadata: z.record(z.string(), z.unknown()).default({}),
+    source: z.enum(['local-scan', 'bootstrap-inventory', 'federation-sync', 'manual']).optional(),
+  })).default([]),
   role: z.literal('slave').default('slave'),
   ts: z.string().optional(),
 });
@@ -163,6 +181,8 @@ export interface FetchBusEventsResponse {
 
 export interface SlaveRollCallPayload extends z.infer<typeof slaveRollCallPayloadSchema> {}
 
+export interface FederationModelSnapshot extends UpsertRegisteredModelInput {}
+
 export interface SlaveWelcomeResponse {
   accepted: boolean;
   nodeId: string;
@@ -174,6 +194,7 @@ export interface SlaveWelcomeResponse {
   agentManifest?: Record<string, unknown>;
   systemStateHash?: string;
   projectId?: string;
+  modelInventory?: FederationModelSnapshot[];
   reason?: string;
 }
 

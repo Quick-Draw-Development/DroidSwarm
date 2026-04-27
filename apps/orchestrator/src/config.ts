@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { defaultGitPolicy } from '@shared-git';
 import { detectAppleSilicon, detectMlxRuntime } from '@model-router';
+import { refreshModelInventory, resolveModelInventoryCacheFile, resolveModelsRoot } from '@shared-models';
 
 import { loadSpecCards } from './specs';
 import type { FederationRemoteWorkerTarget, OrchestratorConfig, TaskPolicy } from './types';
@@ -187,29 +188,24 @@ export const loadConfig = (): OrchestratorConfig => {
   const droidswarmHome = process.env.DROIDSWARM_HOME ?? path.resolve(process.env.HOME ?? process.cwd(), '.droidswarm');
   const installDir = process.env.DROIDSWARM_INSTALL_DIR ?? path.resolve(droidswarmHome, 'install');
   const runtimeDir = process.env.DROIDSWARM_RUNTIME_DIR ?? path.resolve(installDir, 'runtime');
-  const modelsDir = process.env.DROIDSWARM_MODELS_DIR ?? path.resolve(droidswarmHome, 'models');
-  const llamaModelsFile = env.DROIDSWARM_LLAMA_MODELS_FILE ?? path.resolve(modelsDir, 'inventory.json');
-  const availableLlamaModels = (() => {
-    if (!fs.existsSync(llamaModelsFile)) {
-      return undefined;
-    }
-
-    try {
-      const payload = JSON.parse(fs.readFileSync(llamaModelsFile, 'utf8')) as {
-        models?: Array<{ id?: string; name?: string; tags?: string; path?: string; url?: string }>;
-      };
-      const models = Array.isArray(payload.models) ? payload.models : [];
-      const normalized = models
-        .filter((model): model is { id: string; name: string; tags?: string; path: string; url?: string } =>
-          typeof model.id === 'string'
-          && typeof model.name === 'string'
-          && typeof model.path === 'string')
-        .filter((model) => fs.existsSync(model.path));
-      return normalized.length > 0 ? normalized : undefined;
-    } catch {
-      return undefined;
-    }
-  })();
+  const modelsDir = resolveModelsRoot();
+  const llamaModelsFile = resolveModelInventoryCacheFile();
+  const modelInventory = refreshModelInventory({
+    nodeId: env.DROIDSWARM_FEDERATION_NODE_ID,
+    modelsRoot: modelsDir,
+    cacheFile: llamaModelsFile,
+    includeVirtualBackends: true,
+    persist: true,
+  });
+  const availableLlamaModels = modelInventory.models
+    .filter((model) => model.backend === 'local-llama' && typeof model.path === 'string')
+    .map((model) => ({
+      id: model.modelId,
+      name: model.displayName,
+      tags: model.tags.join(','),
+      path: model.path as string,
+      url: typeof model.metadata.url === 'string' ? model.metadata.url : undefined,
+    }));
   const host = env.DROIDSWARM_SOCKET_HOST ?? '127.0.0.1';
   const port = toPositiveInt(env.DROIDSWARM_SOCKET_PORT, 8765);
   const specDir = env.DROIDSWARM_SPECS_DIR ?? path.resolve(__dirname, '..', '..', '..', 'packages', 'bootstrap', 'specs');

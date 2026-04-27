@@ -1,7 +1,13 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { chooseBackend, chooseBackendDecision, detectAppleSilicon, detectMlxRuntime } from './index';
+import {
+  chooseBackend,
+  chooseBackendDecision,
+  detectAppleSilicon,
+  detectMlxRuntime,
+  selectModelForRole,
+} from './index';
 
 describe('model-router', () => {
   it('detects Apple silicon only on darwin arm64', () => {
@@ -60,5 +66,52 @@ describe('model-router', () => {
       taskType: 'embedding',
       contextLength: 18_000,
     }), 'mlx');
+  });
+
+  it('selects a strong review model from inventory when available', () => {
+    const decision = selectModelForRole({
+      role: 'code-review-agent',
+      inventory: [
+        {
+          nodeId: 'node-a',
+          modelId: 'small-fast',
+          displayName: 'qwen2.5-7b-q4',
+          backend: 'local-llama',
+          toolUse: true,
+          reasoningDepth: 'low',
+          speedTier: 'fast',
+          enabled: true,
+          tags: ['code'],
+          metadata: {},
+          source: 'local-scan',
+          lastSeenAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          contextLength: 8_192,
+        },
+        {
+          nodeId: 'node-a',
+          modelId: 'review-heavy',
+          displayName: 'qwen2.5-coder-32b-32k-q4',
+          backend: 'local-llama',
+          toolUse: true,
+          reasoningDepth: 'high',
+          speedTier: 'heavy',
+          enabled: true,
+          tags: ['review', 'code'],
+          metadata: {},
+          source: 'local-scan',
+          lastSeenAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          contextLength: 32_768,
+        },
+      ],
+      appleRuntimeAvailable: false,
+      mlxAvailable: false,
+    });
+
+    assert.equal(decision.model?.modelId, 'review-heavy');
+    assert.equal(decision.backend, 'local-llama');
   });
 });

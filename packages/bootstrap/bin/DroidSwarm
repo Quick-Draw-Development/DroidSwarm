@@ -72,6 +72,7 @@ Commands:
   nodes       List or kick federated slave nodes
   laws        Inspect and operate the governance law system
   governance  Governance status and role inspection shortcuts
+  models      Refresh and inspect model inventory
   skill       Create, build, approve, and list skill packs
   agent       Create, approve, and list specialized agents
   review      Run the code-review-agent on a branch or PR id
@@ -353,6 +354,19 @@ Usage:
 EOF
 }
 
+print_models_help() {
+  cat <<'EOF'
+Usage:
+  DroidSwarm models status [options]
+  DroidSwarm models refresh [options]
+
+Options:
+  --node-id ID
+  --backend BACKEND
+  --all
+EOF
+}
+
 print_skill_help() {
   cat <<'EOF'
 Usage:
@@ -389,6 +403,10 @@ run_shared_governance_cli() {
 
 run_shared_skills_cli() {
   node --import tsx "$ROOT_DIR/../shared-skills/src/cli.ts" "$@"
+}
+
+run_shared_models_cli() {
+  node --import tsx "$ROOT_DIR/../shared-models/src/cli.ts" "$@"
 }
 
 json_field() {
@@ -2371,6 +2389,30 @@ cmd_governance() {
   esac
 }
 
+cmd_models() {
+  local action="${1:-status}"
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
+
+  case "$action" in
+    status|list)
+      run_shared_models_cli status "$@"
+      ;;
+    refresh)
+      run_shared_models_cli refresh "$@"
+      ;;
+    help|-h|--help)
+      print_models_help
+      ;;
+    *)
+      err "Unknown models command: $action"
+      print_models_help
+      return 1
+      ;;
+  esac
+}
+
 cmd_review() {
   local action="${1:-run}"
   if [[ $# -gt 0 ]]; then
@@ -3289,6 +3331,9 @@ case "$COMMAND" in
     ;;
   governance)
     cmd_governance "$@"
+    ;;
+  models)
+    cmd_models "$@"
     ;;
   review)
     cmd_review "$@"

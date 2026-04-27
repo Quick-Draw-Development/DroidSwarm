@@ -293,6 +293,40 @@ test('runs a code review from slack commands', async () => {
   assert.match(result.text, /finished with status/i);
 });
 
+test('lists and refreshes models from slack commands', async () => {
+  const home = makeTempHome();
+  const modelsDir = path.join(home, 'models');
+  process.env.DROIDSWARM_HOME = home;
+  process.env.DROIDSWARM_MODELS_DIR = modelsDir;
+  process.env.DROIDSWARM_LLAMA_MODELS_FILE = path.join(modelsDir, 'inventory.json');
+  fs.mkdirSync(modelsDir, { recursive: true });
+  fs.writeFileSync(path.join(modelsDir, 'qwen2.5-coder-14b-16k-q4_k_m.gguf'), 'model');
+  onboardProject({
+    projectId: 'demo',
+    name: 'Demo',
+    rootPath: path.join(home, 'repo'),
+    dbPath: path.join(home, 'projects', 'demo', 'droidswarm.db'),
+    wsPort: 9999,
+  });
+
+  const refreshed = await handleSlackInput({
+    text: 'models refresh',
+    userId: 'U1',
+    username: 'alice',
+    channelId: 'C1',
+  }, baseConfig());
+  assert.match(refreshed.text, /Model inventory refreshed/i);
+
+  const listed = await handleSlackInput({
+    text: 'models list',
+    userId: 'U1',
+    username: 'alice',
+    channelId: 'C1',
+  }, baseConfig());
+  assert.match(listed.text, /Model inventory/i);
+  assert.match(listed.text, /qwen2\.5-coder-14b/i);
+});
+
 test('creates skill scaffolds and specialized agents from slack commands', async () => {
   const home = makeTempHome();
   process.env.DROIDSWARM_HOME = home;

@@ -39,6 +39,7 @@ export const ROUTE_KINDS = [
   'apple-local-saturated',
   'mythos-local',
   'mythos-local-throttled',
+  'ralph-persistent-loop',
   'coder-local',
   'coder-local-queued',
   'cloud-escalated',

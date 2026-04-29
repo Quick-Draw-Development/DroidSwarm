@@ -7,6 +7,7 @@ import { GovernancePanel } from './GovernancePanel';
 import { LiveConnectionStatus } from './LiveConnectionStatus';
 import { MemoryPanel } from './MemoryPanel';
 import { ModelInventoryPanel } from './ModelInventoryPanel';
+import { PersistentWorkersPanel } from './PersistentWorkersPanel';
 import { ProvideInstructionsModal } from './ProvideInstructionsModal';
 import { OrchestrationInsights } from './OrchestrationInsights';
 import { SkillsRegistryPanel } from './SkillsRegistryPanel';
@@ -54,6 +55,7 @@ export function BoardShell({
       <GovernancePanel governance={insights.governance} />
       <ModelInventoryPanel inventory={insights.modelInventory} />
       <CognitiveEnginesPanel engines={insights.cognitiveEngines} />
+      <PersistentWorkersPanel workers={insights.persistentWorkers} />
       <MemoryPanel memory={insights.longTermMemory} />
       <EvolutionPanel evolution={insights.evolution} />
       <SkillsRegistryPanel registry={insights.skillsRegistry} />

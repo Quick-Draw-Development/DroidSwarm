@@ -91,3 +91,18 @@ After completion, update AGENTS.md, SKILLS.md, and MODEL-ROUTING.md with Ralph w
 
 This addition gives DroidSwarm a powerful, battle-tested persistent iteration primitive that complements our existing reflection/evolution loop and makes long-running refinement tasks dramatically more reliable and efficient.
 Start with Phase 0.
+
+## Completion
+
+Completed on 2026-04-29.
+
+Implemented:
+
+- New `ralph-wiggum-worker` skill and persistent-loop agent manifests under `skills/ralph-wiggum-worker/` and `skills/agents/ralph-wiggum-worker.json`.
+- Shared Ralph session persistence in the global registry with lifecycle fields for running, paused, completed, halted, and failed loops.
+- A real Ralph loop engine in `packages/shared-skills/src/ralph-loop.ts` with fresh-context iterations, long-term memory recall, pause/resume, governance gating, Droidspeak audit events, and detached/background execution support.
+- Routing heuristics for long-horizon, self-correcting, polishing, and recovery work so the router marks these tasks as `ralph-persistent-loop` when `DROIDSWARM_ENABLE_RALPH=true`.
+- Orchestrator supervisor support for launching Ralph as a persistent process instead of a one-shot worker.
+- Operator surfaces for `DroidSwarm ralph ...`, Slack `ralph start|status`, and a dashboard Persistent Workers panel plus API route.
+
+Validation completed with Nx typechecks/tests for the touched packages/apps and `bash -n packages/bootstrap/bin/DroidSwarm`.

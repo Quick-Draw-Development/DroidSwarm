@@ -8,6 +8,7 @@ DroidSwarm keeps model inventory in the shared registry and per-node cache. `pac
 - `planner`, `researcher`, `checkpoint` roles: prefer high-reasoning models with balanced speed and larger context.
 - `verifier`, `guardian` roles: prefer faster low-latency models unless explicit context pressure requires a larger one.
 - Deep recurrent reasoning, long-horizon review, governance, and evolution tasks prefer `openmythos` when `DROIDSWARM_ENABLE_MYTHOS=true` and the runtime is available.
+- When `DROIDSWARM_ENABLE_RALPH=true`, long-horizon/self-correcting/polishing/recovery tasks with expected iteration counts above 8 are marked for the `ralph-wiggum-worker` persistent loop instead of one-shot local planning.
 - Apple ecosystem work still prefers `apple-intelligence` first on `darwin/arm64` when the runtime is enabled.
 - If OpenMythos is unavailable, Apple runtime is preferred first on Apple Silicon, then MLX for heavy local contexts, then `local-llama`.
 
@@ -23,6 +24,18 @@ DroidSwarm keeps model inventory in the shared registry and per-node cache. `pac
 - recurrent-depth preference for `openmythos`
 
 The router first evaluates the preferred backend, then falls back to the best available model across the full inventory if that backend has no suitable match.
+
+## Ralph Routing
+
+Ralph selection is driven by routing signals rather than a separate backend:
+
+- `expected_iterations > 8`
+- `self_correction_needed = true`
+- `long_horizon = true`
+- `polishing_phase = true`
+- `failure_recovery_mode = true`
+
+When these signals are present and Ralph is enabled, the routing layer emits `routeKind = ralph-persistent-loop`, attaches the `ralph-wiggum-worker` skill pack, and keeps execution local-first with the best available backend for each iteration.
 
 ## Inventory Flow
 

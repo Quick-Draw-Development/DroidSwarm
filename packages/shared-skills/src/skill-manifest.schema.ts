@@ -32,7 +32,9 @@ export const agentManifestSchema = z.object({
   name: z.string().min(1),
   version: z.string().min(1).default('0.1.0'),
   description: z.string().min(1),
+  type: z.enum(['specialized', 'persistent-loop']).default('specialized'),
   skills: z.array(z.string().min(1)).min(1),
+  capabilities: z.array(z.string()).default([]),
   priority: z.enum(['low', 'medium', 'high']).default('medium'),
   projectScoped: z.boolean().default(false),
   affectsCoreBehavior: z.boolean().default(false),
@@ -47,6 +49,11 @@ export const agentManifestSchema = z.object({
     maxConcurrentTasks: z.number().int().positive().optional(),
     maxTokens: z.number().int().positive().optional(),
   }).default({}),
+  loopConfig: z.object({
+    maxIterations: z.number().int().positive(),
+    completionSignal: z.string().min(1),
+    sleepMs: z.number().int().nonnegative(),
+  }).optional(),
 });
 
 export type SkillVerbManifest = z.infer<typeof skillVerbSchema>;

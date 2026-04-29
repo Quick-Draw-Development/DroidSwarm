@@ -43,6 +43,13 @@ Run the dedicated code review agent:
 DroidSwarm review run feature/my-branch
 ```
 
+Start a persistent Ralph worker for long-horizon refinement:
+
+```bash
+DroidSwarm ralph start "polish the release candidate until <RALPH_DONE>"
+DroidSwarm ralph status
+```
+
 The built-in `code-review-agent` skill is registered from `skills/code-review-agent/` and exposes:
 
 - PR description validation
@@ -51,6 +58,13 @@ The built-in `code-review-agent` skill is registered from `skills/code-review-ag
 - security and performance heuristics
 - categorized markdown review output
 - consensus-aware audit records when critical paths are touched
+
+The built-in `ralph-wiggum-worker` skill is registered from `skills/ralph-wiggum-worker/` and exposes:
+
+- persistent iterative refinement with fresh context windows
+- external long-term-memory recall on every pass
+- governed pause, halt, and completion semantics
+- Droidspeak `RALPH_ITERATION`, `RALPH_DONE`, and `RALPH_PAUSE` events
 
 ## Governed Evolution
 

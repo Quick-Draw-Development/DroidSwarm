@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test';
+import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
@@ -8,6 +8,12 @@ import {
   detectMlxRuntime,
   selectModelForRole,
 } from './index';
+
+const ORIGINAL_ENV = { ...process.env };
+
+afterEach(() => {
+  process.env = { ...ORIGINAL_ENV };
+});
 
 describe('model-router', () => {
   it('detects Apple silicon only on darwin arm64', () => {
@@ -80,6 +86,21 @@ describe('model-router', () => {
 
     assert.equal(decision.backend, 'openmythos');
     assert.match(decision.reason, /OpenMythos/i);
+  });
+
+  it('marks long-horizon self-correcting work for the Ralph worker loop', () => {
+    process.env.DROIDSWARM_ENABLE_RALPH = 'true';
+    const decision = chooseBackendDecision({
+      summary: 'Need iterative polishing and recovery after previous failures.',
+      taskType: 'review-follow-up',
+      iterationCountExpected: 12,
+      selfCorrectionNeeded: true,
+      longHorizon: true,
+      polishingPhase: true,
+      failureRecoveryMode: true,
+    });
+
+    assert.equal(decision.preferRalphWorker, true);
   });
 
   it('selects a strong review model from inventory when available', () => {

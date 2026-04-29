@@ -1,0 +1,48 @@
+{
+  "name": "ralph-wiggum-worker",
+  "version": "0.1.0",
+  "description": "Persistent long-horizon refinement agent that keeps revisiting a goal using fresh context windows and shared memory.",
+  "type": "persistent-loop",
+  "skills": [
+    "ralph-wiggum-worker"
+  ],
+  "capabilities": [
+    "iterative-refinement",
+    "self-correction",
+    "long-horizon"
+  ],
+  "priority": "high",
+  "projectScoped": false,
+  "affectsCoreBehavior": false,
+  "modelRouting": {
+    "preferredBackend": "openmythos",
+    "modelTier": "local-capable"
+  },
+  "modelPreferences": {
+    "backend": "openmythos",
+    "reasoningDepth": "high",
+    "minContextLength": 16000,
+    "toolUse": true,
+    "speedPriority": "throughput",
+    "tags": [
+      "persistent",
+      "iterative",
+      "polish"
+    ]
+  },
+  "consensusRoles": [
+    "proposer",
+    "reviewer",
+    "verifier",
+    "guardian"
+  ],
+  "governanceParticipation": "participant",
+  "resourceQuotas": {
+    "maxConcurrentTasks": 1
+  },
+  "loopConfig": {
+    "maxIterations": 50,
+    "completionSignal": "<RALPH_DONE>",
+    "sleepMs": 5000
+  }
+}

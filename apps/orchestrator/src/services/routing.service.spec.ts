@@ -1,8 +1,14 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { afterEach, describe, it } from 'node:test';
 
 import { getSwarmRoleDefinition, normalizeSwarmRole } from '@shared-routing';
 import { RoutingService } from './routing.service';
+
+const ORIGINAL_ENV = { ...process.env };
+
+afterEach(() => {
+  process.env = { ...ORIGINAL_ENV };
+});
 
 const service = new RoutingService({
   modelRouting: {
@@ -234,6 +240,30 @@ describe('RoutingService', () => {
     assert.equal(decision.engine, 'apple-intelligence');
     assert.equal(decision.routeKind, 'planner-local-saturated');
     assert.equal(decision.cloudEscalated, false);
+  });
+
+  it('routes long-horizon self-correcting work to the Ralph persistent loop', () => {
+    process.env.DROIDSWARM_ENABLE_RALPH = 'true';
+    const decision = service.decide({
+      taskId: 'task-ralph',
+      runId: 'run-1',
+      name: 'Polish release candidate',
+      status: 'queued',
+      priority: 'high',
+      metadata: {
+        task_type: 'review_follow_up',
+        description: 'Iteratively refine and self-correct the release candidate over many passes.',
+        expected_iterations: 12,
+        self_correction_needed: true,
+        long_horizon: true,
+        polishing_phase: true,
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }, 'ralph-wiggum-worker');
+
+    assert.equal(decision.routeKind, 'ralph-persistent-loop');
+    assert.equal(decision.skillPacks?.[0], 'ralph-wiggum-worker');
   });
 
   it('escalates coding work to cloud only when cloud is allowed and local capacity is saturated', () => {

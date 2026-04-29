@@ -11,7 +11,7 @@ import {
 import { getModelLifecycleStatus, listDiscoveredModels, listRegisteredModels } from '@shared-models';
 import { listLongTermMemories } from '@shared-memory';
 import { getEvolutionStatus, listRegisteredSkillManifests, listSpecializedAgents } from '@shared-skills';
-import { listCodeReviewRuns } from '@shared-projects';
+import { listCodeReviewRuns, listRalphWorkerSessions } from '@shared-projects';
 
 import { BoardShell } from '../../components/BoardShell';
 import { ProjectSwitcher } from '../../components/project-switcher';
@@ -220,6 +220,26 @@ export default async function BoardPage({
           loopCount: typeof entry.metadata.loopCount === 'number' ? entry.metadata.loopCount : undefined,
           driftScore: typeof entry.metadata.driftScore === 'number' ? entry.metadata.driftScore : undefined,
           pid: typeof entry.metadata.pid === 'number' ? entry.metadata.pid : undefined,
+          updatedAt: entry.updatedAt,
+        })),
+      };
+    })(),
+    persistentWorkers: (() => {
+      const sessions = listRalphWorkerSessions({ projectId: selectedProjectId }).slice(0, 8);
+      return {
+        activeCount: sessions.filter((entry) => entry.status === 'running').length,
+        pausedCount: sessions.filter((entry) => entry.status === 'paused').length,
+        completedCount: sessions.filter((entry) => entry.status === 'completed').length,
+        sessions: sessions.map((entry) => ({
+          sessionId: entry.sessionId,
+          projectId: entry.projectId,
+          workerName: entry.workerName,
+          status: entry.status,
+          iterationCount: entry.iterationCount,
+          maxIterations: entry.maxIterations,
+          goal: entry.goal,
+          routeKind: entry.routeKind,
+          engine: entry.engine,
           updatedAt: entry.updatedAt,
         })),
       };

@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { ChildProcess, fork } from 'node:child_process';
+import path from 'node:path';
+import { ChildProcess, fork, spawn } from 'node:child_process';
 
 import { getSwarmRoleDefinition } from '@shared-routing';
+import { startRalphWorker } from '@shared-skills';
 import { WorkerRegistry } from './worker-registry';
 import type {
   CompactVerb,
@@ -31,6 +33,9 @@ interface ActiveAgent {
   attemptId: string;
 }
 
+const resolveRalphCliPath = (workspaceRoot: string): string =>
+  path.resolve(workspaceRoot, 'packages/shared-skills/src/cli.ts');
+
 export interface AgentLaunchOptions {
   engine?: WorkerEngine;
   scope?: TaskScope;
@@ -53,12 +58,23 @@ export interface AgentLaunchOptions {
 
 export const defaultRoleInstructions = (task: TaskRecord): RequestedAgent[] => {
   const normalizedType = task.taskType.toLowerCase();
+  const combined = `${task.title} ${task.description} ${task.taskType}`.toLowerCase();
+  const prefersRalph = ['1', 'true', 'yes', 'on'].includes((process.env.DROIDSWARM_ENABLE_RALPH ?? '').toLowerCase())
+    && /long-horizon|iterative|self-correct|refine|polish|recovery|synthesis/.test(combined);
   if (normalizedType === 'bug') {
     const role = getSwarmRoleDefinition('bugfix-helper').id;
     return [{
       role,
       reason: 'bug-triage',
       instructions: `Investigate and fix the reported bug in task ${task.taskId}.`,
+    }];
+  }
+
+  if (prefersRalph) {
+    return [{
+      role: 'ralph-wiggum-worker',
+      reason: 'persistent-loop',
+      instructions: `Iteratively refine task ${task.taskId} using fresh context windows and durable memory until <RALPH_DONE>.`,
     }];
   }
 
@@ -107,44 +123,73 @@ export class AgentSupervisor {
     const agentName = this.nextAgentName(role);
     const mode = role === 'tester' ? 'verifier' : 'worker';
     const executionTarget = this.selectExecutionTarget(role, options?.engine, options?.modelTier);
-    const child = fork(this.entryScript, [mode, JSON.stringify({
-      task,
-      role,
-      agentName,
-      attemptId,
-      parentSummary,
-      parentDroidspeak,
-      model,
-      engine: options?.engine,
-      scope: options?.scope,
-      skillPacks: options?.skillPacks,
-      skillTexts: options?.skillTexts,
-      readOnly: options?.readOnly,
-      instructions: options?.instructions,
-      workspacePath: options?.workspacePath,
-      taskDigest: options?.taskDigest,
-      handoffPacket: options?.handoffPacket,
-      modelTier: options?.modelTier,
-      routingTelemetry: options?.routingTelemetry,
-      requiredReads: options?.requiredReads,
-      compactVerbDictionary: options?.compactVerbDictionary,
-    })], {
-      env: {
-        ...process.env,
-        DROIDSWARM_AGENT_ROLE: role,
-        ...(options?.governance?.consensusId ? { DROIDSWARM_CONSENSUS_ID: options.governance.consensusId } : {}),
-        ...(options?.governance?.assignmentType ? { DROIDSWARM_GOVERNANCE_ASSIGNMENT_TYPE: options.governance.assignmentType } : {}),
-        ...(executionTarget
-          ? {
-            DROIDSWARM_FEDERATION_REMOTE_SERIAL: executionTarget.serial,
-            DROIDSWARM_FEDERATION_REMOTE_ENTRY: executionTarget.remoteEntry,
-            DROIDSWARM_FEDERATION_REMOTE_COMMAND: executionTarget.remoteCommand ?? 'node',
-            ...(executionTarget.workspaceRoot ? { DROIDSWARM_FEDERATION_REMOTE_WORKSPACE_ROOT: executionTarget.workspaceRoot } : {}),
-          }
-          : {}),
-      },
-      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-    });
+    const child = role === 'ralph-wiggum-worker'
+      ? (() => {
+        const session = startRalphWorker({
+          projectId: options?.scope?.projectId ?? this.config.projectId,
+          goal: options?.instructions ?? task.description,
+          workerName: agentName,
+          loopConfig: {
+            maxIterations: 50,
+            completionSignal: '<RALPH_DONE>',
+            sleepMs: 5_000,
+          },
+          metadata: {
+            taskId: task.taskId,
+            attemptId,
+            model,
+            longHorizon: true,
+            expectedIterations: 12,
+          },
+          spawnDetached: false,
+        });
+        return spawn(process.execPath, ['--import', 'tsx', resolveRalphCliPath(this.config.workspaceRoot), 'ralph-run', '--session-id', session.sessionId], {
+          cwd: this.config.workspaceRoot,
+          env: {
+            ...process.env,
+            DROIDSWARM_AGENT_ROLE: role,
+          },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+      })()
+      : fork(this.entryScript, [mode, JSON.stringify({
+        task,
+        role,
+        agentName,
+        attemptId,
+        parentSummary,
+        parentDroidspeak,
+        model,
+        engine: options?.engine,
+        scope: options?.scope,
+        skillPacks: options?.skillPacks,
+        skillTexts: options?.skillTexts,
+        readOnly: options?.readOnly,
+        instructions: options?.instructions,
+        workspacePath: options?.workspacePath,
+        taskDigest: options?.taskDigest,
+        handoffPacket: options?.handoffPacket,
+        modelTier: options?.modelTier,
+        routingTelemetry: options?.routingTelemetry,
+        requiredReads: options?.requiredReads,
+        compactVerbDictionary: options?.compactVerbDictionary,
+      })], {
+        env: {
+          ...process.env,
+          DROIDSWARM_AGENT_ROLE: role,
+          ...(options?.governance?.consensusId ? { DROIDSWARM_CONSENSUS_ID: options.governance.consensusId } : {}),
+          ...(options?.governance?.assignmentType ? { DROIDSWARM_GOVERNANCE_ASSIGNMENT_TYPE: options.governance.assignmentType } : {}),
+          ...(executionTarget
+            ? {
+              DROIDSWARM_FEDERATION_REMOTE_SERIAL: executionTarget.serial,
+              DROIDSWARM_FEDERATION_REMOTE_ENTRY: executionTarget.remoteEntry,
+              DROIDSWARM_FEDERATION_REMOTE_COMMAND: executionTarget.remoteCommand ?? 'node',
+              ...(executionTarget.workspaceRoot ? { DROIDSWARM_FEDERATION_REMOTE_WORKSPACE_ROOT: executionTarget.workspaceRoot } : {}),
+            }
+            : {}),
+        },
+        stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+      });
 
     child.stdout?.setEncoding('utf8');
     child.stdout?.on('data', (chunk) => {

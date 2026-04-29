@@ -35,6 +35,8 @@ import {
   proposeSkillEvolution,
   runCodeReview,
   resolveSkillsRoot,
+  listRalphWorkers,
+  startRalphWorker,
 } from '@shared-skills';
 import { searchLongTermMemories } from '@shared-memory';
 import {
@@ -781,6 +783,45 @@ export const executeSlackIntent = async (
       });
       return {
         text: `Created governed evolution proposal \`${proposal.proposalId}\` with status *${proposal.status}*.`,
+        projectId: project?.projectId,
+        backend: command.route.backend,
+      };
+    }
+    case 'ralph-start': {
+      if (!project) {
+        return {
+          text: 'Select a project before starting a Ralph worker.',
+          backend: command.route.backend,
+        };
+      }
+      const goal = command.content?.trim();
+      if (!goal) {
+        return {
+          text: 'Missing Ralph worker goal.',
+          backend: command.route.backend,
+        };
+      }
+      const session = startRalphWorker({
+        projectId: project.projectId,
+        goal,
+        workerName: `slack-ralph-${user.username}`,
+      });
+      return {
+        text: `Started Ralph worker \`${session.workerName}\` for project \`${project.projectId}\` with session \`${session.sessionId}\`.`,
+        projectId: project.projectId,
+        backend: command.route.backend,
+      };
+    }
+    case 'ralph-status': {
+      const sessions = listRalphWorkers(project?.projectId).slice(0, 6);
+      return {
+        text: sessions.length === 0
+          ? 'No Ralph worker sessions are active.'
+          : [
+            '*Ralph worker sessions*',
+            ...sessions.map((session) =>
+              `• \`${session.sessionId}\` ${session.status} · ${session.iterationCount}/${session.maxIterations} · ${session.goal}`),
+          ].join('\n'),
         projectId: project?.projectId,
         backend: command.route.backend,
       };

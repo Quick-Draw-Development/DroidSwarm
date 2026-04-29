@@ -197,6 +197,7 @@ export interface OrchestrationInsightsData {
   codeReviews?: CodeReviewSummary;
   modelInventory?: ModelInventorySummary;
   cognitiveEngines?: CognitiveEnginesSummary;
+  persistentWorkers?: PersistentWorkersSummary;
   longTermMemory?: LongTermMemorySummary;
   evolution?: SkillEvolutionSummary;
 }
@@ -336,6 +337,24 @@ export interface CognitiveEnginesSummary {
     loopCount?: number;
     driftScore?: number;
     pid?: number;
+    updatedAt: string;
+  }>;
+}
+
+export interface PersistentWorkersSummary {
+  activeCount: number;
+  pausedCount: number;
+  completedCount: number;
+  sessions: Array<{
+    sessionId: string;
+    projectId: string;
+    workerName: string;
+    status: string;
+    iterationCount: number;
+    maxIterations: number;
+    goal: string;
+    routeKind?: string;
+    engine?: string;
     updatedAt: string;
   }>;
 }

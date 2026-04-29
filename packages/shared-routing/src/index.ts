@@ -11,6 +11,11 @@ export interface RoutingContext {
   taskType?: string;
   stage?: string;
   summary?: string;
+  iterationCountExpected?: number;
+  selfCorrectionNeeded?: boolean;
+  longHorizon?: boolean;
+  polishingPhase?: boolean;
+  failureRecoveryMode?: boolean;
   readOnly?: boolean;
   allowCloud?: boolean;
   queueDepth?: number;
@@ -54,6 +59,11 @@ export class RoutingService {
       stage,
       summary: context.summary,
       contextLength: context.summary?.length,
+      iterationCountExpected: context.iterationCountExpected,
+      selfCorrectionNeeded: context.selfCorrectionNeeded,
+      longHorizon: context.longHorizon,
+      polishingPhase: context.polishingPhase,
+      failureRecoveryMode: context.failureRecoveryMode,
       appleRuntimeAvailable: appleEnabled,
       mlxAvailable: context.mlxAvailable,
       mythosAvailable: context.mythosAvailable,
@@ -137,6 +147,37 @@ export class RoutingService {
         cloudEscalated: false,
       });
     };
+
+    if (localModelDecision.preferRalphWorker) {
+      return this.auditDecision(context, {
+        engine: localModelDecision.backend === 'openmythos'
+          ? 'openmythos'
+          : localModelDecision.backend === 'mlx'
+            ? 'mlx'
+            : localModelDecision.backend === 'apple-intelligence'
+              ? 'apple-intelligence'
+              : 'local-llama',
+        model: localModelDecision.backend === 'openmythos'
+          ? 'openmythos/local'
+          : localModelDecision.backend === 'mlx'
+            ? 'mlx/local'
+            : localModelDecision.backend === 'apple-intelligence'
+              ? 'apple-intelligence/local'
+              : 'llama.cpp/planner',
+        modelTier: 'local-capable',
+        routeKind: 'ralph-persistent-loop',
+        reason: `Persistent refinement signals detected; routing to the Ralph Wiggum worker loop. ${localModelDecision.reason}`,
+        role: context.role,
+        readOnly,
+        complexity: complexity === 'low' ? 'medium' : complexity,
+        confidence: 0.88,
+        skillPacks: ['ralph-wiggum-worker'],
+        queueDepth,
+        fallbackCount,
+        localFirst,
+        cloudEscalated: false,
+      });
+    }
 
     if (
       roleDefinition.id === 'planner'

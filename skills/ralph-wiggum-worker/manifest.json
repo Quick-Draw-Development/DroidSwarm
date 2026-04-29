@@ -1,0 +1,45 @@
+{
+  "name": "ralph-wiggum-worker",
+  "version": "0.1.0",
+  "description": "Persistent iterative refinement worker that revisits the same goal with fresh context windows and durable memory.",
+  "capabilities": [
+    "iterative-refinement",
+    "self-correction",
+    "long-horizon"
+  ],
+  "requiredBackends": [
+    "openmythos",
+    "local-llama",
+    "mlx"
+  ],
+  "droidspeakVerbs": [
+    {
+      "code": "RALPH_ITERATION",
+      "label": "Ralph worker iteration"
+    },
+    {
+      "code": "RALPH_DONE",
+      "label": "Ralph worker complete"
+    },
+    {
+      "code": "RALPH_PAUSE",
+      "label": "Ralph worker paused"
+    }
+  ],
+  "projectScoped": false,
+  "affectsCoreBehavior": false,
+  "entry": "index.ts",
+  "instructionsFile": "SKILL.md",
+  "modelPreferences": {
+    "backend": "openmythos",
+    "reasoningDepth": "high",
+    "minContextLength": 16000,
+    "toolUse": true,
+    "speedPriority": "throughput",
+    "tags": [
+      "persistent",
+      "iterative",
+      "refinement"
+    ]
+  }
+}

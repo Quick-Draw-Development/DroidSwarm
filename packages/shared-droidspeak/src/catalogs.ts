@@ -74,7 +74,10 @@ export const DROIDSPEAK_CATALOGS = {
     'MYTHOS_THINK': 'OpenMythos Think',
     'MYTHOS_LOOP': 'OpenMythos Loop',
     'MYTHOS_STATUS': 'OpenMythos Status',
-    'MYTHOS_DRIFT': 'OpenMythos Drift'
+    'MYTHOS_DRIFT': 'OpenMythos Drift',
+    'RALPH_ITERATION': 'Ralph Iteration',
+    'RALPH_DONE': 'Ralph Complete',
+    'RALPH_PAUSE': 'Ralph Pause'
   },
   
   // D11: Promotion (8 entries)

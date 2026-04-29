@@ -18,6 +18,8 @@ export type SlackCommandKind =
   | 'models-refresh'
   | 'mythos-status'
   | 'mythos-loops'
+  | 'ralph-start'
+  | 'ralph-status'
   | 'memory-search'
   | 'evolve-status'
   | 'evolve-propose'
@@ -157,6 +159,19 @@ const parseSlashCommand = (text: string, route: ModelRouteDecision): ParsedSlack
       kind: 'mythos-loops',
       args: args.slice(2),
       content: `${args[2]} ${args[3]}`,
+      source: 'slash',
+    });
+  }
+
+  if (args[0] === 'ralph' && args[1] === 'status') {
+    return buildCommand(text, route, { kind: 'ralph-status', args: [], source: 'slash' });
+  }
+
+  if (args[0] === 'ralph' && args[1] === 'start' && args.length > 2) {
+    return buildCommand(text, route, {
+      kind: 'ralph-start',
+      args: args.slice(2),
+      content: trimmed.replace(/^ralph\s+start\s+/i, ''),
       source: 'slash',
     });
   }
@@ -321,6 +336,20 @@ const parseNaturalLanguage = (text: string, route: ModelRouteDecision): ParsedSl
     return buildCommand(text, route, { kind: 'mythos-status', args: [], source: 'natural-language' });
   }
 
+  if (/^ralph\s+status$/i.test(trimmed)) {
+    return buildCommand(text, route, { kind: 'ralph-status', args: [], source: 'natural-language' });
+  }
+
+  const ralphStartMatch = trimmed.match(/^ralph\s+start\s+(.+)$/i);
+  if (ralphStartMatch?.[1]) {
+    return buildCommand(text, route, {
+      kind: 'ralph-start',
+      args: tokenize(ralphStartMatch[1]),
+      content: ralphStartMatch[1],
+      source: 'natural-language',
+    });
+  }
+
   const mythosLoopsMatch = trimmed.match(/^mythos\s+loops\s+([a-z0-9-]+)\s+(\d+)$/i);
   if (mythosLoopsMatch?.[1] && mythosLoopsMatch[2]) {
     return buildCommand(text, route, {
@@ -479,6 +508,7 @@ export const parseSlackIntent = (text: string, context?: SlackParseContext): Par
     'review',
     'models',
     'mythos',
+    'ralph',
     'memory',
     'evolve',
   ].includes(args[0]?.toLowerCase() ?? '');
@@ -507,6 +537,8 @@ export const renderSlackCommandResponse = (command: ParsedSlackCommand): SlackCo
           '`/droid models refresh` rescans local models and updates the registry.',
           '`/droid mythos status` shows OpenMythos spectral and loop status.',
           '`/droid mythos loops <engine-id> <count>` overrides recurrent loop count for a local Mythos runtime.',
+          '`/droid ralph start <goal>` starts a persistent Ralph worker loop.',
+          '`/droid ralph status` shows active Ralph worker sessions.',
           '`/droid memory search <query>` searches long-term memory.',
           '`/droid evolve status` shows pending governed skill evolution proposals.',
           '`/droid evolve run [skill]` generates a governed evolution proposal.',
@@ -582,6 +614,14 @@ export const renderSlackCommandResponse = (command: ParsedSlackCommand): SlackCo
     case 'mythos-loops':
       return {
         text: `Updating OpenMythos loop count for \`${command.content ?? 'unknown'}\`.`,
+      };
+    case 'ralph-start':
+      return {
+        text: `Starting Ralph worker for \`${command.content ?? 'unknown'}\`.`,
+      };
+    case 'ralph-status':
+      return {
+        text: 'Fetching Ralph worker status.',
       };
     case 'memory-search':
       return {

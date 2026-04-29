@@ -6,6 +6,7 @@ The built-in `code-review-agent` is the canonical specialized reviewer for diff 
 Use `DroidSwarm models refresh|status` and the shared model registry instead of bespoke llama inventory parsing when extending local model behavior.
 Use the shared Hermes surfaces for durable memory and skill evolution: `DroidSwarm memory ...` for retrieval/pruning and `DroidSwarm evolve ...` for governed reflection proposals. If `DROIDSWARM_ENABLE_HERMES_LOOP=true` is enabled, treat reflected memory and evolution proposals as first-class operator surfaces rather than ad hoc local state.
 Use `DroidSwarm engines mythos ...` and the shared Mythos runtime registry for recurrent-engine work. If `DROIDSWARM_ENABLE_MYTHOS=true` is enabled, LAW-099 spectral stability checks and Mythos inventory metadata are the canonical source of truth for deep-reasoning execution.
+Use `DroidSwarm ralph ...` and the shared Ralph session registry for persistent iterative work. If `DROIDSWARM_ENABLE_RALPH=true` is enabled, long-horizon refinement and self-correction tasks should route through the `ralph-wiggum-worker` flow rather than accumulating ever-larger one-shot prompts.
 
 ## Nx commands (mandatory)
 

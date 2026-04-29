@@ -16,6 +16,7 @@ import {
   listRegisteredAgents,
   listRegisteredSkills,
   listRegisteredProjects,
+  listRalphWorkerSessions,
   markFederatedNodeKicked,
   migrateLegacyProject,
   onboardProject,
@@ -31,6 +32,7 @@ import {
   upsertSkillEvolutionProposal,
   upsertRegisteredModel,
   upsertRegisteredAgent,
+  upsertRalphWorkerSession,
   upsertCodeReviewRun,
   upsertRegisteredSkill,
 } from './index';
@@ -167,6 +169,26 @@ describe('shared-projects registry', () => {
 
     assert.equal(listCodeReviewRuns()[0]?.reviewId, 'review-1');
     assert.equal(listCodeReviewRuns()[0]?.status, 'completed');
+  });
+
+  it('stores Ralph worker sessions in the global registry', () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'droidswarm-ralph-sessions-'));
+    tempDirs.push(home);
+    process.env.DROIDSWARM_HOME = home;
+
+    upsertRalphWorkerSession({
+      sessionId: 'ralph-1',
+      projectId: 'demo',
+      workerName: 'ralph-wiggum-worker-1',
+      goal: 'Refine the release checklist.',
+      status: 'running',
+      iterationCount: 3,
+      maxIterations: 12,
+      metadata: { routeKind: 'ralph-persistent-loop' },
+    });
+
+    assert.equal(listRalphWorkerSessions({ projectId: 'demo' })[0]?.sessionId, 'ralph-1');
+    assert.equal(listRalphWorkerSessions({ projectId: 'demo' })[0]?.iterationCount, 3);
   });
 
   it('stores registered model inventory in the global registry', () => {

@@ -357,6 +357,36 @@ test('reports and updates mythos runtime state from slack commands', async () =>
   assert.match(loops.text, /loop count set to 12/i);
 });
 
+test('starts and lists Ralph worker sessions from slack commands', async () => {
+  const home = makeTempHome();
+  process.env.DROIDSWARM_HOME = home;
+  process.env.DROIDSWARM_ENABLE_RALPH = 'true';
+  process.env.DROIDSWARM_RALPH_SPAWN_DETACHED = '0';
+  onboardProject({
+    projectId: 'demo',
+    name: 'Demo',
+    rootPath: path.join(home, 'repo'),
+    dbPath: path.join(home, 'projects', 'demo', 'droidswarm.db'),
+    wsPort: 9999,
+  });
+
+  const started = await handleSlackInput({
+    text: 'ralph start polish the code review follow-up and keep iterating',
+    userId: 'U1',
+    username: 'alice',
+    channelId: 'C1',
+  }, baseConfig());
+  assert.match(started.text, /Started Ralph worker/i);
+
+  const status = await handleSlackInput({
+    text: 'ralph status',
+    userId: 'U1',
+    username: 'alice',
+    channelId: 'C1',
+  }, baseConfig());
+  assert.match(status.text, /Ralph worker sessions/i);
+});
+
 test('creates skill scaffolds and specialized agents from slack commands', async () => {
   const home = makeTempHome();
   process.env.DROIDSWARM_HOME = home;

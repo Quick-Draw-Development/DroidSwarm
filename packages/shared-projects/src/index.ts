@@ -260,6 +260,54 @@ export interface UpsertCodeReviewRunInput {
   auditHash?: string;
 }
 
+export interface RalphWorkerSessionRecord {
+  sessionId: string;
+  projectId: string;
+  workerName: string;
+  goal: string;
+  status: 'running' | 'paused' | 'completed' | 'halted' | 'failed';
+  iterationCount: number;
+  maxIterations: number;
+  completionSignal: string;
+  sleepMs: number;
+  engine?: string;
+  routeKind?: string;
+  assignedNodeId?: string;
+  currentTask?: string;
+  lastSummary?: string;
+  lastError?: string;
+  governanceConsensusId?: string;
+  metadata: Record<string, unknown>;
+  startedAt: string;
+  pausedAt?: string;
+  completedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertRalphWorkerSessionInput {
+  sessionId: string;
+  projectId: string;
+  workerName: string;
+  goal: string;
+  status: RalphWorkerSessionRecord['status'];
+  iterationCount?: number;
+  maxIterations: number;
+  completionSignal?: string;
+  sleepMs?: number;
+  engine?: string;
+  routeKind?: string;
+  assignedNodeId?: string;
+  currentTask?: string;
+  lastSummary?: string;
+  lastError?: string;
+  governanceConsensusId?: string;
+  metadata?: Record<string, unknown>;
+  startedAt?: string;
+  pausedAt?: string;
+  completedAt?: string;
+}
+
 export const resolveDroidSwarmHome = (): string =>
   process.env.DROIDSWARM_HOME ?? path.resolve(process.env.HOME ?? process.cwd(), '.droidswarm');
 
@@ -461,6 +509,34 @@ export const openProjectRegistryDatabase = (dbPath = resolveProjectRegistryDbPat
 
     CREATE INDEX IF NOT EXISTS idx_registry_code_reviews_project
       ON code_review_runs(project_id, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS ralph_worker_sessions (
+      session_id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      worker_name TEXT NOT NULL,
+      goal TEXT NOT NULL,
+      status TEXT NOT NULL,
+      iteration_count INTEGER NOT NULL,
+      max_iterations INTEGER NOT NULL,
+      completion_signal TEXT NOT NULL,
+      sleep_ms INTEGER NOT NULL,
+      engine TEXT,
+      route_kind TEXT,
+      assigned_node_id TEXT,
+      current_task TEXT,
+      last_summary TEXT,
+      last_error TEXT,
+      governance_consensus_id TEXT,
+      metadata_json TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      paused_at TEXT,
+      completed_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    ) STRICT;
+
+    CREATE INDEX IF NOT EXISTS idx_registry_ralph_sessions_project
+      ON ralph_worker_sessions(project_id, updated_at DESC);
   `);
   const ensureColumn = (tableName: string, columnName: string, definition: string): void => {
     const columns = database.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name?: string }>;
@@ -726,6 +802,41 @@ const normalizeCodeReviewRunRecord = (row: Record<string, unknown>): CodeReviewR
   findingsMarkdown: String(row.findings_markdown ?? ''),
   consensusId: typeof row.consensus_id === 'string' ? row.consensus_id : undefined,
   auditHash: typeof row.audit_hash === 'string' ? row.audit_hash : undefined,
+  createdAt: String(row.created_at),
+  updatedAt: String(row.updated_at),
+});
+
+const normalizeRalphWorkerSessionRecord = (row: Record<string, unknown>): RalphWorkerSessionRecord => ({
+  sessionId: String(row.session_id),
+  projectId: String(row.project_id),
+  workerName: String(row.worker_name),
+  goal: String(row.goal),
+  status:
+    row.status === 'paused'
+      ? 'paused'
+      : row.status === 'completed'
+        ? 'completed'
+        : row.status === 'halted'
+          ? 'halted'
+          : row.status === 'failed'
+            ? 'failed'
+            : 'running',
+  iterationCount: typeof row.iteration_count === 'number' ? row.iteration_count : Number(row.iteration_count ?? 0),
+  maxIterations: typeof row.max_iterations === 'number' ? row.max_iterations : Number(row.max_iterations ?? 0),
+  completionSignal: String(row.completion_signal),
+  sleepMs: typeof row.sleep_ms === 'number' ? row.sleep_ms : Number(row.sleep_ms ?? 0),
+  engine: typeof row.engine === 'string' ? row.engine : undefined,
+  routeKind: typeof row.route_kind === 'string' ? row.route_kind : undefined,
+  assignedNodeId: typeof row.assigned_node_id === 'string' ? row.assigned_node_id : undefined,
+  currentTask: typeof row.current_task === 'string' ? row.current_task : undefined,
+  lastSummary: typeof row.last_summary === 'string' ? row.last_summary : undefined,
+  lastError: typeof row.last_error === 'string' ? row.last_error : undefined,
+  governanceConsensusId:
+    typeof row.governance_consensus_id === 'string' ? row.governance_consensus_id : undefined,
+  metadata: parseJsonObject(row.metadata_json),
+  startedAt: String(row.started_at),
+  pausedAt: typeof row.paused_at === 'string' ? row.paused_at : undefined,
+  completedAt: typeof row.completed_at === 'string' ? row.completed_at : undefined,
   createdAt: String(row.created_at),
   updatedAt: String(row.updated_at),
 });
@@ -1461,6 +1572,131 @@ export const getCodeReviewRun = (reviewId: string, dbPath?: string): CodeReviewR
   try {
     const row = database.prepare(`SELECT * FROM code_review_runs WHERE review_id = ? LIMIT 1`).get(reviewId) as Record<string, unknown> | undefined;
     return row ? normalizeCodeReviewRunRecord(row) : undefined;
+  } finally {
+    database.close();
+  }
+};
+
+export const upsertRalphWorkerSession = (
+  input: UpsertRalphWorkerSessionInput,
+  dbPath?: string,
+): RalphWorkerSessionRecord => {
+  const database = openProjectRegistryDatabase(dbPath);
+  try {
+    const now = new Date().toISOString();
+    const record = {
+      sessionId: input.sessionId,
+      projectId: input.projectId,
+      workerName: input.workerName,
+      goal: input.goal,
+      status: input.status,
+      iterationCount: input.iterationCount ?? 0,
+      maxIterations: input.maxIterations,
+      completionSignal: input.completionSignal ?? '<RALPH_DONE>',
+      sleepMs: input.sleepMs ?? 5_000,
+      engine: input.engine ?? null,
+      routeKind: input.routeKind ?? null,
+      assignedNodeId: input.assignedNodeId ?? null,
+      currentTask: input.currentTask ?? null,
+      lastSummary: input.lastSummary ?? null,
+      lastError: input.lastError ?? null,
+      governanceConsensusId: input.governanceConsensusId ?? null,
+      metadataJson: JSON.stringify(input.metadata ?? {}),
+      startedAt: input.startedAt ?? now,
+      pausedAt: input.pausedAt ?? null,
+      completedAt: input.completedAt ?? null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    database.prepare(`
+      INSERT INTO ralph_worker_sessions (
+        session_id, project_id, worker_name, goal, status, iteration_count, max_iterations, completion_signal,
+        sleep_ms, engine, route_kind, assigned_node_id, current_task, last_summary, last_error,
+        governance_consensus_id, metadata_json, started_at, paused_at, completed_at, created_at, updated_at
+      ) VALUES (
+        @sessionId, @projectId, @workerName, @goal, @status, @iterationCount, @maxIterations, @completionSignal,
+        @sleepMs, @engine, @routeKind, @assignedNodeId, @currentTask, @lastSummary, @lastError,
+        @governanceConsensusId, @metadataJson, @startedAt, @pausedAt, @completedAt, @createdAt, @updatedAt
+      )
+      ON CONFLICT(session_id) DO UPDATE SET
+        project_id = excluded.project_id,
+        worker_name = excluded.worker_name,
+        goal = excluded.goal,
+        status = excluded.status,
+        iteration_count = excluded.iteration_count,
+        max_iterations = excluded.max_iterations,
+        completion_signal = excluded.completion_signal,
+        sleep_ms = excluded.sleep_ms,
+        engine = excluded.engine,
+        route_kind = excluded.route_kind,
+        assigned_node_id = excluded.assigned_node_id,
+        current_task = excluded.current_task,
+        last_summary = excluded.last_summary,
+        last_error = excluded.last_error,
+        governance_consensus_id = excluded.governance_consensus_id,
+        metadata_json = excluded.metadata_json,
+        started_at = excluded.started_at,
+        paused_at = excluded.paused_at,
+        completed_at = excluded.completed_at,
+        updated_at = excluded.updated_at
+    `).run(record);
+    const row = database.prepare(`
+      SELECT *
+      FROM ralph_worker_sessions
+      WHERE session_id = ?
+      LIMIT 1
+    `).get(input.sessionId) as Record<string, unknown>;
+    return normalizeRalphWorkerSessionRecord(row);
+  } finally {
+    database.close();
+  }
+};
+
+export const listRalphWorkerSessions = (
+  input?: {
+    projectId?: string;
+    status?: RalphWorkerSessionRecord['status'];
+  },
+  dbPath?: string,
+): RalphWorkerSessionRecord[] => {
+  const database = openProjectRegistryDatabase(dbPath);
+  try {
+    const clauses: string[] = [];
+    const values: unknown[] = [];
+    if (input?.projectId) {
+      clauses.push('project_id = ?');
+      values.push(input.projectId);
+    }
+    if (input?.status) {
+      clauses.push('status = ?');
+      values.push(input.status);
+    }
+    const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    return (database.prepare(`
+      SELECT *
+      FROM ralph_worker_sessions
+      ${whereClause}
+      ORDER BY updated_at DESC, session_id DESC
+    `).all(...values) as Record<string, unknown>[])
+      .map(normalizeRalphWorkerSessionRecord);
+  } finally {
+    database.close();
+  }
+};
+
+export const getRalphWorkerSession = (
+  sessionId: string,
+  dbPath?: string,
+): RalphWorkerSessionRecord | undefined => {
+  const database = openProjectRegistryDatabase(dbPath);
+  try {
+    const row = database.prepare(`
+      SELECT *
+      FROM ralph_worker_sessions
+      WHERE session_id = ?
+      LIMIT 1
+    `).get(sessionId) as Record<string, unknown> | undefined;
+    return row ? normalizeRalphWorkerSessionRecord(row) : undefined;
   } finally {
     database.close();
   }

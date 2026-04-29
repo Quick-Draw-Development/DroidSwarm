@@ -10,6 +10,11 @@ export interface ModelRouterContext {
   stage?: string;
   summary?: string;
   contextLength?: number;
+  iterationCountExpected?: number;
+  selfCorrectionNeeded?: boolean;
+  longHorizon?: boolean;
+  polishingPhase?: boolean;
+  failureRecoveryMode?: boolean;
   preferAppleIntelligence?: boolean;
   appleRuntimeAvailable?: boolean;
   mlxAvailable?: boolean;
@@ -24,6 +29,7 @@ export interface ModelRouteDecision {
   appleRuntimeAvailable: boolean;
   mlxAvailable: boolean;
   mythosAvailable: boolean;
+  preferRalphWorker: boolean;
 }
 
 export interface RoleModelSelectionInput extends ModelRouterContext {
@@ -39,6 +45,7 @@ export interface RoleModelSelectionDecision extends ModelRouteDecision {
 
 const heavyTaskHints = ['vision', 'embedding', 'analysis', 'summary', 'checkpoint', 'compress'];
 const mythosTaskHints = ['deep', 'recurrent', 'long-horizon', 'code-review', 'review', 'governance', 'evolution', 'mythos'];
+const ralphTaskHints = ['long-horizon', 'polish', 'polishing', 'refine', 'refinement', 'iterative', 'synthesis', 'recovery'];
 
 export const detectAppleSilicon = (platform: string = process.platform, arch: string = process.arch): boolean =>
   platform === 'darwin' && arch === 'arm64';
@@ -68,13 +75,25 @@ const inferMythosContext = (context: ModelRouterContext): boolean => {
   return contextLength >= 20_000 || mythosTaskHints.some((hint) => combined.includes(hint));
 };
 
+const inferRalphContext = (context: ModelRouterContext): boolean => {
+  const combined = `${context.taskType ?? ''} ${context.stage ?? ''} ${context.summary ?? ''}`.toLowerCase();
+  return (context.iterationCountExpected ?? 0) > 8
+    || context.selfCorrectionNeeded === true
+    || context.longHorizon === true
+    || context.polishingPhase === true
+    || context.failureRecoveryMode === true
+    || ralphTaskHints.some((hint) => combined.includes(hint));
+};
+
 export const chooseBackendDecision = (context: ModelRouterContext = {}): ModelRouteDecision => {
   const prefersAppleSilicon = context.preferAppleIntelligence ?? detectAppleSilicon(context.platform, context.arch);
   const appleRuntimeAvailable = context.appleRuntimeAvailable !== false;
   const mlxAvailable = context.mlxAvailable === true;
   const mythosAvailable = context.mythosAvailable === true;
+  const ralphAvailable = ['1', 'true', 'yes', 'on'].includes((process.env.DROIDSWARM_ENABLE_RALPH ?? '').toLowerCase());
   const heavyLocalContext = inferHeavyLocalContext(context);
   const mythosContext = inferMythosContext(context);
+  const preferRalphWorker = ralphAvailable && inferRalphContext(context);
   const preferMlx = context.preferMlx === true || (heavyLocalContext && mlxAvailable);
 
   if (mythosAvailable && mythosContext) {
@@ -85,6 +104,7 @@ export const chooseBackendDecision = (context: ModelRouterContext = {}): ModelRo
       appleRuntimeAvailable,
       mlxAvailable,
       mythosAvailable,
+      preferRalphWorker,
     };
   }
 
@@ -96,6 +116,7 @@ export const chooseBackendDecision = (context: ModelRouterContext = {}): ModelRo
       appleRuntimeAvailable,
       mlxAvailable,
       mythosAvailable,
+      preferRalphWorker,
     };
   }
 
@@ -109,6 +130,7 @@ export const chooseBackendDecision = (context: ModelRouterContext = {}): ModelRo
       appleRuntimeAvailable,
       mlxAvailable,
       mythosAvailable,
+      preferRalphWorker,
     };
   }
 
@@ -121,6 +143,7 @@ export const chooseBackendDecision = (context: ModelRouterContext = {}): ModelRo
     appleRuntimeAvailable,
     mlxAvailable,
     mythosAvailable,
+    preferRalphWorker,
   };
 };
 

@@ -44,7 +44,7 @@ const main = async (): Promise<void> => {
           })
           : listRegisteredModels({
             nodeId: readValue('--node-id'),
-            backend: readValue('--backend') as 'apple-intelligence' | 'mlx' | 'local-llama' | undefined,
+            backend: readValue('--backend') as 'apple-intelligence' | 'mlx' | 'local-llama' | 'openmythos' | undefined,
             enabledOnly: !args.includes('--all'),
           }),
       );

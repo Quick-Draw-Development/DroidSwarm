@@ -10,10 +10,22 @@
   ],
   "requiredBackends": [
     "apple-intelligence",
+    "openmythos",
     "mlx",
     "local-llama",
     "codex-cli"
   ],
+  "modelPreferences": {
+    "backend": "openmythos",
+    "reasoningDepth": "high",
+    "minContextLength": 16000,
+    "toolUse": true,
+    "speedPriority": "balanced",
+    "tags": [
+      "review",
+      "deep-reasoning"
+    ]
+  },
   "droidspeakVerbs": [
     {
       "code": "EVT-REVIEW-START",

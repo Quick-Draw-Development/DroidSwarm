@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const WORKER_ENGINES = ['local-llama', 'mlx', 'apple-intelligence', 'codex-cloud', 'codex-cli'] as const;
+export const WORKER_ENGINES = ['local-llama', 'mlx', 'apple-intelligence', 'openmythos', 'codex-cloud', 'codex-cli'] as const;
 export type WorkerEngine = (typeof WORKER_ENGINES)[number];
 export const MODEL_TIERS = ['local-cheap', 'local-capable', 'cloud'] as const;
 export type ModelTier = (typeof MODEL_TIERS)[number];
@@ -37,6 +37,8 @@ export const ROUTE_KINDS = [
   'planner-local-saturated',
   'apple-local',
   'apple-local-saturated',
+  'mythos-local',
+  'mythos-local-throttled',
   'coder-local',
   'coder-local-queued',
   'cloud-escalated',

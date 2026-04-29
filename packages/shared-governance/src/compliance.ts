@@ -108,3 +108,24 @@ export const computeSystemStateHash = (): string =>
       enforcement: () => [],
     },
   ]);
+
+export const evaluateRecurrentEngineStability = (input: {
+  recurrentEngine: string;
+  spectralRadius: number;
+  requestedLoops?: number;
+  driftScore?: number;
+}): {
+  action: 'log' | 'throttle' | 'halt_and_rollback';
+  stable: boolean;
+} => {
+  if (input.recurrentEngine !== 'openmythos') {
+    return { action: 'log', stable: true };
+  }
+  if (input.spectralRadius >= 1.0) {
+    return { action: 'halt_and_rollback', stable: false };
+  }
+  if (input.spectralRadius >= 0.95 || (input.requestedLoops ?? 0) > 16 || (input.driftScore ?? 0) >= 0.5) {
+    return { action: 'throttle', stable: true };
+  }
+  return { action: 'log', stable: true };
+};

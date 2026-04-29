@@ -22,6 +22,7 @@ import {
   listRegisteredModels,
   refreshModelInventory,
 } from '@shared-models';
+import { inspectMythosRuntime, setMythosLoopCount } from '@mythos-engine';
 import {
   approveRegisteredSkill,
   approveSpecializedAgent,
@@ -706,6 +707,29 @@ export const executeSlackIntent = async (
       const snapshot = refreshModelInventory();
       return {
         text: `Model inventory refreshed for \`${snapshot.nodeId}\` with ${snapshot.models.length} registered models.`,
+        projectId: project?.projectId,
+        backend: command.route.backend,
+      };
+    }
+    case 'mythos-status': {
+      const status = await inspectMythosRuntime();
+      return {
+        text: `OpenMythos \`${status.engineId}\` is *${status.status}* with spectral radius ${status.spectralRadius.toFixed(3)} and loop count ${status.loopCount}.`,
+        projectId: project?.projectId,
+        backend: command.route.backend,
+      };
+    }
+    case 'mythos-loops': {
+      const [engineId, countRaw] = command.args;
+      if (!engineId || !countRaw) {
+        return {
+          text: 'Missing Mythos engine id or loop count.',
+          backend: command.route.backend,
+        };
+      }
+      const updated = await setMythosLoopCount(engineId, Number.parseInt(countRaw, 10));
+      return {
+        text: `OpenMythos \`${updated.engineId}\` loop count set to ${updated.loopCount} (${updated.status}).`,
         projectId: project?.projectId,
         backend: command.route.backend,
       };

@@ -6,7 +6,7 @@ export const skillVerbSchema = z.object({
 });
 
 export const modelPreferencesSchema = z.object({
-  backend: z.enum(['apple-intelligence', 'mlx', 'local-llama']).optional(),
+  backend: z.enum(['apple-intelligence', 'mlx', 'local-llama', 'openmythos']).optional(),
   reasoningDepth: z.enum(['low', 'medium', 'high']).optional(),
   minContextLength: z.number().int().positive().optional(),
   toolUse: z.boolean().optional(),

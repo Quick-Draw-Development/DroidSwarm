@@ -14,6 +14,8 @@ test('parses supported slash commands', () => {
   assert.equal(parseSlackCommand('models new').kind, 'models-new');
   assert.equal(parseSlackCommand('models discover').kind, 'models-discover');
   assert.equal(parseSlackCommand('models download qwen-test').kind, 'models-download');
+  assert.equal(parseSlackCommand('mythos status').kind, 'mythos-status');
+  assert.equal(parseSlackCommand('mythos loops openmythos-local 12').kind, 'mythos-loops');
   assert.equal(parseSlackCommand('skill create vision research').kind, 'skill-create');
   assert.equal(parseSlackCommand('agent create vision-agent vision,reviewer high').kind, 'agent-create');
   assert.equal(parseSlackCommand('task-1234abcd: please retry').kind, 'task-message');
@@ -47,6 +49,9 @@ test('parses natural language relay intents and project selection', () => {
 
   const modelsNew = parseSlackIntent('models new');
   assert.equal(modelsNew.kind, 'models-new');
+
+  const mythosStatus = parseSlackIntent('mythos status');
+  assert.equal(mythosStatus.kind, 'mythos-status');
 });
 
 test('defaults arbitrary messages to operator relay', () => {

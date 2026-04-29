@@ -1,6 +1,7 @@
 import { AddTaskForm } from './AddTaskForm';
 import { BoardClient } from './BoardClient';
 import { CodeReviewsPanel } from './CodeReviewsPanel';
+import { CognitiveEnginesPanel } from './CognitiveEnginesPanel';
 import { EvolutionPanel } from './EvolutionPanel';
 import { GovernancePanel } from './GovernancePanel';
 import { LiveConnectionStatus } from './LiveConnectionStatus';
@@ -52,6 +53,7 @@ export function BoardShell({
       <BoardClient username={username} tasks={tasks} />
       <GovernancePanel governance={insights.governance} />
       <ModelInventoryPanel inventory={insights.modelInventory} />
+      <CognitiveEnginesPanel engines={insights.cognitiveEngines} />
       <MemoryPanel memory={insights.longTermMemory} />
       <EvolutionPanel evolution={insights.evolution} />
       <SkillsRegistryPanel registry={insights.skillsRegistry} />

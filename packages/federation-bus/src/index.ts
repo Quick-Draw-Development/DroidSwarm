@@ -46,7 +46,7 @@ const slaveRollCallPayloadSchema = z.object({
     nodeId: z.string().min(1),
     modelId: z.string().min(1),
     displayName: z.string().min(1),
-    backend: z.enum(['apple-intelligence', 'mlx', 'local-llama']),
+    backend: z.enum(['apple-intelligence', 'mlx', 'local-llama', 'openmythos']),
     path: z.string().optional(),
     quantization: z.string().optional(),
     contextLength: z.number().int().positive().optional(),

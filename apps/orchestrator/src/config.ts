@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { defaultGitPolicy } from '@shared-git';
+import { inspectMythosRuntimeSync } from '@mythos-engine';
 import { detectAppleSilicon, detectMlxRuntime } from '@model-router';
 import { refreshModelInventory, resolveModelInventoryCacheFile, resolveModelsRoot } from '@shared-models';
 
@@ -147,10 +148,15 @@ const envSchema = z.object({
   DROIDSWARM_MODEL_CODE: z.string().optional(),
   DROIDSWARM_MODEL_APPLE: z.string().optional(),
   DROIDSWARM_MODEL_MLX: z.string().optional(),
+  DROIDSWARM_MODEL_MYTHOS: z.string().optional(),
   DROIDSWARM_MODEL_DEFAULT: z.string().optional(),
   DROIDSWARM_APPLE_INTELLIGENCE_ENABLED: z.string().optional(),
   DROIDSWARM_MLX_ENABLED: z.string().optional(),
   DROIDSWARM_MLX_BASE_URL: z.string().optional(),
+  DROIDSWARM_ENABLE_MYTHOS: z.string().optional(),
+  DROIDSWARM_MYTHOS_PYTHON_BIN: z.string().optional(),
+  DROIDSWARM_MYTHOS_DEFAULT_LOOPS: z.string().optional(),
+  DROIDSWARM_MYTHOS_MAX_LOOPS: z.string().optional(),
   DROIDSWARM_ROUTING_PLANNER_ROLES: z.string().optional(),
   DROIDSWARM_ROUTING_APPLE_ROLES: z.string().optional(),
   DROIDSWARM_ROUTING_APPLE_HINTS: z.string().optional(),
@@ -215,6 +221,7 @@ export const loadConfig = (): OrchestratorConfig => {
   const codeModel = env.DROIDSWARM_MODEL_CODE ?? 'claude-3.5-sonnet';
   const appleModel = env.DROIDSWARM_MODEL_APPLE ?? 'apple-intelligence/local';
   const mlxModel = env.DROIDSWARM_MODEL_MLX ?? 'mlx/local';
+  const mythosModel = env.DROIDSWARM_MODEL_MYTHOS ?? 'openmythos/local';
   const defaultModel = env.DROIDSWARM_MODEL_DEFAULT ?? env.DROIDSWARM_CODEX_MODEL ?? 'o1-preview';
   const appleSdkAvailable = hasAppleIntelligenceSdk();
   const prefersAppleHost = detectAppleSilicon();
@@ -229,6 +236,17 @@ export const loadConfig = (): OrchestratorConfig => {
     baseUrl: mlxBaseUrl,
     model: mlxModel,
   });
+  const mythosEnabled = parseBooleanFlag(env.DROIDSWARM_ENABLE_MYTHOS, false);
+  const mythosStatus = mythosEnabled
+    ? (() => {
+      try {
+        return inspectMythosRuntimeSync();
+      } catch {
+        return undefined;
+      }
+    })()
+    : undefined;
+  const mythosAvailable = mythosStatus?.available === true;
   const budgetMaxConsumed = toPositiveIntOrUndefined(env.DROIDSWARM_BUDGET_MAX_CONSUMED);
   const allowedTools = parseCommaList(env.DROIDSWARM_ALLOWED_TOOLS);
   const policyAllowedTools =
@@ -297,6 +315,7 @@ export const loadConfig = (): OrchestratorConfig => {
             value === 'local-llama'
             || value === 'mlx'
             || value === 'apple-intelligence'
+            || value === 'openmythos'
             || value === 'codex-cloud'
             || value === 'codex-cli')
           : undefined,
@@ -380,6 +399,7 @@ export const loadConfig = (): OrchestratorConfig => {
       code: codeModel,
       apple: appleModel,
       mlx: mlxModel,
+      mythos: mythosModel,
       default: defaultModel,
     },
     appleIntelligence: {
@@ -392,6 +412,14 @@ export const loadConfig = (): OrchestratorConfig => {
       available: mlxAvailable,
       baseUrl: mlxBaseUrl,
       model: mlxModel,
+    },
+    mythos: {
+      enabled: mythosEnabled,
+      available: mythosAvailable,
+      pythonBin: env.DROIDSWARM_MYTHOS_PYTHON_BIN ?? 'python3',
+      model: mythosModel,
+      defaultLoops: toPositiveInt(env.DROIDSWARM_MYTHOS_DEFAULT_LOOPS, 6),
+      maxLoops: toPositiveInt(env.DROIDSWARM_MYTHOS_MAX_LOOPS, 24),
     },
     routingPolicy: {
       plannerRoles: parseCommaList(env.DROIDSWARM_ROUTING_PLANNER_ROLES ?? 'plan,planner,research,review,orchestrator,checkpoint,compress'),

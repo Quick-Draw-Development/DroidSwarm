@@ -24,7 +24,7 @@ const buildEvolutionStub = (name: string, description: string): Record<string, s
     version: '0.1.0',
     description,
     capabilities: ['memory', 'reflection'],
-    requiredBackends: ['apple-intelligence', 'mlx', 'local-llama'],
+    requiredBackends: ['apple-intelligence', 'mlx', 'local-llama', 'openmythos'],
     droidspeakVerbs: [
       {
         code: `EVT-SKILL-${name.toUpperCase().replace(/-/g, '_')}`,
@@ -71,13 +71,13 @@ export const proposeSkillEvolution = (input?: {
     : undefined;
   const normalizedName = normalizeSkillName(targetSkill ?? `evolved-${nudge.title}`);
   const manifest = existingManifest
-    ? evolveSkill(targetSkill)
+    ? evolveSkill(targetSkill as string)
     : skillManifestSchema.parse({
       name: normalizedName,
       version: '0.1.0',
       description: nudge.description,
       capabilities: ['memory', 'reflection'],
-      requiredBackends: ['apple-intelligence', 'mlx', 'local-llama'],
+      requiredBackends: ['apple-intelligence', 'mlx', 'local-llama', 'openmythos'],
       droidspeakVerbs: [
         {
           code: `EVT-SKILL-${normalizedName.toUpperCase().replace(/-/g, '_')}`,

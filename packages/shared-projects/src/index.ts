@@ -121,7 +121,7 @@ export interface RegisteredModelRecord {
   nodeId: string;
   modelId: string;
   displayName: string;
-  backend: 'apple-intelligence' | 'mlx' | 'local-llama';
+  backend: 'apple-intelligence' | 'mlx' | 'local-llama' | 'openmythos';
   path?: string;
   quantization?: string;
   contextLength?: number;
@@ -137,6 +137,7 @@ export interface RegisteredModelRecord {
     | 'bootstrap-inventory'
     | 'federation-sync'
     | 'manual'
+    | 'mythos-runtime'
     | 'huggingface-discovery'
     | 'local-ai-zone-discovery'
     | 'downloaded';
@@ -766,6 +767,8 @@ const normalizeRegisteredModelRecord = (row: Record<string, unknown>): Registere
       ? 'apple-intelligence'
       : row.backend === 'mlx'
         ? 'mlx'
+        : row.backend === 'openmythos'
+          ? 'openmythos'
         : 'local-llama',
   path: typeof row.path === 'string' ? row.path : undefined,
   quantization: typeof row.quantization === 'string' ? row.quantization : undefined,

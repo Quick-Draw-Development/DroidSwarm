@@ -30,6 +30,10 @@ Require explicit governance summaries at startup.
 
 Long-term memory writes, reflection cycles, and governed skill-evolution proposals must emit Droidspeak-compatible audit events and remain reviewable by a human operator before capability activation.
 
+## LAW-099
+
+OpenMythos and other recurrent engines must remain spectrally stable. If spectral radius reaches or exceeds `1.0`, execution halts and must roll back to a safer backend.
+
 ## Skill And Agent Extension Rules
 
 - New skills and specialized agents must register through the shared skills registry before they are treated as active runtime capabilities.
@@ -45,6 +49,13 @@ Long-term memory writes, reflection cycles, and governed skill-evolution proposa
 - Drift mismatches must be surfaced to operators through governance status surfaces before normal automation proceeds.
 - Code review outcomes that influence merge integrity on critical paths must emit review-specific Droidspeak events and run through the same consensus and tracing surfaces.
 - Federated onboarding must share recent governed evolution proposals and durable memory signals so slave nodes do not boot cold.
+- OpenMythos execution must include Guardian-visible stability metrics and LAW-099 review before deep recurrent execution continues.
+
+## Recurrent Engine Rules
+
+- `DROIDSWARM_ENABLE_MYTHOS` gates all OpenMythos activation, inventory registration, and routing decisions.
+- Spectral radius below `1.0` is mandatory for OpenMythos execution; `>= 0.95` may throttle loop counts and `>= 1.0` must halt and roll back.
+- OpenMythos status, loop overrides, and drift signals must emit Droidspeak-compatible `MYTHOS_*` audit events and remain visible through Slack, dashboard, and federation surfaces.
 
 ## Memory And Reflection Rules
 

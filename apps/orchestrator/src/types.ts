@@ -96,6 +96,7 @@ export interface OrchestratorConfig {
   routingPolicy: RoutingPolicyConfig;
   appleIntelligence?: AppleIntelligenceConfig;
   mlx?: MlxConfig;
+  mythos?: MythosConfig;
   budgetMaxConsumed?: number;
   policyDefaults?: TaskPolicy;
   federationEnabled?: boolean;
@@ -128,6 +129,7 @@ export interface ModelRoutingConfig {
   code: string;
   apple: string;
   mlx?: string;
+  mythos?: string;
   default: string;
 }
 
@@ -142,6 +144,15 @@ export interface MlxConfig {
   available: boolean;
   baseUrl?: string;
   model: string;
+}
+
+export interface MythosConfig {
+  enabled: boolean;
+  available: boolean;
+  pythonBin: string;
+  model: string;
+  defaultLoops: number;
+  maxLoops: number;
 }
 
 export interface RoutingPolicyConfig {

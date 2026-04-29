@@ -8,6 +8,7 @@ export const builtInLawIdSchema = z.enum([
   'LAW-003',
   'LAW-004',
   'LAW-005',
+  'LAW-099',
 ]);
 
 export type BuiltInLawId = z.infer<typeof builtInLawIdSchema>;
@@ -24,6 +25,10 @@ export interface GovernanceLawContext {
   droidspeakState?: unknown;
   quorumRoles?: string[];
   guardianVote?: 'approve' | 'reject' | 'veto';
+  recurrentEngine?: string;
+  spectralRadius?: number;
+  requestedLoops?: number;
+  driftScore?: number;
 }
 
 export interface LawDefinition {
@@ -118,6 +123,26 @@ export const BUILT_IN_LAWS: LawDefinition[] = [
         violations.push('Slave swarms may not claim master governance authority.');
       }
       return violations;
+    },
+  },
+  {
+    id: 'LAW-099',
+    version: '2026-04-29',
+    title: 'Spectral Stability Of Recurrent Engines',
+    description: 'Recurrent engines must remain spectrally stable before high-complexity execution continues.',
+    glyph: 'MYTHOS_STATUS',
+    enforcement(context) {
+      if (context.recurrentEngine !== 'openmythos') {
+        return [];
+      }
+      const radius = context.spectralRadius;
+      if (typeof radius !== 'number') {
+        return ['OpenMythos tasks require a spectral radius measurement.'];
+      }
+      if (radius >= 1.0) {
+        return ['OpenMythos spectral radius is unstable (>= 1.0); halt and rollback required.'];
+      }
+      return [];
     },
   },
 ];

@@ -18,6 +18,7 @@ import type { HandoffPacket, MessageEnvelope, TaskRecord, TaskScope, TaskStateDi
 import { CompressionShape, StatusUpdatePayload, ToolResponsePayload, UsageShape } from '@protocol';
 import { LocalLlamaAdapter } from './adapters/worker/local-llama.adapter';
 import { MlxAdapter } from './adapters/worker/mlx.adapter';
+import { OpenMythosWorkerAdapter } from './adapters/worker/openmythos.adapter';
 import { CodexCloudAdapter } from './adapters/worker/codex-cloud.adapter';
 import { CodexCliAdapter } from './adapters/worker/codex-cli.adapter';
 
@@ -122,6 +123,12 @@ const getAdapter = (config: ReturnType<typeof loadConfig>, engine: WorkerEngine,
         availableTools: config.allowedTools,
       });
     }
+    case 'openmythos':
+      return new OpenMythosWorkerAdapter({
+        model: config.modelRouting.mythos,
+        defaultLoops: config.mythos?.defaultLoops ?? 6,
+        maxLoops: config.mythos?.maxLoops ?? 24,
+      });
     case 'codex-cloud':
       return new CodexCloudAdapter({
         apiBaseUrl: config.codexApiBaseUrl,
@@ -210,6 +217,8 @@ export const runWorker = async (): Promise<void> => {
         ? (config.modelRouting.mlx ?? 'mlx/local')
       : engine === 'apple-intelligence'
         ? config.modelRouting.apple
+        : engine === 'openmythos'
+          ? (config.modelRouting.mythos ?? 'openmythos/local')
         : engine === 'codex-cloud'
           ? config.codexCloudModel
           : config.codexModel);

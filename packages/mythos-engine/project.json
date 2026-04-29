@@ -1,0 +1,21 @@
+{
+  "name": "mythos-engine",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/mythos-engine/src",
+  "projectType": "library",
+  "targets": {
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc --noEmit -p packages/mythos-engine/tsconfig.json"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node --import tsx --test packages/mythos-engine/src/**/*.spec.ts"
+      }
+    }
+  },
+  "tags": []
+}

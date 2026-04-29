@@ -70,7 +70,11 @@ export const DROIDSPEAK_CATALOGS = {
     'EVT-REVIEW-START': 'Review Start',
     'EVT-BUG-FLAG': 'Bug Flag',
     'EVT-SECURITY-FINDING': 'Security Finding',
-    'EVT-CONSENSUS-REVIEW': 'Consensus Review'
+    'EVT-CONSENSUS-REVIEW': 'Consensus Review',
+    'MYTHOS_THINK': 'OpenMythos Think',
+    'MYTHOS_LOOP': 'OpenMythos Loop',
+    'MYTHOS_STATUS': 'OpenMythos Status',
+    'MYTHOS_DRIFT': 'OpenMythos Drift'
   },
   
   // D11: Promotion (8 entries)

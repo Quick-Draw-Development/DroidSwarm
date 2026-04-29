@@ -206,6 +206,24 @@ export default async function BoardPage({
         })),
       };
     })(),
+    cognitiveEngines: (() => {
+      const mythos = listRegisteredModels({ backend: 'openmythos' }).slice(0, 8);
+      return {
+        mythosEnabled: ['1', 'true', 'yes', 'on'].includes((process.env.DROIDSWARM_ENABLE_MYTHOS ?? '').toLowerCase()),
+        mythosAvailable: mythos.some((entry) => entry.enabled),
+        instances: mythos.map((entry) => ({
+          nodeId: entry.nodeId,
+          modelId: entry.modelId,
+          displayName: entry.displayName,
+          status: typeof entry.metadata.status === 'string' ? entry.metadata.status : 'ready',
+          spectralRadius: typeof entry.metadata.spectralRadius === 'number' ? entry.metadata.spectralRadius : undefined,
+          loopCount: typeof entry.metadata.loopCount === 'number' ? entry.metadata.loopCount : undefined,
+          driftScore: typeof entry.metadata.driftScore === 'number' ? entry.metadata.driftScore : undefined,
+          pid: typeof entry.metadata.pid === 'number' ? entry.metadata.pid : undefined,
+          updatedAt: entry.updatedAt,
+        })),
+      };
+    })(),
     longTermMemory: (() => {
       const recent = listLongTermMemories({ projectId: selectedProjectId, limit: 12 });
       return {

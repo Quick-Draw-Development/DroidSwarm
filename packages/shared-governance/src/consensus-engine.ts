@@ -53,7 +53,9 @@ export const runConsensusRound = (input: {
   const compliance = validateCompliance({
     ...input.context,
     eventType: 'governance.vote',
-    quorumRoles: ['planner', 'reviewer', 'verifier'],
+    quorumRoles: input.context.recurrentEngine === 'openmythos'
+      ? ['planner', 'reviewer', 'verifier', 'guardian']
+      : ['planner', 'reviewer', 'verifier'],
     droidspeakState: {
       compact: input.glyph,
       expanded: input.summary,

@@ -9,8 +9,19 @@
   "projectScoped": false,
   "affectsCoreBehavior": true,
   "modelRouting": {
-    "preferredBackend": "apple-intelligence",
+    "preferredBackend": "openmythos",
     "modelTier": "local-cheap"
+  },
+  "modelPreferences": {
+    "backend": "openmythos",
+    "reasoningDepth": "high",
+    "minContextLength": 16000,
+    "toolUse": true,
+    "speedPriority": "balanced",
+    "tags": [
+      "review",
+      "deep-reasoning"
+    ]
   },
   "consensusRoles": [
     "proposer",

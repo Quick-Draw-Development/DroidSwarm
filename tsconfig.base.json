@@ -57,6 +57,12 @@
     "@shared-models/*": [
       "packages/shared-models/src/*"
     ],
+    "@mythos-engine": [
+      "packages/mythos-engine/src/index.ts"
+    ],
+    "@mythos-engine/*": [
+      "packages/mythos-engine/src/*"
+    ],
     "@model-router": [
       "packages/model-router/src/index.ts"
     ],

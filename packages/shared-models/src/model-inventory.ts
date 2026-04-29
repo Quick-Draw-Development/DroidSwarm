@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { inspectMythosRuntimeSync } from '@mythos-engine';
 
 import {
   listRegisteredModels as listRegisteredModelsFromRegistry,
@@ -276,6 +277,47 @@ export const scanLocalModels = (options: InventoryRefreshOptions = {}): UpsertRe
   return [...byKey.values()];
 };
 
+export const scanLocalModelsWithVirtualBackends = (options: InventoryRefreshOptions = {}): UpsertRegisteredModelInput[] => {
+  const scanned = scanLocalModels(options);
+  const mythosEnabled = ['1', 'true', 'yes', 'on'].includes((process.env.DROIDSWARM_ENABLE_MYTHOS ?? '').toLowerCase())
+    || (process.env.DROIDSWARM_MYTHOS_BRIDGE_MODE ?? '').toLowerCase() === 'mock';
+  if (!mythosEnabled || options.includeVirtualBackends === false) {
+    return scanned;
+  }
+
+  try {
+    const status = inspectMythosRuntimeSync();
+    if (status.enabled) {
+      scanned.push({
+        nodeId: options.nodeId ?? resolveLocalNodeId(),
+        modelId: status.engineId,
+        displayName: status.displayName,
+        backend: 'openmythos',
+        toolUse: true,
+        reasoningDepth: 'high',
+        speedTier: status.spectralRadius >= 0.95 ? 'heavy' : 'balanced',
+        enabled: status.available,
+        tags: ['mythos', 'recurrent', 'deep-reasoning'],
+        metadata: {
+          runtime: 'openmythos',
+          spectralRadius: status.spectralRadius,
+          loopCount: status.loopCount,
+          driftScore: status.driftScore,
+          pid: status.pid,
+          pythonExecutable: status.pythonExecutable,
+          status: status.status,
+          ...status.metadata,
+        },
+        source: 'mythos-runtime',
+      });
+    }
+  } catch {
+    // Ignore optional Mythos detection failures; inventory refresh must remain usable without Python.
+  }
+
+  return scanned;
+};
+
 const serializeCache = (snapshot: ModelInventorySnapshot): string => JSON.stringify({
   nodeId: snapshot.nodeId,
   generatedAt: snapshot.generatedAt,
@@ -299,7 +341,7 @@ export const refreshModelInventory = (options: InventoryRefreshOptions = {}): Mo
   const nodeId = options.nodeId ?? resolveLocalNodeId();
   const cacheFile = options.cacheFile ?? resolveModelInventoryCacheFile();
   const persist = options.persist !== false;
-  const scanned = scanLocalModels(options).map((entry) => (
+  const scanned = scanLocalModelsWithVirtualBackends(options).map((entry) => (
     persist ? upsertRegisteredModel(entry) : ({
       ...entry,
       toolUse: entry.toolUse ?? false,
@@ -386,6 +428,9 @@ export const chooseBestModel = (
       score += Math.min((model.contextLength ?? 0) / 4_096, 6);
       if (preferences.reasoningDepth && model.reasoningDepth === preferences.reasoningDepth) {
         score += 5;
+      }
+      if (model.backend === 'openmythos') {
+        score += 4;
       }
       if (preferences.tags?.some((tag) => model.tags.includes(tag))) {
         score += 3;

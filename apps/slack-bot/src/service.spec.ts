@@ -327,6 +327,36 @@ test('lists and refreshes models from slack commands', async () => {
   assert.match(listed.text, /qwen2\.5-coder-14b/i);
 });
 
+test('reports and updates mythos runtime state from slack commands', async () => {
+  const home = makeTempHome();
+  process.env.DROIDSWARM_HOME = home;
+  process.env.DROIDSWARM_ENABLE_MYTHOS = 'true';
+  process.env.DROIDSWARM_MYTHOS_BRIDGE_MODE = 'mock';
+  onboardProject({
+    projectId: 'demo',
+    name: 'Demo',
+    rootPath: path.join(home, 'repo'),
+    dbPath: path.join(home, 'projects', 'demo', 'droidswarm.db'),
+    wsPort: 9999,
+  });
+
+  const status = await handleSlackInput({
+    text: 'mythos status',
+    userId: 'U1',
+    username: 'alice',
+    channelId: 'C1',
+  }, baseConfig());
+  assert.match(status.text, /OpenMythos/);
+
+  const loops = await handleSlackInput({
+    text: 'mythos loops openmythos-local 12',
+    userId: 'U1',
+    username: 'alice',
+    channelId: 'C1',
+  }, baseConfig());
+  assert.match(loops.text, /loop count set to 12/i);
+});
+
 test('creates skill scaffolds and specialized agents from slack commands', async () => {
   const home = makeTempHome();
   process.env.DROIDSWARM_HOME = home;

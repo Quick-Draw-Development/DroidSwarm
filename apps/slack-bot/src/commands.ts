@@ -16,6 +16,8 @@ export type SlackCommandKind =
   | 'models-download'
   | 'models-list'
   | 'models-refresh'
+  | 'mythos-status'
+  | 'mythos-loops'
   | 'memory-search'
   | 'evolve-status'
   | 'evolve-propose'
@@ -144,6 +146,19 @@ const parseSlashCommand = (text: string, route: ModelRouteDecision): ParsedSlack
 
   if (args[0] === 'models' && args[1] === 'refresh') {
     return buildCommand(text, route, { kind: 'models-refresh', args: args.slice(2), source: 'slash' });
+  }
+
+  if (args[0] === 'mythos' && args[1] === 'status') {
+    return buildCommand(text, route, { kind: 'mythos-status', args: [], source: 'slash' });
+  }
+
+  if (args[0] === 'mythos' && args[1] === 'loops' && args[2] && args[3]) {
+    return buildCommand(text, route, {
+      kind: 'mythos-loops',
+      args: args.slice(2),
+      content: `${args[2]} ${args[3]}`,
+      source: 'slash',
+    });
   }
 
   if (args[0] === 'memory' && args[1] === 'search' && args.length > 2) {
@@ -302,6 +317,20 @@ const parseNaturalLanguage = (text: string, route: ModelRouteDecision): ParsedSl
     return buildCommand(text, route, { kind: 'models-refresh', args: [], source: 'natural-language' });
   }
 
+  if (/^mythos\s+status$/i.test(trimmed)) {
+    return buildCommand(text, route, { kind: 'mythos-status', args: [], source: 'natural-language' });
+  }
+
+  const mythosLoopsMatch = trimmed.match(/^mythos\s+loops\s+([a-z0-9-]+)\s+(\d+)$/i);
+  if (mythosLoopsMatch?.[1] && mythosLoopsMatch[2]) {
+    return buildCommand(text, route, {
+      kind: 'mythos-loops',
+      args: [mythosLoopsMatch[1], mythosLoopsMatch[2]],
+      content: `${mythosLoopsMatch[1]} ${mythosLoopsMatch[2]}`,
+      source: 'natural-language',
+    });
+  }
+
   const memorySearchMatch = trimmed.match(/^memory\s+search\s+(.+)$/i);
   if (memorySearchMatch?.[1]) {
     return buildCommand(text, route, {
@@ -449,6 +478,7 @@ export const parseSlackIntent = (text: string, context?: SlackParseContext): Par
     'override',
     'review',
     'models',
+    'mythos',
     'memory',
     'evolve',
   ].includes(args[0]?.toLowerCase() ?? '');
@@ -475,6 +505,8 @@ export const renderSlackCommandResponse = (command: ParsedSlackCommand): SlackCo
           '`/droid models discover` polls discovery sources immediately.',
           '`/droid models download <model-id>` downloads a discovered model.',
           '`/droid models refresh` rescans local models and updates the registry.',
+          '`/droid mythos status` shows OpenMythos spectral and loop status.',
+          '`/droid mythos loops <engine-id> <count>` overrides recurrent loop count for a local Mythos runtime.',
           '`/droid memory search <query>` searches long-term memory.',
           '`/droid evolve status` shows pending governed skill evolution proposals.',
           '`/droid evolve run [skill]` generates a governed evolution proposal.',
@@ -542,6 +574,14 @@ export const renderSlackCommandResponse = (command: ParsedSlackCommand): SlackCo
     case 'models-refresh':
       return {
         text: 'Refreshing local model inventory.',
+      };
+    case 'mythos-status':
+      return {
+        text: 'Fetching OpenMythos engine status.',
+      };
+    case 'mythos-loops':
+      return {
+        text: `Updating OpenMythos loop count for \`${command.content ?? 'unknown'}\`.`,
       };
     case 'memory-search':
       return {

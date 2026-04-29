@@ -8,7 +8,7 @@ export class RoutingService {
   private readonly routing = new SharedRoutingService();
 
   constructor(
-    private readonly config: Pick<OrchestratorConfig, 'routingPolicy' | 'modelRouting' | 'appleIntelligence' | 'mlx'>,
+    private readonly config: Pick<OrchestratorConfig, 'routingPolicy' | 'modelRouting' | 'appleIntelligence' | 'mlx' | 'mythos'>,
   ) {}
 
   decide(task: PersistedTask, role: string, policy?: TaskPolicy): RoutingDecision {
@@ -38,6 +38,7 @@ export class RoutingService {
       platform: process.platform,
       arch: process.arch,
       mlxAvailable: this.config.mlx?.available ?? false,
+      mythosAvailable: this.config.mythos?.available ?? false,
       planningHints: this.config.routingPolicy.plannerRoles,
       appleRoles: this.config.routingPolicy.appleRoles,
       appleHints: this.config.routingPolicy.appleTaskHints,
@@ -54,6 +55,7 @@ export class RoutingService {
       preferAppleIntelligence: this.config.appleIntelligence?.preferredByHost,
       appleRuntimeAvailable: this.config.appleIntelligence?.enabled ?? true,
       mlxAvailable: this.config.mlx?.available ?? false,
+      mythosAvailable: this.config.mythos?.available ?? false,
     });
     if (modelSelection.model) {
       const previousModel = typeof task.metadata?.agent_model === 'string' ? task.metadata.agent_model : undefined;
@@ -101,6 +103,12 @@ export class RoutingService {
       return {
         ...decision,
         model: modelSelection.model?.displayName ?? this.config.modelRouting.mlx ?? 'mlx/local',
+      };
+    }
+    if (decision.engine === 'openmythos') {
+      return {
+        ...decision,
+        model: modelSelection.model?.displayName ?? this.config.modelRouting.mythos ?? 'openmythos/local',
       };
     }
     if (decision.engine === 'local-llama') {

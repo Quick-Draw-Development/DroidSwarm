@@ -1,4 +1,4 @@
-export type ModelBackend = 'apple-intelligence' | 'mlx' | 'local-llama';
+export type ModelBackend = 'apple-intelligence' | 'mlx' | 'local-llama' | 'openmythos';
 
 import { chooseBestModel, listRegisteredModels, type ModelPreferenceProfile } from '@shared-models';
 import type { RegisteredModelRecord } from '@shared-projects';
@@ -13,6 +13,7 @@ export interface ModelRouterContext {
   preferAppleIntelligence?: boolean;
   appleRuntimeAvailable?: boolean;
   mlxAvailable?: boolean;
+  mythosAvailable?: boolean;
   preferMlx?: boolean;
 }
 
@@ -22,6 +23,7 @@ export interface ModelRouteDecision {
   prefersAppleSilicon: boolean;
   appleRuntimeAvailable: boolean;
   mlxAvailable: boolean;
+  mythosAvailable: boolean;
 }
 
 export interface RoleModelSelectionInput extends ModelRouterContext {
@@ -36,6 +38,7 @@ export interface RoleModelSelectionDecision extends ModelRouteDecision {
 }
 
 const heavyTaskHints = ['vision', 'embedding', 'analysis', 'summary', 'checkpoint', 'compress'];
+const mythosTaskHints = ['deep', 'recurrent', 'long-horizon', 'code-review', 'review', 'governance', 'evolution', 'mythos'];
 
 export const detectAppleSilicon = (platform: string = process.platform, arch: string = process.arch): boolean =>
   platform === 'darwin' && arch === 'arm64';
@@ -59,12 +62,31 @@ const inferHeavyLocalContext = (context: ModelRouterContext): boolean => {
   return heavyTaskHints.some((hint) => combined.includes(hint));
 };
 
+const inferMythosContext = (context: ModelRouterContext): boolean => {
+  const combined = `${context.taskType ?? ''} ${context.stage ?? ''} ${context.summary ?? ''}`.toLowerCase();
+  const contextLength = context.contextLength ?? 0;
+  return contextLength >= 20_000 || mythosTaskHints.some((hint) => combined.includes(hint));
+};
+
 export const chooseBackendDecision = (context: ModelRouterContext = {}): ModelRouteDecision => {
   const prefersAppleSilicon = context.preferAppleIntelligence ?? detectAppleSilicon(context.platform, context.arch);
   const appleRuntimeAvailable = context.appleRuntimeAvailable !== false;
   const mlxAvailable = context.mlxAvailable === true;
+  const mythosAvailable = context.mythosAvailable === true;
   const heavyLocalContext = inferHeavyLocalContext(context);
+  const mythosContext = inferMythosContext(context);
   const preferMlx = context.preferMlx === true || (heavyLocalContext && mlxAvailable);
+
+  if (mythosAvailable && mythosContext) {
+    return {
+      backend: 'openmythos',
+      reason: 'Deep recurrent reasoning detected; preferring OpenMythos for multi-step local cognition.',
+      prefersAppleSilicon,
+      appleRuntimeAvailable,
+      mlxAvailable,
+      mythosAvailable,
+    };
+  }
 
   if (prefersAppleSilicon && appleRuntimeAvailable) {
     return {
@@ -73,6 +95,7 @@ export const chooseBackendDecision = (context: ModelRouterContext = {}): ModelRo
       prefersAppleSilicon,
       appleRuntimeAvailable,
       mlxAvailable,
+      mythosAvailable,
     };
   }
 
@@ -85,6 +108,7 @@ export const chooseBackendDecision = (context: ModelRouterContext = {}): ModelRo
       prefersAppleSilicon,
       appleRuntimeAvailable,
       mlxAvailable,
+      mythosAvailable,
     };
   }
 
@@ -96,6 +120,7 @@ export const chooseBackendDecision = (context: ModelRouterContext = {}): ModelRo
     prefersAppleSilicon,
     appleRuntimeAvailable,
     mlxAvailable,
+    mythosAvailable,
   };
 };
 

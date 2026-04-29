@@ -68,6 +68,20 @@ describe('model-router', () => {
     }), 'mlx');
   });
 
+  it('prefers OpenMythos for deep recurrent reasoning when available', () => {
+    const decision = chooseBackendDecision({
+      summary: 'Need deep recurrent long-horizon code-review reasoning',
+      stage: 'review',
+      appleRuntimeAvailable: true,
+      mlxAvailable: true,
+      mythosAvailable: true,
+      contextLength: 24_000,
+    });
+
+    assert.equal(decision.backend, 'openmythos');
+    assert.match(decision.reason, /OpenMythos/i);
+  });
+
   it('selects a strong review model from inventory when available', () => {
     const decision = selectModelForRole({
       role: 'code-review-agent',

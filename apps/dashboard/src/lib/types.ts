@@ -196,6 +196,7 @@ export interface OrchestrationInsightsData {
   skillsRegistry?: SkillsRegistrySummary;
   codeReviews?: CodeReviewSummary;
   modelInventory?: ModelInventorySummary;
+  cognitiveEngines?: CognitiveEnginesSummary;
   longTermMemory?: LongTermMemorySummary;
   evolution?: SkillEvolutionSummary;
 }
@@ -320,6 +321,22 @@ export interface AuditTrailSummary {
     runId?: string;
     detail: string;
     hash: string;
+  }>;
+}
+
+export interface CognitiveEnginesSummary {
+  mythosEnabled: boolean;
+  mythosAvailable: boolean;
+  instances: Array<{
+    nodeId: string;
+    modelId: string;
+    displayName: string;
+    status: string;
+    spectralRadius?: number;
+    loopCount?: number;
+    driftScore?: number;
+    pid?: number;
+    updatedAt: string;
   }>;
 }
 

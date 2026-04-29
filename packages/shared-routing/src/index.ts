@@ -25,6 +25,7 @@ export interface RoutingContext {
   platform?: string;
   arch?: string;
   mlxAvailable?: boolean;
+  mythosAvailable?: boolean;
   codeHints?: string[];
   cloudEscalationHints?: string[];
 }
@@ -55,6 +56,7 @@ export class RoutingService {
       contextLength: context.summary?.length,
       appleRuntimeAvailable: appleEnabled,
       mlxAvailable: context.mlxAvailable,
+      mythosAvailable: context.mythosAvailable,
     });
     const codeHints = context.codeHints ?? defaultCodeHints;
     const cloudEscalationHints = context.cloudEscalationHints ?? defaultCloudEscalationHints;
@@ -104,11 +106,15 @@ export class RoutingService {
     ): RoutingDecision => {
       const engine = localModelDecision.backend === 'mlx'
         ? 'mlx'
+        : localModelDecision.backend === 'openmythos'
+          ? 'openmythos'
         : localModelDecision.backend === 'apple-intelligence'
           ? 'apple-intelligence'
           : 'local-llama';
       const model = localModelDecision.backend === 'mlx'
         ? 'mlx/local'
+        : localModelDecision.backend === 'openmythos'
+          ? 'openmythos/local'
         : localModelDecision.backend === 'apple-intelligence'
           ? 'apple-intelligence/local'
           : routeKind === 'planner-local' || routeKind === 'planner-local-saturated'
@@ -145,7 +151,9 @@ export class RoutingService {
         || planningHints.some((hint) => role.includes(hint))
     ) {
       return resolveLocalBackendDecision(
-        localSaturated ? 'planner-local-saturated' : 'planner-local',
+        localModelDecision.backend === 'openmythos'
+          ? (localSaturated ? 'mythos-local-throttled' : 'mythos-local')
+          : (localSaturated ? 'planner-local-saturated' : 'planner-local'),
         withAppleFallbackReason(localSaturated
           ? 'Local-first planning, review, and compression roles stay local even when local capacity is saturated.'
           : 'Local-first planning, review, and orchestration policy.'),

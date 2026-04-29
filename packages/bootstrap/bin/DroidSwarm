@@ -73,6 +73,7 @@ Commands:
   laws        Inspect and operate the governance law system
   governance  Governance status and role inspection shortcuts
   models      Refresh and inspect model inventory
+  engines     Inspect and bootstrap optional cognitive engines
   memory      Inspect, search, and prune long-term memory
   evolve      Inspect and approve governed skill evolution proposals
   skill       Create, build, approve, and list skill packs
@@ -373,6 +374,15 @@ Options:
 EOF
 }
 
+print_engines_help() {
+  cat <<'EOF'
+Usage:
+  DroidSwarm engines mythos status
+  DroidSwarm engines mythos bootstrap
+  DroidSwarm engines mythos loops <engine-id> <count>
+EOF
+}
+
 print_memory_help() {
   cat <<'EOF'
 Usage:
@@ -432,6 +442,10 @@ run_shared_skills_cli() {
 
 run_shared_models_cli() {
   node --import tsx "$ROOT_DIR/../shared-models/src/cli.ts" "$@"
+}
+
+run_mythos_cli() {
+  node --import tsx "$ROOT_DIR/../mythos-engine/src/cli.ts" "$@"
 }
 
 run_shared_memory_cli() {
@@ -2461,6 +2475,56 @@ cmd_models() {
   esac
 }
 
+cmd_engines() {
+  local engine="${1:-}"
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
+
+  case "$engine" in
+    mythos)
+      local action="${1:-status}"
+      if [[ $# -gt 0 ]]; then
+        shift
+      fi
+      case "$action" in
+        status)
+          run_mythos_cli status "$@"
+          ;;
+        bootstrap)
+          node "$ROOT_DIR/../../scripts/bootstrap-mythos.mjs" "$@"
+          ;;
+        loops)
+          local engine_id="${1:-}"
+          local count="${2:-}"
+          if [[ -z "$engine_id" || -z "$count" ]]; then
+            err "Missing Mythos engine id or loop count."
+            print_engines_help
+            return 1
+          fi
+          run_mythos_cli loops --engine-id "$engine_id" --count "$count"
+          ;;
+        help|-h|--help)
+          print_engines_help
+          ;;
+        *)
+          err "Unknown mythos command: $action"
+          print_engines_help
+          return 1
+          ;;
+      esac
+      ;;
+    help|-h|--help|'')
+      print_engines_help
+      ;;
+    *)
+      err "Unknown engines command: $engine"
+      print_engines_help
+      return 1
+      ;;
+  esac
+}
+
 cmd_memory() {
   local action="${1:-list}"
   if [[ $# -gt 0 ]]; then
@@ -3457,6 +3521,9 @@ case "$COMMAND" in
     ;;
   models)
     cmd_models "$@"
+    ;;
+  engines)
+    cmd_engines "$@"
     ;;
   memory)
     cmd_memory "$@"

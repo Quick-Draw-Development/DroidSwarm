@@ -6,7 +6,7 @@ import test from 'node:test';
 
 import { listRegisteredModels } from '@shared-projects';
 
-import { chooseBestModel, listDiscoveredModels, refreshModelInventory, scanLocalModels } from './model-inventory';
+import { chooseBestModel, listDiscoveredModels, refreshModelInventory, scanLocalModels, scanLocalModelsWithVirtualBackends } from './model-inventory';
 import { discoverModels, downloadDiscoveredModel } from './model-discovery';
 import { saveModelDiscoveryConfig } from './discovery-config';
 
@@ -47,6 +47,20 @@ test('includes apple and mlx runtime records when enabled', () => {
 
   assert.ok(models.some((entry) => entry.backend === 'apple-intelligence'));
   assert.ok(models.some((entry) => entry.backend === 'mlx'));
+});
+
+test('includes an OpenMythos runtime record when enabled', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'droidswarm-mythos-models-'));
+  const modelsDir = path.join(home, 'models');
+  fs.mkdirSync(modelsDir, { recursive: true });
+  process.env.DROIDSWARM_HOME = home;
+  process.env.DROIDSWARM_MODELS_DIR = modelsDir;
+  process.env.DROIDSWARM_ENABLE_MYTHOS = 'true';
+  process.env.DROIDSWARM_MYTHOS_BRIDGE_MODE = 'mock';
+
+  const models = scanLocalModelsWithVirtualBackends();
+
+  assert.ok(models.some((entry) => entry.backend === 'openmythos'));
 });
 
 test('scores model choices according to reasoning and latency preferences', () => {

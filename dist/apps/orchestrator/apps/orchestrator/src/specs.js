@@ -31,7 +31,7 @@ __export(specs_exports, {
 });
 module.exports = __toCommonJS(specs_exports);
 var import_node_fs = require("node:fs");
-var import_node_path = __toESM(require("node:path"));
+var import_node_path = __toESM(require("node:path"), 1);
 const CARD_FILES = {
   orchestrator: "orchestrator-card.md",
   agent: "agent-card.md",

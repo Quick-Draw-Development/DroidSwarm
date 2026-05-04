@@ -30,7 +30,7 @@ __export(SocketGateway_exports, {
   SocketGateway: () => SocketGateway
 });
 module.exports = __toCommonJS(SocketGateway_exports);
-var import_ws = __toESM(require("ws"));
+var import_ws = __toESM(require("ws"), 1);
 var import_protocol = require("../protocol");
 class SocketGateway {
   constructor(config) {

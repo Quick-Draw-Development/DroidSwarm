@@ -21,7 +21,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 var import_node_test = require("node:test");
-var import_node_assert = __toESM(require("node:assert"));
+var import_node_assert = __toESM(require("node:assert"), 1);
 var import_operator_notifications = require("./operator-notifications");
 (0, import_node_test.describe)("operator-notifications", () => {
   (0, import_node_test.it)("formats assignment content", () => {

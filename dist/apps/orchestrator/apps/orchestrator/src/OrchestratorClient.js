@@ -30,7 +30,7 @@ __export(OrchestratorClient_exports, {
   DroidSwarmOrchestratorClient: () => DroidSwarmOrchestratorClient
 });
 module.exports = __toCommonJS(OrchestratorClient_exports);
-var import_node_path = __toESM(require("node:path"));
+var import_node_path = __toESM(require("node:path"), 1);
 var import_AgentSupervisor = require("./AgentSupervisor");
 var import_config = require("./config");
 var import_OrchestratorEngine = require("./engine/OrchestratorEngine");
@@ -46,7 +46,10 @@ var import_run_lifecycle = require("./run-lifecycle");
 var import_run_shutdown = require("./run-shutdown");
 var import_ToolService = require("./tools/ToolService");
 var import_project_registry = require("./services/project-registry.service");
+var import_governance_supervisor = require("./services/governance-supervisor.service");
+var import_dynamic_skill_registry = require("./services/dynamic-skill-registry.service");
 var import_federation_bus = require("@federation-bus");
+var import_shared_governance = require("@shared-governance");
 class DroidSwarmOrchestratorClient {
   constructor(config = (0, import_config.loadConfig)()) {
     this.config = config;
@@ -63,6 +66,19 @@ class DroidSwarmOrchestratorClient {
     );
   }
   start() {
+    if (this.config.governanceEnabled) {
+      const report = (0, import_shared_governance.validateCompliance)({
+        eventType: "governance.startup",
+        actorRole: "master",
+        swarmRole: "master",
+        projectId: this.config.projectId,
+        auditLoggingEnabled: true,
+        dashboardEnabled: false
+      });
+      if (!report.ok) {
+        throw new Error(`Governance compliance failed at orchestrator startup: ${report.laws.filter((entry) => !entry.ok).map((entry) => `${entry.lawId}: ${entry.violations.join(" ")}`).join(" | ")}`);
+      }
+    }
     this.log("starting orchestrator", {
       projectId: this.config.projectId,
       projectRoot: this.config.projectRoot,
@@ -143,6 +159,10 @@ class DroidSwarmOrchestratorClient {
     this.gateway.setMessageHandler(this.engine.handleMessage.bind(this.engine));
     this.gateway.start();
     void this.announceFederationPresence();
+    this.dynamicSkillRegistry = new import_dynamic_skill_registry.DynamicSkillRegistryService(this.config);
+    this.dynamicSkillRegistry.start();
+    this.governanceSupervisor = new import_governance_supervisor.GovernanceSupervisorService(this.config);
+    this.governanceSupervisor.start();
     this.hydrateExistingTasks();
     this.persistenceService.recordSwarmTopologySnapshot();
     const recoveredSummaries = this.runLifecycle.getRecoverySummaries();
@@ -164,6 +184,8 @@ class DroidSwarmOrchestratorClient {
     this.log("run ready", this.currentRun.runId);
   }
   stop() {
+    this.dynamicSkillRegistry?.stop();
+    this.governanceSupervisor?.stop();
     if (this.currentRun) {
       (0, import_run_shutdown.finalizeRunOnShutdown)(this.persistence, this.runLifecycle, this.currentRun.runId);
     }

@@ -1,6 +1,8 @@
+var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __export = (target, all) => {
   for (var name in all)
@@ -14,6 +16,14 @@ var __copyProps = (to, from, except, desc) => {
   }
   return to;
 };
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 var AgentSupervisor_exports = {};
 __export(AgentSupervisor_exports, {
@@ -22,16 +32,28 @@ __export(AgentSupervisor_exports, {
 });
 module.exports = __toCommonJS(AgentSupervisor_exports);
 var import_node_crypto = require("node:crypto");
+var import_node_path = __toESM(require("node:path"), 1);
 var import_node_child_process = require("node:child_process");
 var import_shared_routing = require("@shared-routing");
+var import_shared_skills = require("@shared-skills");
+const resolveRalphCliPath = (workspaceRoot) => import_node_path.default.resolve(workspaceRoot, "packages/shared-skills/src/cli.ts");
 const defaultRoleInstructions = (task) => {
   const normalizedType = task.taskType.toLowerCase();
+  const combined = `${task.title} ${task.description} ${task.taskType}`.toLowerCase();
+  const prefersRalph = ["1", "true", "yes", "on"].includes((process.env.DROIDSWARM_ENABLE_RALPH ?? "").toLowerCase()) && /long-horizon|iterative|self-correct|refine|polish|recovery|synthesis/.test(combined);
   if (normalizedType === "bug") {
     const role2 = (0, import_shared_routing.getSwarmRoleDefinition)("bugfix-helper").id;
     return [{
       role: role2,
       reason: "bug-triage",
       instructions: `Investigate and fix the reported bug in task ${task.taskId}.`
+    }];
+  }
+  if (prefersRalph) {
+    return [{
+      role: "ralph-wiggum-worker",
+      reason: "persistent-loop",
+      instructions: `Iteratively refine task ${task.taskId} using fresh context windows and durable memory until <RALPH_DONE>.`
     }];
   }
   const role = (0, import_shared_routing.getSwarmRoleDefinition)("planner").id;
@@ -62,7 +84,34 @@ class AgentSupervisor {
     const agentName = this.nextAgentName(role);
     const mode = role === "tester" ? "verifier" : "worker";
     const executionTarget = this.selectExecutionTarget(role, options?.engine, options?.modelTier);
-    const child = (0, import_node_child_process.fork)(this.entryScript, [mode, JSON.stringify({
+    const child = role === "ralph-wiggum-worker" ? (() => {
+      const session = (0, import_shared_skills.startRalphWorker)({
+        projectId: options?.scope?.projectId ?? this.config.projectId,
+        goal: options?.instructions ?? task.description,
+        workerName: agentName,
+        loopConfig: {
+          maxIterations: 50,
+          completionSignal: "<RALPH_DONE>",
+          sleepMs: 5e3
+        },
+        metadata: {
+          taskId: task.taskId,
+          attemptId,
+          model,
+          longHorizon: true,
+          expectedIterations: 12
+        },
+        spawnDetached: false
+      });
+      return (0, import_node_child_process.spawn)(process.execPath, ["--import", "tsx", resolveRalphCliPath(this.config.workspaceRoot), "ralph-run", "--session-id", session.sessionId], {
+        cwd: this.config.workspaceRoot,
+        env: {
+          ...process.env,
+          DROIDSWARM_AGENT_ROLE: role
+        },
+        stdio: ["ignore", "pipe", "pipe"]
+      });
+    })() : (0, import_node_child_process.fork)(this.entryScript, [mode, JSON.stringify({
       task,
       role,
       agentName,
@@ -86,6 +135,9 @@ class AgentSupervisor {
     })], {
       env: {
         ...process.env,
+        DROIDSWARM_AGENT_ROLE: role,
+        ...options?.governance?.consensusId ? { DROIDSWARM_CONSENSUS_ID: options.governance.consensusId } : {},
+        ...options?.governance?.assignmentType ? { DROIDSWARM_GOVERNANCE_ASSIGNMENT_TYPE: options.governance.assignmentType } : {},
         ...executionTarget ? {
           DROIDSWARM_FEDERATION_REMOTE_SERIAL: executionTarget.serial,
           DROIDSWARM_FEDERATION_REMOTE_ENTRY: executionTarget.remoteEntry,

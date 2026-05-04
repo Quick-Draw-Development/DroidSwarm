@@ -32,7 +32,7 @@ __export(ToolService_exports, {
 module.exports = __toCommonJS(ToolService_exports);
 var import_node_child_process = require("node:child_process");
 var import_node_fs = require("node:fs");
-var import_node_path = __toESM(require("node:path"));
+var import_node_path = __toESM(require("node:path"), 1);
 const truncate = (value, limit = 1024) => value.length <= limit ? value : `${value.slice(0, limit - 3)}...`;
 const ensureStringArray = (value) => {
   if (Array.isArray(value)) {

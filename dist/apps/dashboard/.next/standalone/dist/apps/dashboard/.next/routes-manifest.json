@@ -91,16 +91,70 @@
       "namedRegex": "^/_not\\-found(?:/)?$"
     },
     {
+      "page": "/api/brain",
+      "regex": "^/api/brain(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/brain(?:/)?$"
+    },
+    {
+      "page": "/api/engines/mythos",
+      "regex": "^/api/engines/mythos(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/engines/mythos(?:/)?$"
+    },
+    {
+      "page": "/api/governance/proposals",
+      "regex": "^/api/governance/proposals(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/governance/proposals(?:/)?$"
+    },
+    {
       "page": "/api/identity",
       "regex": "^/api/identity(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/api/identity(?:/)?$"
     },
     {
+      "page": "/api/memory",
+      "regex": "^/api/memory(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/memory(?:/)?$"
+    },
+    {
+      "page": "/api/models",
+      "regex": "^/api/models(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/models(?:/)?$"
+    },
+    {
       "page": "/api/operator/messages",
       "regex": "^/api/operator/messages(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/api/operator/messages(?:/)?$"
+    },
+    {
+      "page": "/api/ralph",
+      "regex": "^/api/ralph(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/ralph(?:/)?$"
+    },
+    {
+      "page": "/api/reviews",
+      "regex": "^/api/reviews(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/reviews(?:/)?$"
+    },
+    {
+      "page": "/api/skills/evolution",
+      "regex": "^/api/skills/evolution(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/skills/evolution(?:/)?$"
+    },
+    {
+      "page": "/api/skills/registry",
+      "regex": "^/api/skills/registry(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/skills/registry(?:/)?$"
     },
     {
       "page": "/api/socket-url",

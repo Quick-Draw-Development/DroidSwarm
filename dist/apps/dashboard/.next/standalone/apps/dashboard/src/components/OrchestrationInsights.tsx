@@ -9,6 +9,7 @@ import type {
   OrchestrationInsightsData,
   RunSummary,
   RunTimelineEntry,
+  SkillsRegistrySummary,
   TaskNode,
   VerificationTaskSummary,
 } from '../lib/types';
@@ -158,6 +159,13 @@ const renderAuditEntry = (entry: AuditTrailSummary['latestEvents'][number], inde
   </li>
 );
 
+const renderRegisteredSkillEntry = (entry: SkillsRegistrySummary['skills'][number], index: number) => (
+  <li key={`${entry.name}-${index}`} className="insight-item">
+    <strong>{entry.name}</strong>
+    <span>{entry.status} · {entry.capabilities.join(', ') || 'no capabilities declared'}</span>
+  </li>
+);
+
 const schedulerEventTypes = new Set([
   'run_started',
   'run_recovered',
@@ -191,6 +199,8 @@ export function OrchestrationInsights({ data }: { data: OrchestrationInsightsDat
   const serviceUsage = data.serviceUsage;
   const federation = data.federation;
   const auditTrail = data.auditTrail;
+  const governance = data.governance;
+  const skillsRegistry = data.skillsRegistry;
   const runSummary = (() => {
     if (!latestRun?.metadata) {
       return undefined;
@@ -475,6 +485,51 @@ export function OrchestrationInsights({ data }: { data: OrchestrationInsightsDat
             </ul>
           ) : (
             <p className="empty-copy">Audit trail unavailable.</p>
+          )}
+        </article>
+        <article className="insight-card">
+          <p className="section-title">Governance status</p>
+          {governance ? (
+            <ul className="insight-list">
+              <li className="insight-item">
+                <strong>Active laws</strong>
+                <span>{governance.activeLawCount} · pending {governance.pendingProposalCount}</span>
+              </li>
+              <li className="insight-item">
+                <strong>Law hash</strong>
+                <span>{governance.lawHash}</span>
+              </li>
+              <li className="insight-item">
+                <strong>Consensus / drift</strong>
+                <span>{governance.consensus.length} rounds · {governance.drift.filter((entry) => !entry.matches).length} mismatches</span>
+              </li>
+              {governance.latestDebateAt ? (
+                <li className="insight-item">
+                  <strong>Latest debate</strong>
+                  <span>{displayDate(governance.latestDebateAt)}</span>
+                </li>
+              ) : null}
+            </ul>
+          ) : (
+            <p className="empty-copy">Governance status unavailable.</p>
+          )}
+        </article>
+        <article className="insight-card">
+          <p className="section-title">Skills registry</p>
+          {skillsRegistry ? (
+            <ul className="insight-list">
+              <li className="insight-item">
+                <strong>Counts</strong>
+                <span>
+                  skills {skillsRegistry.activeSkillCount} active / {skillsRegistry.pendingSkillCount} pending · agents {skillsRegistry.activeAgentCount} active / {skillsRegistry.pendingAgentCount} pending
+                </span>
+              </li>
+              {skillsRegistry.skills.length > 0
+                ? skillsRegistry.skills.slice(0, 4).map(renderRegisteredSkillEntry)
+                : <li className="insight-empty">No registered skills.</li>}
+            </ul>
+          ) : (
+            <p className="empty-copy">Skills registry unavailable.</p>
           )}
         </article>
         <article className="insight-card">

@@ -192,6 +192,123 @@ export interface OrchestrationInsightsData {
   serviceUsage?: RunServiceUsageSummary;
   federation?: FederationStatusSummary;
   auditTrail?: AuditTrailSummary;
+  governance?: GovernanceSummary;
+  skillsRegistry?: SkillsRegistrySummary;
+  codeReviews?: CodeReviewSummary;
+  modelInventory?: ModelInventorySummary;
+  cognitiveEngines?: CognitiveEnginesSummary;
+  persistentWorkers?: PersistentWorkersSummary;
+  brain?: AgentBrainSummary;
+  longTermMemory?: LongTermMemorySummary;
+  evolution?: SkillEvolutionSummary;
+}
+
+export interface CodeReviewSummary {
+  activeReviewCount: number;
+  clarificationCount: number;
+  completedReviewCount: number;
+  reviews: Array<{
+    reviewId: string;
+    prId: string;
+    title: string;
+    status: string;
+    summary: string;
+    findingsMarkdown: string;
+    updatedAt: string;
+  }>;
+}
+
+export interface GovernanceSummary {
+  lawHash: string;
+  systemStateHash: string;
+  activeLawCount: number;
+  pendingProposalCount: number;
+  approvedProposalCount: number;
+  latestDebateAt?: string;
+  roles: Array<{
+    id: string;
+    title: string;
+    responsibility: string;
+  }>;
+  consensus: Array<{
+    consensusId: string;
+    proposalId: string;
+    proposalType: string;
+    approved: boolean;
+    guardianVeto: boolean;
+    updatedAt: string;
+  }>;
+  drift: Array<{
+    nodeId: string;
+    localHash: string;
+    remoteHash?: string;
+    matches: boolean;
+    source?: string;
+    createdAt: string;
+  }>;
+  laws: Array<{
+    id: string;
+    title: string;
+    description: string;
+    version: string;
+  }>;
+  proposals: Array<{
+    proposalId: string;
+    lawId: string;
+    title: string;
+    status: string;
+    proposedBy: string;
+    updatedAt: string;
+  }>;
+}
+
+export interface SkillsRegistrySummary {
+  activeSkillCount: number;
+  pendingSkillCount: number;
+  activeAgentCount: number;
+  pendingAgentCount: number;
+  skills: Array<{
+    name: string;
+    version: string;
+    status: string;
+    capabilities: string[];
+  }>;
+  agents: Array<{
+    name: string;
+    version: string;
+    status: string;
+    skills: string[];
+    priority: string;
+  }>;
+}
+
+export interface ModelInventorySummary {
+  totalModelCount: number;
+  nodeCount: number;
+  discoveredModelCount: number;
+  backends: Array<{
+    backend: string;
+    count: number;
+  }>;
+  models: Array<{
+    nodeId: string;
+    modelId: string;
+    displayName: string;
+    backend: string;
+    reasoningDepth: string;
+    speedTier: string;
+    contextLength?: number;
+    updatedAt: string;
+  }>;
+  discovered: Array<{
+    nodeId: string;
+    modelId: string;
+    displayName: string;
+    author?: string;
+    quantization?: string;
+    lifecycleStatus: string;
+    updatedAt: string;
+  }>;
 }
 
 export interface AuditTrailSummary {
@@ -206,6 +323,85 @@ export interface AuditTrailSummary {
     runId?: string;
     detail: string;
     hash: string;
+  }>;
+}
+
+export interface CognitiveEnginesSummary {
+  mythosEnabled: boolean;
+  mythosAvailable: boolean;
+  instances: Array<{
+    nodeId: string;
+    modelId: string;
+    displayName: string;
+    status: string;
+    spectralRadius?: number;
+    loopCount?: number;
+    driftScore?: number;
+    pid?: number;
+    updatedAt: string;
+  }>;
+}
+
+export interface PersistentWorkersSummary {
+  activeCount: number;
+  pausedCount: number;
+  completedCount: number;
+  sessions: Array<{
+    sessionId: string;
+    projectId: string;
+    workerName: string;
+    status: string;
+    iterationCount: number;
+    maxIterations: number;
+    goal: string;
+    routeKind?: string;
+    engine?: string;
+    updatedAt: string;
+  }>;
+}
+
+export interface AgentBrainSummary {
+  root: string;
+  workingCount: number;
+  episodicCount: number;
+  semanticCount: number;
+  personalCount: number;
+  pendingCandidateCount: number;
+  skillIndexPresent: boolean;
+  candidates: Array<{
+    candidateId: string;
+    summary: string;
+    status: string;
+  }>;
+}
+
+export interface LongTermMemorySummary {
+  totalCount: number;
+  patternCount: number;
+  proceduralCount: number;
+  recent: Array<{
+    memoryId: string;
+    memoryType: string;
+    englishTranslation: string;
+    relevanceScore: number;
+    timestamp: string;
+  }>;
+}
+
+export interface SkillEvolutionSummary {
+  pendingCount: number;
+  approvedCount: number;
+  proposals: Array<{
+    proposalId: string;
+    proposalType: string;
+    targetSkill?: string;
+    title: string;
+    description: string;
+    rationale: string;
+    status: string;
+    proposedBy: string;
+    manifestName?: string;
+    updatedAt: string;
   }>;
 }
 export interface ProjectIdentity {

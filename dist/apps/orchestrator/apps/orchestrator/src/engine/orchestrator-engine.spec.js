@@ -20,7 +20,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
   mod
 ));
-var import_strict = __toESM(require("node:assert/strict"));
+var import_strict = __toESM(require("node:assert/strict"), 1);
 var import_node_test = require("node:test");
 var import_OrchestratorEngine = require("./OrchestratorEngine");
 var import_worker_registry = require("../worker-registry");

@@ -1,4 +1,17 @@
 import { cookies } from 'next/headers';
+import {
+  computeSystemStateHash,
+  listActiveLaws,
+  listConsensusRounds,
+  listDriftSnapshots,
+  listGovernanceRoles,
+  listLawProposals,
+  validateCompliance,
+} from '@shared-governance';
+import { getModelLifecycleStatus, listDiscoveredModels, listRegisteredModels } from '@shared-models';
+import { getBrainStatus, listBrainPromotionCandidates, listLongTermMemories } from '@shared-memory';
+import { getEvolutionStatus, listRegisteredSkillManifests, listSpecializedAgents } from '@shared-skills';
+import { listCodeReviewRuns, listRalphWorkerSessions } from '@shared-projects';
 
 import { BoardShell } from '../../components/BoardShell';
 import { ProjectSwitcher } from '../../components/project-switcher';
@@ -67,6 +80,216 @@ export default async function BoardPage({
     serviceUsage: getRunServiceUsage(latestRunId),
     federation: getFederationStatus(),
     auditTrail: getAuditTrail(latestRunId),
+    governance: (() => {
+      const laws = listActiveLaws();
+      const proposals = listLawProposals();
+      const status = validateCompliance({
+        eventType: 'dashboard.read',
+        actorRole: 'dashboard',
+        swarmRole: process.env.DROIDSWARM_SWARM_ROLE === 'slave' ? 'slave' : 'master',
+        projectId: selectedProjectId,
+        auditLoggingEnabled: true,
+        dashboardEnabled: true,
+      });
+      return {
+        lawHash: status.lawHash,
+        systemStateHash: computeSystemStateHash(),
+        activeLawCount: laws.length,
+        pendingProposalCount: proposals.filter((entry) => entry.status === 'pending').length,
+        approvedProposalCount: proposals.filter((entry) => entry.status === 'approved').length,
+        latestDebateAt: proposals[0]?.updatedAt,
+        roles: listGovernanceRoles(),
+        consensus: listConsensusRounds().slice(0, 8).map((round) => ({
+          consensusId: round.consensusId,
+          proposalId: round.proposalId,
+          proposalType: round.proposalType,
+          approved: round.approved,
+          guardianVeto: round.guardianVeto,
+          updatedAt: round.updatedAt,
+        })),
+        drift: listDriftSnapshots().slice(0, 8).map((snapshot) => ({
+          nodeId: snapshot.nodeId,
+          localHash: snapshot.localHash,
+          remoteHash: snapshot.remoteHash,
+          matches: snapshot.matches,
+          source: snapshot.source,
+          createdAt: snapshot.createdAt,
+        })),
+        laws: laws.map((law) => ({
+          id: law.id,
+          title: law.title,
+          description: law.description,
+          version: law.version,
+        })),
+        proposals: proposals.slice(0, 8).map((proposal) => ({
+          proposalId: proposal.proposalId,
+          lawId: proposal.lawId,
+          title: proposal.title,
+          status: proposal.status,
+          proposedBy: proposal.proposedBy,
+          updatedAt: proposal.updatedAt,
+        })),
+      };
+    })(),
+    skillsRegistry: (() => {
+      const skills = listRegisteredSkillManifests();
+      const agents = listSpecializedAgents();
+      return {
+        activeSkillCount: skills.filter((entry) => entry.status === 'active').length,
+        pendingSkillCount: skills.filter((entry) => entry.status === 'pending-approval').length,
+        activeAgentCount: agents.filter((entry) => entry.status === 'active').length,
+        pendingAgentCount: agents.filter((entry) => entry.status === 'pending-approval').length,
+        skills: skills.slice(0, 8).map((entry) => ({
+          name: entry.name,
+          version: entry.version,
+          status: entry.status,
+          capabilities: entry.capabilities,
+        })),
+        agents: agents.slice(0, 8).map((entry) => ({
+          name: entry.name,
+          version: entry.version,
+          status: entry.status,
+          skills: entry.skills,
+          priority: entry.priority,
+        })),
+      };
+    })(),
+    codeReviews: (() => {
+      const reviews = listCodeReviewRuns({ projectId: selectedProjectId }).slice(0, 8);
+      return {
+        activeReviewCount: reviews.filter((entry) => entry.status === 'pending').length,
+        clarificationCount: reviews.filter((entry) => entry.status === 'clarification-needed').length,
+        completedReviewCount: reviews.filter((entry) => entry.status === 'completed').length,
+        reviews: reviews.map((entry) => ({
+          reviewId: entry.reviewId,
+          prId: entry.prId,
+          title: entry.title,
+          status: entry.status,
+          summary: entry.summary,
+          findingsMarkdown: entry.findingsMarkdown,
+          updatedAt: entry.updatedAt,
+        })),
+      };
+    })(),
+    modelInventory: (() => {
+      const models = listRegisteredModels().slice(0, 12);
+      const discovered = listDiscoveredModels({ newOnly: false }).slice(0, 8);
+      const backendCounts = new Map<string, number>();
+      const nodes = new Set<string>();
+      for (const model of models) {
+        backendCounts.set(model.backend, (backendCounts.get(model.backend) ?? 0) + 1);
+        nodes.add(model.nodeId);
+      }
+      return {
+        totalModelCount: models.length,
+        nodeCount: nodes.size,
+        discoveredModelCount: discovered.length,
+        backends: [...backendCounts.entries()].map(([backend, count]) => ({ backend, count })),
+        models: models.map((model) => ({
+          nodeId: model.nodeId,
+          modelId: model.modelId,
+          displayName: model.displayName,
+          backend: model.backend,
+          reasoningDepth: model.reasoningDepth,
+          speedTier: model.speedTier,
+          contextLength: model.contextLength,
+          updatedAt: model.updatedAt,
+        })),
+        discovered: discovered.map((model) => ({
+          nodeId: model.nodeId,
+          modelId: model.modelId,
+          displayName: model.displayName,
+          author: typeof model.metadata.author === 'string' ? model.metadata.author : undefined,
+          quantization: model.quantization,
+          lifecycleStatus: getModelLifecycleStatus(model),
+          updatedAt: model.updatedAt,
+        })),
+      };
+    })(),
+    cognitiveEngines: (() => {
+      const mythos = listRegisteredModels({ backend: 'openmythos' }).slice(0, 8);
+      return {
+        mythosEnabled: ['1', 'true', 'yes', 'on'].includes((process.env.DROIDSWARM_ENABLE_MYTHOS ?? '').toLowerCase()),
+        mythosAvailable: mythos.some((entry) => entry.enabled),
+        instances: mythos.map((entry) => ({
+          nodeId: entry.nodeId,
+          modelId: entry.modelId,
+          displayName: entry.displayName,
+          status: typeof entry.metadata.status === 'string' ? entry.metadata.status : 'ready',
+          spectralRadius: typeof entry.metadata.spectralRadius === 'number' ? entry.metadata.spectralRadius : undefined,
+          loopCount: typeof entry.metadata.loopCount === 'number' ? entry.metadata.loopCount : undefined,
+          driftScore: typeof entry.metadata.driftScore === 'number' ? entry.metadata.driftScore : undefined,
+          pid: typeof entry.metadata.pid === 'number' ? entry.metadata.pid : undefined,
+          updatedAt: entry.updatedAt,
+        })),
+      };
+    })(),
+    persistentWorkers: (() => {
+      const sessions = listRalphWorkerSessions({ projectId: selectedProjectId }).slice(0, 8);
+      return {
+        activeCount: sessions.filter((entry) => entry.status === 'running').length,
+        pausedCount: sessions.filter((entry) => entry.status === 'paused').length,
+        completedCount: sessions.filter((entry) => entry.status === 'completed').length,
+        sessions: sessions.map((entry) => ({
+          sessionId: entry.sessionId,
+          projectId: entry.projectId,
+          workerName: entry.workerName,
+          status: entry.status,
+          iterationCount: entry.iterationCount,
+          maxIterations: entry.maxIterations,
+          goal: entry.goal,
+          routeKind: entry.routeKind,
+          engine: entry.engine,
+          updatedAt: entry.updatedAt,
+        })),
+      };
+    })(),
+    brain: (() => {
+      const status = getBrainStatus({ projectId: selectedProjectId });
+      const candidates = listBrainPromotionCandidates({ projectId: selectedProjectId }).slice(0, 8);
+      return {
+        ...status,
+        candidates: candidates.map((candidate) => ({
+          candidateId: candidate.candidateId,
+          summary: candidate.summary,
+          status: candidate.status,
+        })),
+      };
+    })(),
+    longTermMemory: (() => {
+      const recent = listLongTermMemories({ projectId: selectedProjectId, limit: 12 });
+      return {
+        totalCount: recent.length,
+        patternCount: recent.filter((entry) => entry.memoryType === 'pattern').length,
+        proceduralCount: recent.filter((entry) => entry.memoryType === 'procedural').length,
+        recent: recent.map((entry) => ({
+          memoryId: entry.memoryId,
+          memoryType: entry.memoryType,
+          englishTranslation: entry.englishTranslation,
+          relevanceScore: entry.relevanceScore,
+          timestamp: entry.timestamp,
+        })),
+      };
+    })(),
+    evolution: (() => {
+      const status = getEvolutionStatus(selectedProjectId);
+      return {
+        pendingCount: status.proposals.filter((entry) => entry.status === 'pending-human-approval').length,
+        approvedCount: status.proposals.filter((entry) => entry.status === 'approved').length,
+        proposals: status.proposals.slice(0, 8).map((proposal) => ({
+          proposalId: proposal.proposalId,
+          proposalType: proposal.proposalType,
+          targetSkill: proposal.targetSkill,
+          title: proposal.title,
+          description: proposal.description,
+          rationale: proposal.rationale,
+          status: proposal.status,
+          proposedBy: proposal.proposedBy,
+          manifestName: typeof proposal.manifest.name === 'string' ? proposal.manifest.name : undefined,
+          updatedAt: proposal.updatedAt,
+        })),
+      };
+    })(),
   };
   const operatorMessages = listOperatorMessages();
   const appVersion = getAppVersion();

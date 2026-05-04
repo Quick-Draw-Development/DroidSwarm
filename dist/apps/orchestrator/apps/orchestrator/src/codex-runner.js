@@ -32,7 +32,7 @@ __export(codex_runner_exports, {
 module.exports = __toCommonJS(codex_runner_exports);
 var import_node_fs = require("node:fs");
 var import_node_os = require("node:os");
-var import_node_path = __toESM(require("node:path"));
+var import_node_path = __toESM(require("node:path"), 1);
 var import_node_child_process = require("node:child_process");
 var import_codex_schema = require("./codex-schema");
 const createTempWorkspace = () => (0, import_node_fs.mkdtempSync)(import_node_path.default.join((0, import_node_os.tmpdir)(), "droidswarm-codex-"));

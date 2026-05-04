@@ -26,6 +26,7 @@ var import_node_crypto = require("node:crypto");
 var import_node_http = require("node:http");
 var import_ws = require("ws");
 var import_federation_bus = require("@federation-bus");
+var import_shared_governance = require("@shared-governance");
 var import_authenticate = require("./auth/authenticate");
 var import_client = require("./db/client");
 var import_repositories = require("./db/repositories");
@@ -54,6 +55,19 @@ class DroidSwarmSocketServer {
     });
   }
   async start() {
+    if (this.config.governanceEnabled) {
+      const report = (0, import_shared_governance.validateCompliance)({
+        eventType: "socket-server.start",
+        actorRole: "gateway",
+        swarmRole: "master",
+        projectId: this.config.projectId,
+        auditLoggingEnabled: true,
+        dashboardEnabled: false
+      });
+      if (!report.ok) {
+        throw new Error(`Governance compliance failed for socket server startup.`);
+      }
+    }
     await new Promise((resolve) => {
       this.httpServer.listen(this.config.port, this.config.host, () => {
         resolve();
@@ -201,6 +215,21 @@ class DroidSwarmSocketServer {
     if (message.project_id !== this.config.projectId || message.room_id !== client.roomId) {
       this.sendRoomError(client, "Message project or room mismatch", "message_scope_mismatch");
       return;
+    }
+    if (this.config.governanceEnabled) {
+      const governance = (0, import_shared_governance.validateCompliance)({
+        eventType: message.verb.startsWith("governance.") ? "governance.proposal" : "socket-server.message",
+        actorRole: client.agentRole,
+        swarmRole: "master",
+        projectId: message.project_id,
+        auditLoggingEnabled: true,
+        dashboardEnabled: false,
+        droidspeakState: message.payload?.droidspeak ?? message.body?.droidspeak
+      });
+      if (!governance.ok) {
+        this.sendRoomError(client, governance.laws.filter((entry) => !entry.ok).map((entry) => entry.violations.join(" ")).join(" "), "governance_violation");
+        return;
+      }
     }
     if (message.type === "heartbeat") {
       this.persistence.recordConnectionAuth({
@@ -390,6 +419,7 @@ class DroidSwarmSocketServer {
       "verification.completed": "verification_completed",
       "run.completed": "run_completed",
       "handoff.ready": "handoff_event",
+      "consensus.round": "trace_event",
       "summary.emitted": "guardrail_event",
       "memory.pinned": "checkpoint_event",
       "drift.detected": "trace_event",

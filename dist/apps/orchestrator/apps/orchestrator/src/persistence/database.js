@@ -30,9 +30,9 @@ __export(database_exports, {
   openPersistenceDatabase: () => openPersistenceDatabase
 });
 module.exports = __toCommonJS(database_exports);
-var import_better_sqlite3 = __toESM(require("better-sqlite3"));
-var fs = __toESM(require("node:fs"));
-var path = __toESM(require("node:path"));
+var import_better_sqlite3 = __toESM(require("better-sqlite3"), 1);
+var fs = __toESM(require("node:fs"), 1);
+var path = __toESM(require("node:path"), 1);
 var import_schema = require("./schema");
 const openPersistenceDatabase = (dbPath) => {
   const directory = path.dirname(dbPath);

@@ -30,10 +30,12 @@ __export(config_exports, {
   loadConfig: () => loadConfig
 });
 module.exports = __toCommonJS(config_exports);
-var import_node_fs = __toESM(require("node:fs"));
-var import_node_path = __toESM(require("node:path"));
+var import_node_fs = __toESM(require("node:fs"), 1);
+var import_node_path = __toESM(require("node:path"), 1);
 var import_shared_git = require("@shared-git");
+var import_mythos_engine = require("@mythos-engine");
 var import_model_router = require("@model-router");
+var import_shared_models = require("@shared-models");
 var import_specs = require("./specs");
 var import_zod = require("zod");
 const toPositiveInt = (value, fallback) => {
@@ -116,6 +118,8 @@ const envSchema = import_zod.z.object({
   DROIDSWARM_DEVELOP_BRANCH: import_zod.z.string().optional(),
   DROIDSWARM_ALLOWED_REPO_ROOTS: import_zod.z.string().optional(),
   DROIDSWARM_WORKSPACE_ROOT: import_zod.z.string().optional(),
+  DROIDSWARM_SKILLS_DIR: import_zod.z.string().optional(),
+  DROIDSWARM_ENABLE_SKILL_WATCH: import_zod.z.string().optional(),
   DROIDSWARM_WORKER_HOST_ENTRY: import_zod.z.string().optional(),
   DROIDSWARM_OPERATOR_TOKEN: import_zod.z.string().optional(),
   DROIDSWARM_ORCHESTRATOR_NAME: import_zod.z.string().optional(),
@@ -157,10 +161,15 @@ const envSchema = import_zod.z.object({
   DROIDSWARM_MODEL_CODE: import_zod.z.string().optional(),
   DROIDSWARM_MODEL_APPLE: import_zod.z.string().optional(),
   DROIDSWARM_MODEL_MLX: import_zod.z.string().optional(),
+  DROIDSWARM_MODEL_MYTHOS: import_zod.z.string().optional(),
   DROIDSWARM_MODEL_DEFAULT: import_zod.z.string().optional(),
   DROIDSWARM_APPLE_INTELLIGENCE_ENABLED: import_zod.z.string().optional(),
   DROIDSWARM_MLX_ENABLED: import_zod.z.string().optional(),
   DROIDSWARM_MLX_BASE_URL: import_zod.z.string().optional(),
+  DROIDSWARM_ENABLE_MYTHOS: import_zod.z.string().optional(),
+  DROIDSWARM_MYTHOS_PYTHON_BIN: import_zod.z.string().optional(),
+  DROIDSWARM_MYTHOS_DEFAULT_LOOPS: import_zod.z.string().optional(),
+  DROIDSWARM_MYTHOS_MAX_LOOPS: import_zod.z.string().optional(),
   DROIDSWARM_ROUTING_PLANNER_ROLES: import_zod.z.string().optional(),
   DROIDSWARM_ROUTING_APPLE_ROLES: import_zod.z.string().optional(),
   DROIDSWARM_ROUTING_APPLE_HINTS: import_zod.z.string().optional(),
@@ -188,7 +197,8 @@ const envSchema = import_zod.z.object({
   DROIDSWARM_FEDERATION_SIGNING_KEY_ID: import_zod.z.string().optional(),
   DROIDSWARM_FEDERATION_SIGNING_PRIVATE_KEY: import_zod.z.string().optional(),
   DROIDSWARM_FEDERATION_REMOTE_WORKERS_FILE: import_zod.z.string().optional(),
-  DROIDSWARM_FEDERATION_REMOTE_WORKERS: import_zod.z.string().optional()
+  DROIDSWARM_FEDERATION_REMOTE_WORKERS: import_zod.z.string().optional(),
+  DROIDSWARM_ENABLE_GOVERNANCE: import_zod.z.string().optional()
 });
 const loadConfig = () => {
   const env = envSchema.parse(process.env);
@@ -196,21 +206,22 @@ const loadConfig = () => {
   const droidswarmHome = process.env.DROIDSWARM_HOME ?? import_node_path.default.resolve(process.env.HOME ?? process.cwd(), ".droidswarm");
   const installDir = process.env.DROIDSWARM_INSTALL_DIR ?? import_node_path.default.resolve(droidswarmHome, "install");
   const runtimeDir = process.env.DROIDSWARM_RUNTIME_DIR ?? import_node_path.default.resolve(installDir, "runtime");
-  const modelsDir = process.env.DROIDSWARM_MODELS_DIR ?? import_node_path.default.resolve(droidswarmHome, "models");
-  const llamaModelsFile = env.DROIDSWARM_LLAMA_MODELS_FILE ?? import_node_path.default.resolve(modelsDir, "inventory.json");
-  const availableLlamaModels = (() => {
-    if (!import_node_fs.default.existsSync(llamaModelsFile)) {
-      return void 0;
-    }
-    try {
-      const payload = JSON.parse(import_node_fs.default.readFileSync(llamaModelsFile, "utf8"));
-      const models = Array.isArray(payload.models) ? payload.models : [];
-      const normalized = models.filter((model) => typeof model.id === "string" && typeof model.name === "string" && typeof model.path === "string").filter((model) => import_node_fs.default.existsSync(model.path));
-      return normalized.length > 0 ? normalized : void 0;
-    } catch {
-      return void 0;
-    }
-  })();
+  const modelsDir = (0, import_shared_models.resolveModelsRoot)();
+  const llamaModelsFile = (0, import_shared_models.resolveModelInventoryCacheFile)();
+  const modelInventory = (0, import_shared_models.refreshModelInventory)({
+    nodeId: env.DROIDSWARM_FEDERATION_NODE_ID,
+    modelsRoot: modelsDir,
+    cacheFile: llamaModelsFile,
+    includeVirtualBackends: true,
+    persist: true
+  });
+  const availableLlamaModels = modelInventory.models.filter((model) => model.backend === "local-llama" && typeof model.path === "string").map((model) => ({
+    id: model.modelId,
+    name: model.displayName,
+    tags: model.tags.join(","),
+    path: model.path,
+    url: typeof model.metadata.url === "string" ? model.metadata.url : void 0
+  }));
   const host = env.DROIDSWARM_SOCKET_HOST ?? "127.0.0.1";
   const port = toPositiveInt(env.DROIDSWARM_SOCKET_PORT, 8765);
   const specDir = env.DROIDSWARM_SPECS_DIR ?? import_node_path.default.resolve(__dirname, "..", "..", "..", "packages", "bootstrap", "specs");
@@ -220,6 +231,7 @@ const loadConfig = () => {
   const codeModel = env.DROIDSWARM_MODEL_CODE ?? "claude-3.5-sonnet";
   const appleModel = env.DROIDSWARM_MODEL_APPLE ?? "apple-intelligence/local";
   const mlxModel = env.DROIDSWARM_MODEL_MLX ?? "mlx/local";
+  const mythosModel = env.DROIDSWARM_MODEL_MYTHOS ?? "openmythos/local";
   const defaultModel = env.DROIDSWARM_MODEL_DEFAULT ?? env.DROIDSWARM_CODEX_MODEL ?? "o1-preview";
   const appleSdkAvailable = hasAppleIntelligenceSdk();
   const prefersAppleHost = (0, import_model_router.detectAppleSilicon)();
@@ -232,6 +244,15 @@ const loadConfig = () => {
     baseUrl: mlxBaseUrl,
     model: mlxModel
   });
+  const mythosEnabled = parseBooleanFlag(env.DROIDSWARM_ENABLE_MYTHOS, false);
+  const mythosStatus = mythosEnabled ? (() => {
+    try {
+      return (0, import_mythos_engine.inspectMythosRuntimeSync)();
+    } catch {
+      return void 0;
+    }
+  })() : void 0;
+  const mythosAvailable = mythosStatus?.available === true;
   const budgetMaxConsumed = toPositiveIntOrUndefined(env.DROIDSWARM_BUDGET_MAX_CONSUMED);
   const allowedTools = parseCommaList(env.DROIDSWARM_ALLOWED_TOOLS);
   const policyAllowedTools = parseOptionalCommaList(env.DROIDSWARM_POLICY_ALLOWED_TOOLS) ?? (allowedTools.length > 0 ? allowedTools : void 0);
@@ -285,7 +306,7 @@ const loadConfig = () => {
         remoteEntry: record.remoteEntry,
         remoteCommand: typeof record.remoteCommand === "string" ? record.remoteCommand : void 0,
         roles: Array.isArray(record.roles) ? record.roles.filter((value) => typeof value === "string") : void 0,
-        engines: Array.isArray(record.engines) ? record.engines.filter((value) => value === "local-llama" || value === "mlx" || value === "apple-intelligence" || value === "codex-cloud" || value === "codex-cli") : void 0,
+        engines: Array.isArray(record.engines) ? record.engines.filter((value) => value === "local-llama" || value === "mlx" || value === "apple-intelligence" || value === "openmythos" || value === "codex-cloud" || value === "codex-cli") : void 0,
         modelTier,
         workspaceRoot: typeof record.workspaceRoot === "string" ? record.workspaceRoot : void 0,
         nodeId: typeof record.nodeId === "string" ? record.nodeId : void 0
@@ -313,6 +334,7 @@ const loadConfig = () => {
     defaultBranch,
     developBranch,
     allowedRepoRoots: allowedRepoRoots.length > 0 ? allowedRepoRoots : [projectRoot],
+    skillsDir: env.DROIDSWARM_SKILLS_DIR ?? import_node_path.default.resolve(projectRoot, "skills"),
     workspaceRoot: env.DROIDSWARM_WORKSPACE_ROOT ?? import_node_path.default.resolve(projectRoot, ".droidswarm", "workspaces"),
     workerHostEntry,
     operatorToken: env.DROIDSWARM_OPERATOR_TOKEN,
@@ -360,6 +382,7 @@ const loadConfig = () => {
       code: codeModel,
       apple: appleModel,
       mlx: mlxModel,
+      mythos: mythosModel,
       default: defaultModel
     },
     appleIntelligence: {
@@ -372,6 +395,14 @@ const loadConfig = () => {
       available: mlxAvailable,
       baseUrl: mlxBaseUrl,
       model: mlxModel
+    },
+    mythos: {
+      enabled: mythosEnabled,
+      available: mythosAvailable,
+      pythonBin: env.DROIDSWARM_MYTHOS_PYTHON_BIN ?? "python3",
+      model: mythosModel,
+      defaultLoops: toPositiveInt(env.DROIDSWARM_MYTHOS_DEFAULT_LOOPS, 6),
+      maxLoops: toPositiveInt(env.DROIDSWARM_MYTHOS_MAX_LOOPS, 24)
     },
     routingPolicy: {
       plannerRoles: parseCommaList(env.DROIDSWARM_ROUTING_PLANNER_ROLES ?? "plan,planner,research,review,orchestrator,checkpoint,compress"),
@@ -390,6 +421,8 @@ const loadConfig = () => {
     federationSigningPrivateKey: env.DROIDSWARM_FEDERATION_SIGNING_PRIVATE_KEY,
     federationRemoteWorkersFile: env.DROIDSWARM_FEDERATION_REMOTE_WORKERS_FILE,
     federationRemoteWorkers,
+    governanceEnabled: parseBooleanFlag(env.DROIDSWARM_ENABLE_GOVERNANCE, true),
+    enableSkillWatch: parseBooleanFlag(env.DROIDSWARM_ENABLE_SKILL_WATCH, environment === "development"),
     policyDefaults: {
       maxDepth: toPositiveIntOrUndefined(env.DROIDSWARM_POLICY_MAX_DEPTH),
       maxChildren: toPositiveIntOrUndefined(env.DROIDSWARM_POLICY_MAX_CHILDREN),

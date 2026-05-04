@@ -2,6 +2,7 @@
   "name": "@droidswarm/federation-bus",
   "version": "0.1.0",
   "description": "DroidSwarm Federation Bus",
+  "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {

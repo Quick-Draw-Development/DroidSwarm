@@ -20,10 +20,10 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
   mod
 ));
-var import_strict = __toESM(require("node:assert/strict"));
+var import_strict = __toESM(require("node:assert/strict"), 1);
 var import_node_test = require("node:test");
 var import_node_fs = require("node:fs");
-var import_node_path = __toESM(require("node:path"));
+var import_node_path = __toESM(require("node:path"), 1);
 var import_node_os = require("node:os");
 var import_database = require("./database");
 var import_schema = require("./schema");

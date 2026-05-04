@@ -1,8 +1,17 @@
 import { AddTaskForm } from './AddTaskForm';
 import { BoardClient } from './BoardClient';
+import { BrainPanel } from './BrainPanel';
+import { CodeReviewsPanel } from './CodeReviewsPanel';
+import { CognitiveEnginesPanel } from './CognitiveEnginesPanel';
+import { EvolutionPanel } from './EvolutionPanel';
+import { GovernancePanel } from './GovernancePanel';
 import { LiveConnectionStatus } from './LiveConnectionStatus';
+import { MemoryPanel } from './MemoryPanel';
+import { ModelInventoryPanel } from './ModelInventoryPanel';
+import { PersistentWorkersPanel } from './PersistentWorkersPanel';
 import { ProvideInstructionsModal } from './ProvideInstructionsModal';
 import { OrchestrationInsights } from './OrchestrationInsights';
+import { SkillsRegistryPanel } from './SkillsRegistryPanel';
 import type { MessageRecord, TaskRecord, OrchestrationInsightsData } from '../lib/types';
 
 export function BoardShell({
@@ -44,6 +53,15 @@ export function BoardShell({
         <AddTaskForm username={username} />
       </section>
       <BoardClient username={username} tasks={tasks} />
+      <GovernancePanel governance={insights.governance} />
+      <ModelInventoryPanel inventory={insights.modelInventory} />
+      <CognitiveEnginesPanel engines={insights.cognitiveEngines} />
+      <BrainPanel brain={insights.brain} />
+      <PersistentWorkersPanel workers={insights.persistentWorkers} />
+      <MemoryPanel memory={insights.longTermMemory} />
+      <EvolutionPanel evolution={insights.evolution} />
+      <SkillsRegistryPanel registry={insights.skillsRegistry} />
+      <CodeReviewsPanel reviews={insights.codeReviews} />
       <OrchestrationInsights data={insights} />
     </main>
   );

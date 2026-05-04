@@ -74,6 +74,7 @@ const loadConfig = () => {
     federationPollMs: toPositiveInt(process.env.DROIDSWARM_FEDERATION_POLL_MS, 2e3),
     federationSigningKeyId: process.env.DROIDSWARM_FEDERATION_SIGNING_KEY_ID,
     federationSigningPrivateKey: process.env.DROIDSWARM_FEDERATION_SIGNING_PRIVATE_KEY,
+    governanceEnabled: toBooleanFlag(process.env.DROIDSWARM_ENABLE_GOVERNANCE, true),
     environment
   };
 };

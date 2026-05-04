@@ -31,14 +31,17 @@ __export(worker_exports, {
 });
 module.exports = __toCommonJS(worker_exports);
 var import_node_crypto = require("node:crypto");
-var import_ws = __toESM(require("ws"));
+var import_ws = __toESM(require("ws"), 1);
 var import_shared_types = require("@shared-types");
+var import_shared_agent_brain = require("@shared-agent-brain");
+var import_shared_memory = require("@shared-memory");
 var import_config = require("./config");
 var import_agent_prompt = require("./agent-prompt");
 var import_messages = require("./messages");
 var import_protocol = require("./protocol");
 var import_local_llama = require("./adapters/worker/local-llama.adapter");
 var import_mlx = require("./adapters/worker/mlx.adapter");
+var import_openmythos = require("./adapters/worker/openmythos.adapter");
 var import_codex_cloud = require("./adapters/worker/codex-cloud.adapter");
 var import_codex_cli = require("./adapters/worker/codex-cli.adapter");
 const parseOptions = () => {
@@ -104,6 +107,12 @@ const getAdapter = (config, engine, workspacePath) => {
         availableTools: config.allowedTools
       });
     }
+    case "openmythos":
+      return new import_openmythos.OpenMythosWorkerAdapter({
+        model: config.modelRouting.mythos,
+        defaultLoops: config.mythos?.defaultLoops ?? 6,
+        maxLoops: config.mythos?.maxLoops ?? 24
+      });
     case "codex-cloud":
       return new import_codex_cloud.CodexCloudAdapter({
         apiBaseUrl: config.codexApiBaseUrl,
@@ -117,6 +126,26 @@ const getAdapter = (config, engine, workspacePath) => {
       });
     default:
       return new import_local_llama.LocalLlamaAdapter({ baseUrl: config.llamaBaseUrl, timeoutMs: config.llamaTimeoutMs });
+  }
+};
+const recordSkillOutcome = (config, options, outcome, detail) => {
+  const skillsRoot = config.skillsDir ?? process.env.DROIDSWARM_SKILLS_DIR ?? `${process.cwd()}/skills`;
+  for (const skillName of options.skillPacks ?? []) {
+    try {
+      (0, import_shared_agent_brain.recordSkillUsageOutcome)({
+        skillsRoot,
+        projectId: config.projectId,
+        skillName,
+        outcome,
+        detail,
+        metadata: {
+          role: options.role,
+          attemptId: options.attemptId,
+          taskId: options.task.taskId
+        }
+      });
+    } catch {
+    }
   }
 };
 const runWorker = async () => {
@@ -164,6 +193,14 @@ const runWorker = async () => {
     parentDroidspeak: options.parentDroidspeak,
     taskDigest: options.taskDigest,
     handoffPacket: options.handoffPacket,
+    memoryContext: (0, import_shared_memory.retrieveRelevantMemories)({
+      query: `${options.task.title} ${options.task.description} ${options.role}`,
+      projectId: config.projectId,
+      limit: 5
+    }).map((entry) => ({
+      droidspeakSummary: entry.droidspeakSummary,
+      englishTranslation: entry.englishTranslation
+    })),
     projectId: config.projectId,
     projectName: config.projectName,
     specRules: config.agentRules,
@@ -171,7 +208,7 @@ const runWorker = async () => {
   });
   const scope = resolveScope(config, options);
   const engine = options.engine ?? "local-llama";
-  const modelOverride = options.model ?? (engine === "local-llama" ? config.llamaModel : engine === "mlx" ? config.modelRouting.mlx ?? "mlx/local" : engine === "apple-intelligence" ? config.modelRouting.apple : engine === "codex-cloud" ? config.codexCloudModel : config.codexModel);
+  const modelOverride = options.model ?? (engine === "local-llama" ? config.llamaModel : engine === "mlx" ? config.modelRouting.mlx ?? "mlx/local" : engine === "apple-intelligence" ? config.modelRouting.apple : engine === "openmythos" ? config.modelRouting.mythos ?? "openmythos/local" : engine === "codex-cloud" ? config.codexCloudModel : config.codexModel);
   const reportLLMCall = (payload, usage2) => {
     sendMessage(
       socket,
@@ -319,6 +356,7 @@ const runWorker = async () => {
         }
       )
     );
+    recordSkillOutcome(config, options, "failure", error instanceof Error ? error.message : "Codex execution failed.");
     socket.close();
     return;
   } finally {
@@ -349,6 +387,7 @@ const runWorker = async () => {
     usagePayload
   );
   console.log(`[Worker ${options.agentName}] Codex completed with success=${result.success}`);
+  recordSkillOutcome(config, options, result.success ? "success" : "failure", result.summary);
   for (const artifact of result.artifacts) {
     sendMessage(
       socket,

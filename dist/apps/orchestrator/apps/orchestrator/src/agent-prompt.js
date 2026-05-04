@@ -45,6 +45,11 @@ const buildAgentPrompt = (input) => {
     input.handoffPacket.droidspeak ? `- handoff_droidspeak_v2: ${input.handoffPacket.droidspeak.compact} (${input.handoffPacket.droidspeak.expanded})` : "",
     ""
   ].filter(Boolean) : [];
+  const memorySection = (input.memoryContext?.length ?? 0) > 0 ? [
+    "Relevant long-term memory:",
+    ...input.memoryContext.map((memory, index) => `${index + 1}. ${memory.droidspeakSummary} (${memory.englishTranslation})`),
+    ""
+  ] : [];
   const roleSpecificSection = normalizedRole.includes("arbiter") ? [
     "Arbiter contract:",
     "- Compare the sibling specialist outputs before proposing new work.",
@@ -82,6 +87,7 @@ ${parentSummary}` : "Parent summary:\nNone.",
     ...parentDroidspeakSection,
     ...digestSection,
     ...handoffSection,
+    ...memorySection,
     "",
     "Already requested follow-on roles:",
     formatRequestedAgents(input.requestedAgents ?? []),

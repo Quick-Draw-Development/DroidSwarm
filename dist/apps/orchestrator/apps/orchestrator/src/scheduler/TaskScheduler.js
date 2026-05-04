@@ -23,6 +23,7 @@ module.exports = __toCommonJS(TaskScheduler_exports);
 var import_node_crypto = require("node:crypto");
 var import_shared_types = require("@shared-types");
 var import_shared_routing = require("@shared-routing");
+var import_shared_governance = require("@shared-governance");
 var import_AgentSupervisor = require("../AgentSupervisor");
 var import_routing = require("../services/routing.service");
 var import_worker_result = require("../services/worker-result.service");
@@ -358,6 +359,17 @@ class TaskScheduler {
     const workspace = this.workspaceService.ensureWorkspace(task, attemptId, branch, routingDecision.readOnly);
     const skillPackNames = this.skillPackService.resolveNames(role, routingDecision.skillPacks);
     const skillTexts = this.skillPackService.resolve(role, routingDecision.skillPacks);
+    const spawnConsensus = this.runHighImpactConsensus(
+      task,
+      "agent-spawn",
+      `Spawn ${role} for ${task.taskId}`,
+      instructions,
+      "EVT-CONSENSUS-ROUND"
+    );
+    if (!spawnConsensus.approved) {
+      this.schedule();
+      return;
+    }
     const spawned = this.supervisor.startAgentForTask(
       {
         ...record,
@@ -390,7 +402,11 @@ class TaskScheduler {
         modelTier: routingDecision.modelTier,
         routingTelemetry,
         requiredReads: handoffPacket?.requiredReads ?? taskDigest?.artifactIndex.map((artifact) => artifact.artifactId) ?? [],
-        compactVerbDictionary: import_shared_types.COMPACT_VERB_DICTIONARY
+        compactVerbDictionary: import_shared_types.COMPACT_VERB_DICTIONARY,
+        governance: {
+          consensusId: spawnConsensus.consensusId,
+          assignmentType: "agent-spawn"
+        }
       }
     );
     if (!spawned) {
@@ -467,7 +483,20 @@ class TaskScheduler {
     if (!this.enforceTaskPolicy(task, expandedRequests)) {
       return false;
     }
-    for (const request of expandedRequests) {
+    const approvedHandshakes = expandedRequests.map((request) => ({
+      request,
+      consensus: this.runHighImpactConsensus(
+        task,
+        "task-handoff",
+        `Handoff ${task.taskId} -> ${request.role}`,
+        request.instructions ?? request.reason,
+        "EVT-CONSENSUS-ROUND"
+      )
+    }));
+    if (approvedHandshakes.some((entry) => !entry.consensus.approved)) {
+      return false;
+    }
+    for (const { request, consensus } of approvedHandshakes) {
       const childId = (0, import_node_crypto.randomUUID)();
       const childRecord = this.persistenceService.createTask({
         taskId: childId,
@@ -487,6 +516,7 @@ class TaskScheduler {
           parallel_group: request.parallelGroupId,
           parallel_index: request.parallelIndex,
           parallel_total: request.parallelTotal,
+          consensus_id: consensus.consensusId,
           project_id: task.projectId ?? this.config.projectId,
           repo_id: task.repoId ?? this.config.repoId,
           root_path: task.rootPath ?? this.config.projectRoot,
@@ -512,7 +542,8 @@ class TaskScheduler {
         digestId: digest.id,
         digestHash: digest.federationHash,
         handoffHash: handoff.federationHash,
-        auditHash: handoff.auditHash
+        auditHash: handoff.auditHash,
+        consensusId: consensus.consensusId
       }, {
         taskId: childId,
         normalizedVerb: "handoff.ready",
@@ -523,7 +554,14 @@ class TaskScheduler {
           handoffHash: handoff.federationHash,
           auditHash: handoff.auditHash,
           requiredReads: handoff.requiredReads,
-          toRole: request.role
+          toRole: request.role,
+          consensus: {
+            consensus_id: consensus.consensusId,
+            proposal_id: consensus.proposalId,
+            approved: consensus.approved,
+            guardian_veto: consensus.guardianVeto,
+            audit_hash: consensus.auditHash
+          }
         }
       });
       this.readyQueue.add(childId);
@@ -541,6 +579,48 @@ class TaskScheduler {
       );
     }
     return childIds.length > 0;
+  }
+  runHighImpactConsensus(task, proposalType, title, summary, glyph) {
+    if (!this.config.governanceEnabled) {
+      return {
+        approved: true
+      };
+    }
+    const consensus = (0, import_shared_governance.runConsensusRound)({
+      proposalId: `${task.taskId}:${proposalType}`,
+      proposalType,
+      title,
+      summary,
+      glyph,
+      context: {
+        eventType: "governance.vote",
+        actorRole: typeof task.metadata?.agent_role === "string" ? task.metadata.agent_role : "orchestrator",
+        swarmRole: "master",
+        projectId: task.projectId ?? this.config.projectId,
+        auditLoggingEnabled: true,
+        dashboardEnabled: false
+      }
+    });
+    if (!consensus.approved) {
+      this.persistenceService.updateTaskMetadata(task.taskId, {
+        ...task.metadata ?? {},
+        blocked_reason: consensus.reason,
+        consensus_id: consensus.consensusId
+      });
+      this.persistenceService.setTaskStatus(task.taskId, "waiting_on_human");
+      this.persistenceService.recordExecutionEvent(
+        "governance_consensus_blocked",
+        `Consensus blocked ${proposalType} for ${task.taskId}`,
+        {
+          taskId: task.taskId,
+          proposalType,
+          consensusId: consensus.consensusId,
+          reason: consensus.reason,
+          guardianVeto: consensus.guardianVeto
+        }
+      );
+    }
+    return consensus;
   }
   resolveParentIfReady(task) {
     if (!task.parentTaskId) {

@@ -302,12 +302,19 @@
       ]
     },
     "transpilePackages": [
-      "@federation-bus",
+      "@shared-memory",
+      "@shared-agent-brain",
+      "@shared-governance",
       "@shared-tracing",
-      "@protocol-alias",
-      "@protocol",
+      "@shared-droidspeak",
+      "@shared-skills",
+      "@shared-projects",
       "@model-router",
-      "@shared-projects"
+      "@shared-models",
+      "@mythos-engine",
+      "@federation-bus",
+      "@protocol-alias",
+      "@protocol"
     ],
     "turbopack": {
       "root": "/Users/bcbirk/workspace/DroidSwarm"

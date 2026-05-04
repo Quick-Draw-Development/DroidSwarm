@@ -21,7 +21,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 var import_node_test = require("node:test");
-var import_strict = __toESM(require("node:assert/strict"));
+var import_strict = __toESM(require("node:assert/strict"), 1);
 var import_agent_prompt = require("./agent-prompt");
 (0, import_node_test.describe)("buildAgentPrompt", () => {
   (0, import_node_test.it)("includes task and role context for Codex workers", () => {

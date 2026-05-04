@@ -22,9 +22,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 var import_node_fs = require("node:fs");
 var import_node_os = require("node:os");
-var import_node_path = __toESM(require("node:path"));
+var import_node_path = __toESM(require("node:path"), 1);
 var import_node_test = require("node:test");
-var import_strict = __toESM(require("node:assert/strict"));
+var import_strict = __toESM(require("node:assert/strict"), 1);
 var import_codex_runner = require("./codex-runner");
 const createFakeCodex = () => {
   const dir = (0, import_node_fs.mkdtempSync)(import_node_path.default.join((0, import_node_os.tmpdir)(), "droidswarm-fake-codex-"));

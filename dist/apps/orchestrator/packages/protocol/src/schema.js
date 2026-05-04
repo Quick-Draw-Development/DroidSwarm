@@ -56,6 +56,7 @@ const envelopeVerbEnum = import_zod.z.enum([
   "verification.completed",
   "run.completed",
   "handoff.ready",
+  "consensus.round",
   "summary.emitted",
   "memory.pinned",
   "drift.detected",

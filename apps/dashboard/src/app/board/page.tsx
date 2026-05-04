@@ -9,7 +9,7 @@ import {
   validateCompliance,
 } from '@shared-governance';
 import { getModelLifecycleStatus, listDiscoveredModels, listRegisteredModels } from '@shared-models';
-import { listLongTermMemories } from '@shared-memory';
+import { getBrainStatus, listBrainPromotionCandidates, listLongTermMemories } from '@shared-memory';
 import { getEvolutionStatus, listRegisteredSkillManifests, listSpecializedAgents } from '@shared-skills';
 import { listCodeReviewRuns, listRalphWorkerSessions } from '@shared-projects';
 
@@ -241,6 +241,18 @@ export default async function BoardPage({
           routeKind: entry.routeKind,
           engine: entry.engine,
           updatedAt: entry.updatedAt,
+        })),
+      };
+    })(),
+    brain: (() => {
+      const status = getBrainStatus({ projectId: selectedProjectId });
+      const candidates = listBrainPromotionCandidates({ projectId: selectedProjectId }).slice(0, 8);
+      return {
+        ...status,
+        candidates: candidates.map((candidate) => ({
+          candidateId: candidate.candidateId,
+          summary: candidate.summary,
+          status: candidate.status,
         })),
       };
     })(),

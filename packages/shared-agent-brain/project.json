@@ -1,0 +1,33 @@
+{
+  "name": "shared-agent-brain",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "root": "packages/shared-agent-brain",
+  "sourceRoot": "packages/shared-agent-brain/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc -p packages/shared-agent-brain/tsconfig.json"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc --noEmit -p packages/shared-agent-brain/tsconfig.json"
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc --noEmit -p packages/shared-agent-brain/tsconfig.json"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node --import tsx --test packages/shared-agent-brain/src/**/*.spec.ts"
+      }
+    }
+  }
+}

@@ -62,3 +62,7 @@ OpenMythos and other recurrent engines must remain spectrally stable. If spectra
 - Long-term memory is project-scoped by default and may only become `global` or `personal` when the writer marks that scope explicitly.
 - Reflection and pruning loops must stay behind `DROIDSWARM_ENABLE_HERMES_LOOP` and remain low-impact background maintenance, not mandatory boot blockers.
 - Task startup may inject retrieved long-term memory into prompts, but stored memory remains an advisory substrate rather than an unchecked source of authority.
+- `DROIDSWARM_ENABLE_AGENTIC_BRAIN` gates the portable `.agent/` brain substrate, nightly dream cycles, manifest-first skill disclosure, and file-backed recall across memory layers.
+- Durable promotion from `.agent/memory/episodic` into `.agent/memory/semantic` requires explicit rationale, tamper-evident audit logging, and human review before lessons become active recall inputs.
+- Automatic dream cycles may cluster and stage candidate lessons mechanically, but they must not self-promote memory or self-activate rewritten skills without human approval.
+- Repeated skill failures may stage governed rewrite proposals, but those proposals remain inactive until an operator approves them through the CLI, Slack, or dashboard.

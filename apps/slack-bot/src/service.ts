@@ -38,7 +38,8 @@ import {
   listRalphWorkers,
   startRalphWorker,
 } from '@shared-skills';
-import { searchLongTermMemories } from '@shared-memory';
+import { getBrainStatus, listBrainPromotionCandidates, searchLongTermMemories } from '@shared-memory';
+import { reviewBrainPromotionCandidate, runBrainDreamCycle } from '@shared-agent-brain';
 import {
   getCurrentProject,
   listRegisteredProjects,
@@ -756,6 +757,62 @@ export const executeSlackIntent = async (
             `*Long-term memory matches for:* ${query}`,
             ...memories.map((entry) => `• ${entry.memoryType} · ${entry.englishTranslation}`),
           ].join('\n'),
+        projectId: project?.projectId,
+        backend: command.route.backend,
+      };
+    }
+    case 'brain-status': {
+      const status = getBrainStatus({
+        projectId: project?.projectId ?? config.defaultProjectId,
+      });
+      return {
+        text: [
+          '*Agent brain*',
+          `working ${status.workingCount} · episodic ${status.episodicCount} · semantic ${status.semanticCount} · personal ${status.personalCount}`,
+          `pending candidates ${status.pendingCandidateCount} · skill index ${status.skillIndexPresent ? 'ready' : 'missing'}`,
+        ].join('\n'),
+        projectId: project?.projectId,
+        backend: command.route.backend,
+      };
+    }
+    case 'dream-run': {
+      const result = runBrainDreamCycle({
+        projectId: project?.projectId ?? config.defaultProjectId,
+      });
+      return {
+        text: `Brain dream cycle analyzed ${result.analyzedCount} episodic memories and staged ${result.candidateCount} candidates.`,
+        projectId: project?.projectId,
+        backend: command.route.backend,
+      };
+    }
+    case 'memory-review': {
+      const candidates = listBrainPromotionCandidates({
+        projectId: project?.projectId ?? config.defaultProjectId,
+      }).slice(0, 8);
+      return {
+        text: candidates.length === 0
+          ? 'No memory promotion candidates are waiting for review.'
+          : ['*Memory review queue*', ...candidates.map((candidate) => `• \`${candidate.candidateId}\` ${candidate.status} · ${candidate.summary}`)].join('\n'),
+        projectId: project?.projectId,
+        backend: command.route.backend,
+      };
+    }
+    case 'memory-graduate': {
+      if (!command.proposalId || !command.content?.trim()) {
+        return {
+          text: 'Provide a memory candidate id and rationale.',
+          backend: command.route.backend,
+        };
+      }
+      const candidate = reviewBrainPromotionCandidate({
+        projectId: project?.projectId ?? config.defaultProjectId,
+        candidateId: command.proposalId,
+        action: 'graduate',
+        rationale: command.content.trim(),
+        reviewedBy: user.username,
+      });
+      return {
+        text: `Graduated memory candidate \`${candidate.candidateId}\` into semantic memory.`,
         projectId: project?.projectId,
         backend: command.route.backend,
       };

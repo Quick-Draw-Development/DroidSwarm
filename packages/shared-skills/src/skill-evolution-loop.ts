@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
+import { listSkillRewriteCandidates } from '@shared-agent-brain';
 import { runConsensusRound } from '@shared-governance';
 import { createLongTermMemory, listLongTermMemories, runReflectionCycle } from '@shared-memory';
 import {
@@ -192,4 +193,28 @@ export const getEvolutionStatus = (projectId?: string) => ({
     memoryType: 'pattern',
     limit: 10,
   }),
+  rewriteCandidates: listSkillRewriteCandidates({
+    skillsRoot: resolveSkillsRoot(),
+  }),
 });
+
+export const proposeSkillRewrite = (input: {
+  projectId?: string;
+  proposedBy?: string;
+  skillName?: string;
+}) => {
+  const candidates = listSkillRewriteCandidates({
+    skillsRoot: resolveSkillsRoot(),
+  });
+  const candidate = input.skillName
+    ? candidates.find((entry) => entry.skillName === input.skillName)
+    : candidates[0];
+  if (!candidate) {
+    throw new Error('No eligible skill rewrite candidates found.');
+  }
+  return proposeSkillEvolution({
+    projectId: input.projectId,
+    proposedBy: input.proposedBy,
+    targetSkill: candidate.skillName,
+  });
+};

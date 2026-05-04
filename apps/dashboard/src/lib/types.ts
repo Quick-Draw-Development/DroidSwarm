@@ -198,6 +198,7 @@ export interface OrchestrationInsightsData {
   modelInventory?: ModelInventorySummary;
   cognitiveEngines?: CognitiveEnginesSummary;
   persistentWorkers?: PersistentWorkersSummary;
+  brain?: AgentBrainSummary;
   longTermMemory?: LongTermMemorySummary;
   evolution?: SkillEvolutionSummary;
 }
@@ -356,6 +357,21 @@ export interface PersistentWorkersSummary {
     routeKind?: string;
     engine?: string;
     updatedAt: string;
+  }>;
+}
+
+export interface AgentBrainSummary {
+  root: string;
+  workingCount: number;
+  episodicCount: number;
+  semanticCount: number;
+  personalCount: number;
+  pendingCandidateCount: number;
+  skillIndexPresent: boolean;
+  candidates: Array<{
+    candidateId: string;
+    summary: string;
+    status: string;
   }>;
 }
 

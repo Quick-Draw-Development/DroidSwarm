@@ -1,4 +1,12 @@
 import type { CheckpointDelta, ProjectCheckpoint, ProjectDecision, ProjectFact, WorkerResult } from '@shared-types';
+export {
+  ensureAgentBrainLayout,
+  getBrainStatus,
+  listBrainPromotionCandidates,
+  reviewBrainPromotionCandidate,
+  runBrainDreamCycle,
+  searchBrainMemories,
+} from '@shared-agent-brain';
 
 export * from './memory-store';
 export * from './memory-retrieval';

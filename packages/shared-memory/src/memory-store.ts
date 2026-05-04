@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
+import { writeBrainMemoryEntry } from '@shared-agent-brain';
 import { openLongTermMemoryDatabase } from '@shared-persistence';
 import { appendAuditEvent } from '@shared-tracing';
 
@@ -116,6 +117,26 @@ export const createLongTermMemory = (input: CreateLongTermMemoryInput): LongTerm
         @embeddingJson, @metadataJson, @expiresAt
       )
     `).run(record);
+    try {
+      writeBrainMemoryEntry({
+        projectId: input.projectId,
+        global: (input.scope ?? 'project') === 'global',
+        layer: input.memoryType === 'procedural'
+          ? 'episodic'
+          : input.memoryType === 'user-preference'
+            ? 'personal'
+            : 'semantic',
+        title: input.droidspeakSummary,
+        droidspeak: input.droidspeakSummary,
+        content: input.englishTranslation,
+        tags: [input.memoryType, input.scope ?? 'project'],
+        sourceTaskId: input.sourceTaskId,
+        sourceRunId: input.sourceRunId,
+        metadata: input.metadata,
+      });
+    } catch {
+      // File-backed brain sync is best-effort on top of the durable DB store.
+    }
     appendAuditEvent('LONG_TERM_MEMORY_WRITTEN', {
       memoryId: record.memoryId,
       projectId: input.projectId,

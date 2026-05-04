@@ -74,6 +74,7 @@ Commands:
   governance  Governance status and role inspection shortcuts
   models      Refresh and inspect model inventory
   engines     Inspect and bootstrap optional cognitive engines
+  brain       Inspect and operate the portable agent brain
   memory      Inspect, search, and prune long-term memory
   ralph       Start and inspect persistent Ralph workers
   evolve      Inspect and approve governed skill evolution proposals
@@ -384,11 +385,24 @@ Usage:
 EOF
 }
 
+print_brain_help() {
+  cat <<'EOF'
+Usage:
+  DroidSwarm brain status [--project NAME|ID]
+  DroidSwarm brain dream [--project NAME|ID]
+EOF
+}
+
 print_memory_help() {
   cat <<'EOF'
 Usage:
   DroidSwarm memory list [--project NAME|ID] [--limit N]
   DroidSwarm memory search <query> [--project NAME|ID] [--limit N]
+  DroidSwarm memory list-candidates [--project NAME|ID]
+  DroidSwarm memory graduate <candidate-id> --rationale "..."
+  DroidSwarm memory reject <candidate-id> --reason "..."
+  DroidSwarm memory reopen <candidate-id> --rationale "..."
+  DroidSwarm memory dream [--project NAME|ID]
   DroidSwarm memory reflect [--project NAME|ID]
   DroidSwarm memory prune [--older-than ISO] [--max-per-project N]
 EOF
@@ -449,6 +463,10 @@ run_shared_governance_cli() {
 
 run_shared_skills_cli() {
   node --import tsx "$ROOT_DIR/../shared-skills/src/cli.ts" "$@"
+}
+
+run_shared_agent_brain_cli() {
+  node --import tsx "$ROOT_DIR/../shared-agent-brain/src/cli.ts" "$@"
 }
 
 run_shared_models_cli() {
@@ -2556,6 +2574,90 @@ cmd_memory() {
       shift
       run_shared_memory_cli search --query "$query" "$@"
       ;;
+    list-candidates)
+      run_shared_memory_cli list-candidates "$@"
+      ;;
+    graduate)
+      local candidate_id="${1:-}"
+      shift || true
+      local rationale=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --rationale)
+            shift
+            require_value "--rationale" "${1:-}"
+            rationale="$1"
+            ;;
+          *)
+            err "Unknown memory graduate option: $1"
+            print_memory_help
+            return 1
+            ;;
+        esac
+        shift
+      done
+      if [[ -z "$candidate_id" || -z "$rationale" ]]; then
+        err "Missing candidate id or rationale."
+        print_memory_help
+        return 1
+      fi
+      run_shared_memory_cli graduate --candidate-id "$candidate_id" --rationale "$rationale"
+      ;;
+    reject)
+      local candidate_id="${1:-}"
+      shift || true
+      local reason=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --reason)
+            shift
+            require_value "--reason" "${1:-}"
+            reason="$1"
+            ;;
+          *)
+            err "Unknown memory reject option: $1"
+            print_memory_help
+            return 1
+            ;;
+        esac
+        shift
+      done
+      if [[ -z "$candidate_id" || -z "$reason" ]]; then
+        err "Missing candidate id or reason."
+        print_memory_help
+        return 1
+      fi
+      run_shared_memory_cli reject --candidate-id "$candidate_id" --reason "$reason"
+      ;;
+    reopen)
+      local candidate_id="${1:-}"
+      shift || true
+      local rationale=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --rationale)
+            shift
+            require_value "--rationale" "${1:-}"
+            rationale="$1"
+            ;;
+          *)
+            err "Unknown memory reopen option: $1"
+            print_memory_help
+            return 1
+            ;;
+        esac
+        shift
+      done
+      if [[ -z "$candidate_id" || -z "$rationale" ]]; then
+        err "Missing candidate id or rationale."
+        print_memory_help
+        return 1
+      fi
+      run_shared_memory_cli reopen --candidate-id "$candidate_id" --rationale "$rationale"
+      ;;
+    dream)
+      run_shared_memory_cli dream "$@"
+      ;;
     reflect)
       run_shared_memory_cli reflect "$@"
       ;;
@@ -2568,6 +2670,30 @@ cmd_memory() {
     *)
       err "Unknown memory command: $action"
       print_memory_help
+      return 1
+      ;;
+  esac
+}
+
+cmd_brain() {
+  local action="${1:-status}"
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
+
+  case "$action" in
+    status)
+      run_shared_memory_cli brain-status "$@"
+      ;;
+    dream)
+      run_shared_agent_brain_cli dream "$@"
+      ;;
+    help|-h|--help)
+      print_brain_help
+      ;;
+    *)
+      err "Unknown brain command: $action"
+      print_brain_help
       return 1
       ;;
   esac
@@ -3586,6 +3712,9 @@ case "$COMMAND" in
     ;;
   engines)
     cmd_engines "$@"
+    ;;
+  brain)
+    cmd_brain "$@"
     ;;
   memory)
     cmd_memory "$@"

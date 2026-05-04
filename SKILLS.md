@@ -11,6 +11,14 @@ Each skill pack uses a lightweight self-contained directory:
 - `skills/<name>/index.ts`: optional implementation marker or helper exports
 - `skills/<name>/index.spec.ts`: minimal smoke test stub
 
+When `DROIDSWARM_ENABLE_AGENTIC_BRAIN=true`, DroidSwarm also maintains a portable `.agent/skills/` disclosure surface per project:
+
+- `.agent/skills/_manifest.jsonl`: lightweight manifest-first index used for progressive disclosure
+- `.agent/skills/_index.md`: operator-readable index of registered skills
+- `.agent/skills/_usage-patterns.jsonl`: usage outcomes used to detect governed rewrite candidates
+
+The runtime should load the lightweight manifest first and only read the full `SKILL.md` once trigger hints or task keywords match.
+
 ## CLI Flow
 
 Create a new skill:
@@ -86,6 +94,8 @@ DroidSwarm evolve approve <proposal-id>
 Slack mirrors the same flow with `/droid evolve status`, `/droid evolve run [skill]`, and `/droid skill approve <proposal-id>`. The dashboard exposes an “Evolution Proposals” panel for proposal approval and stub inspection.
 
 When `DROIDSWARM_ENABLE_HERMES_LOOP=true`, the orchestrator periodically reflects on procedural memory, stores new pattern memories, and proposes governed skill changes through the same registry.
+
+When `DROIDSWARM_ENABLE_AGENTIC_BRAIN=true`, repeated skill failures also feed the portable brain usage ledger. After repeated failures, DroidSwarm can stage a governed rewrite proposal from those usage patterns, but activation still requires explicit human approval.
 
 ## Governance
 

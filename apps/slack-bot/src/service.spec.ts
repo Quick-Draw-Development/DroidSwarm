@@ -387,6 +387,35 @@ test('starts and lists Ralph worker sessions from slack commands', async () => {
   assert.match(status.text, /Ralph worker sessions/i);
 });
 
+test('reports brain status and runs a dream cycle from slack commands', async () => {
+  const home = makeTempHome();
+  process.env.DROIDSWARM_HOME = home;
+  process.env.DROIDSWARM_ENABLE_AGENTIC_BRAIN = 'true';
+  onboardProject({
+    projectId: 'demo',
+    name: 'Demo',
+    rootPath: path.join(home, 'repo'),
+    dbPath: path.join(home, 'projects', 'demo', 'droidswarm.db'),
+    wsPort: 9999,
+  });
+
+  const status = await handleSlackInput({
+    text: 'brain status',
+    userId: 'U1',
+    username: 'alice',
+    channelId: 'C1',
+  }, baseConfig());
+  assert.match(status.text, /Agent brain/i);
+
+  const dream = await handleSlackInput({
+    text: 'dream run',
+    userId: 'U1',
+    username: 'alice',
+    channelId: 'C1',
+  }, baseConfig());
+  assert.match(dream.text, /Brain dream cycle analyzed/i);
+});
+
 test('creates skill scaffolds and specialized agents from slack commands', async () => {
   const home = makeTempHome();
   process.env.DROIDSWARM_HOME = home;

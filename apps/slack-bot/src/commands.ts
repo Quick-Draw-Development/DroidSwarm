@@ -20,6 +20,10 @@ export type SlackCommandKind =
   | 'mythos-loops'
   | 'ralph-start'
   | 'ralph-status'
+  | 'brain-status'
+  | 'dream-run'
+  | 'memory-review'
+  | 'memory-graduate'
   | 'memory-search'
   | 'evolve-status'
   | 'evolve-propose'
@@ -172,6 +176,28 @@ const parseSlashCommand = (text: string, route: ModelRouteDecision): ParsedSlack
       kind: 'ralph-start',
       args: args.slice(2),
       content: trimmed.replace(/^ralph\s+start\s+/i, ''),
+      source: 'slash',
+    });
+  }
+
+  if (args[0] === 'brain' && args[1] === 'status') {
+    return buildCommand(text, route, { kind: 'brain-status', args: [], source: 'slash' });
+  }
+
+  if (args[0] === 'dream' && args[1] === 'run') {
+    return buildCommand(text, route, { kind: 'dream-run', args: [], source: 'slash' });
+  }
+
+  if (args[0] === 'memory' && args[1] === 'review') {
+    return buildCommand(text, route, { kind: 'memory-review', args: [], source: 'slash' });
+  }
+
+  if (args[0] === 'memory' && args[1] === 'graduate' && args[2]) {
+    return buildCommand(text, route, {
+      kind: 'memory-graduate',
+      args: args.slice(2),
+      proposalId: args[2],
+      content: trimmed.replace(/^memory\s+graduate\s+[^\s]+\s*/i, ''),
       source: 'slash',
     });
   }
@@ -338,6 +364,29 @@ const parseNaturalLanguage = (text: string, route: ModelRouteDecision): ParsedSl
 
   if (/^ralph\s+status$/i.test(trimmed)) {
     return buildCommand(text, route, { kind: 'ralph-status', args: [], source: 'natural-language' });
+  }
+
+  if (/^brain\s+status$/i.test(trimmed)) {
+    return buildCommand(text, route, { kind: 'brain-status', args: [], source: 'natural-language' });
+  }
+
+  if (/^dream\s+run$/i.test(trimmed)) {
+    return buildCommand(text, route, { kind: 'dream-run', args: [], source: 'natural-language' });
+  }
+
+  if (/^memory\s+review$/i.test(trimmed)) {
+    return buildCommand(text, route, { kind: 'memory-review', args: [], source: 'natural-language' });
+  }
+
+  const memoryGraduateMatch = trimmed.match(/^memory\s+graduate\s+([a-z0-9-]+)(?:\s+(.+))?$/i);
+  if (memoryGraduateMatch?.[1]) {
+    return buildCommand(text, route, {
+      kind: 'memory-graduate',
+      args: memoryGraduateMatch.slice(1).filter((entry): entry is string => typeof entry === 'string'),
+      proposalId: memoryGraduateMatch[1],
+      content: memoryGraduateMatch[2],
+      source: 'natural-language',
+    });
   }
 
   const ralphStartMatch = trimmed.match(/^ralph\s+start\s+(.+)$/i);
@@ -509,6 +558,8 @@ export const parseSlackIntent = (text: string, context?: SlackParseContext): Par
     'models',
     'mythos',
     'ralph',
+    'brain',
+    'dream',
     'memory',
     'evolve',
   ].includes(args[0]?.toLowerCase() ?? '');
@@ -539,6 +590,10 @@ export const renderSlackCommandResponse = (command: ParsedSlackCommand): SlackCo
           '`/droid mythos loops <engine-id> <count>` overrides recurrent loop count for a local Mythos runtime.',
           '`/droid ralph start <goal>` starts a persistent Ralph worker loop.',
           '`/droid ralph status` shows active Ralph worker sessions.',
+          '`/droid brain status` shows the portable agent brain status.',
+          '`/droid dream run` runs the mechanical nightly dream cycle immediately.',
+          '`/droid memory review` lists staged promotion candidates.',
+          '`/droid memory graduate <id> <rationale>` graduates a reviewed candidate into semantic memory.',
           '`/droid memory search <query>` searches long-term memory.',
           '`/droid evolve status` shows pending governed skill evolution proposals.',
           '`/droid evolve run [skill]` generates a governed evolution proposal.',
@@ -622,6 +677,22 @@ export const renderSlackCommandResponse = (command: ParsedSlackCommand): SlackCo
     case 'ralph-status':
       return {
         text: 'Fetching Ralph worker status.',
+      };
+    case 'brain-status':
+      return {
+        text: 'Fetching agent brain status.',
+      };
+    case 'dream-run':
+      return {
+        text: 'Running the portable brain dream cycle.',
+      };
+    case 'memory-review':
+      return {
+        text: 'Listing portable brain promotion candidates.',
+      };
+    case 'memory-graduate':
+      return {
+        text: `Graduating memory candidate \`${command.proposalId ?? 'unknown'}\`.`,
       };
     case 'memory-search':
       return {

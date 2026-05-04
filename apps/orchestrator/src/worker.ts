@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import WebSocket from 'ws';
 import { COMPACT_VERB_DICTIONARY, type CompactVerb, type RoutingTelemetry } from '@shared-types';
+import { recordSkillUsageOutcome } from '@shared-agent-brain';
 import { retrieveRelevantMemories } from '@shared-memory';
 
 import { loadConfig } from './config';
@@ -142,6 +143,33 @@ const getAdapter = (config: ReturnType<typeof loadConfig>, engine: WorkerEngine,
       });
     default:
       return new LocalLlamaAdapter({ baseUrl: config.llamaBaseUrl, timeoutMs: config.llamaTimeoutMs });
+  }
+};
+
+const recordSkillOutcome = (
+  config: ReturnType<typeof loadConfig>,
+  options: WorkerOptions,
+  outcome: 'success' | 'failure',
+  detail: string,
+): void => {
+  const skillsRoot = config.skillsDir ?? process.env.DROIDSWARM_SKILLS_DIR ?? `${process.cwd()}/skills`;
+  for (const skillName of options.skillPacks ?? []) {
+    try {
+      recordSkillUsageOutcome({
+        skillsRoot,
+        projectId: config.projectId,
+        skillName,
+        outcome,
+        detail,
+        metadata: {
+          role: options.role,
+          attemptId: options.attemptId,
+          taskId: options.task.taskId,
+        },
+      });
+    } catch {
+      // Skill usage hooks should never block the worker execution path.
+    }
   }
 };
 
@@ -371,6 +399,7 @@ export const runWorker = async (): Promise<void> => {
         },
       ),
     );
+    recordSkillOutcome(config, options, 'failure', error instanceof Error ? error.message : 'Codex execution failed.');
     socket.close();
     return;
   } finally {
@@ -403,6 +432,7 @@ export const runWorker = async (): Promise<void> => {
   );
 
   console.log(`[Worker ${options.agentName}] Codex completed with success=${result.success}`);
+  recordSkillOutcome(config, options, result.success ? 'success' : 'failure', result.summary);
 
   for (const artifact of result.artifacts) {
     sendMessage(

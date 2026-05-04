@@ -1,5 +1,12 @@
-import { listLongTermMemories, pruneLongTermMemories } from './memory-store';
-import { searchLongTermMemories } from './memory-retrieval';
+import {
+  getBrainStatus,
+  listBrainPromotionCandidates,
+  listLongTermMemories,
+  pruneLongTermMemories,
+  reviewBrainPromotionCandidate,
+  runBrainDreamCycle,
+  searchLongTermMemories,
+} from './index';
 import { runReflectionCycle } from './reflection-engine';
 
 const command = process.argv[2];
@@ -36,6 +43,66 @@ switch (command) {
     }));
     break;
   }
+  case 'brain-status':
+    output(getBrainStatus({
+      projectId: readValue('--project'),
+    }));
+    break;
+  case 'list-candidates':
+    output(listBrainPromotionCandidates({
+      projectId: readValue('--project'),
+    }));
+    break;
+  case 'graduate': {
+    const candidateId = readValue('--candidate-id');
+    const rationale = readValue('--rationale');
+    if (!candidateId || !rationale) {
+      throw new Error('Missing --candidate-id or --rationale');
+    }
+    output(reviewBrainPromotionCandidate({
+      projectId: readValue('--project'),
+      candidateId,
+      action: 'graduate',
+      rationale,
+      reviewedBy: process.env.USER ?? 'cli',
+    }));
+    break;
+  }
+  case 'reject': {
+    const candidateId = readValue('--candidate-id');
+    const rationale = readValue('--reason');
+    if (!candidateId || !rationale) {
+      throw new Error('Missing --candidate-id or --reason');
+    }
+    output(reviewBrainPromotionCandidate({
+      projectId: readValue('--project'),
+      candidateId,
+      action: 'reject',
+      rationale,
+      reviewedBy: process.env.USER ?? 'cli',
+    }));
+    break;
+  }
+  case 'reopen': {
+    const candidateId = readValue('--candidate-id');
+    const rationale = readValue('--rationale');
+    if (!candidateId || !rationale) {
+      throw new Error('Missing --candidate-id or --rationale');
+    }
+    output(reviewBrainPromotionCandidate({
+      projectId: readValue('--project'),
+      candidateId,
+      action: 'reopen',
+      rationale,
+      reviewedBy: process.env.USER ?? 'cli',
+    }));
+    break;
+  }
+  case 'dream':
+    output(runBrainDreamCycle({
+      projectId: readValue('--project'),
+    }));
+    break;
   case 'reflect':
     output(runReflectionCycle({
       projectId: readValue('--project'),

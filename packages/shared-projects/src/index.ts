@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 
 import Database from 'better-sqlite3';
+import { ensureAgentBrainLayout } from '@shared-agent-brain';
 import type { RepoTarget, TaskScope } from '@shared-types';
 
 export interface ProjectRegistryRecord {
@@ -641,6 +642,10 @@ export const onboardProject = (input: OnboardProjectInput, dbPath?: string): Pro
         ws_port = excluded.ws_port
     `).run(record);
     ensureDirectory(path.dirname(record.dbPath));
+    ensureAgentBrainLayout({
+      projectRoot: normalizedRoot,
+      projectId: input.projectId,
+    });
     return record;
   } finally {
     database.close();

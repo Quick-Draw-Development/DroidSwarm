@@ -48,6 +48,12 @@
     "@shared-memory": [
       "packages/shared-memory/src/index.ts"
     ],
+    "@shared-agent-brain": [
+      "packages/shared-agent-brain/src/index.ts"
+    ],
+    "@shared-agent-brain/*": [
+      "packages/shared-agent-brain/src/*"
+    ],
     "@shared-projects": [
       "packages/shared-projects/src/index.ts"
     ],

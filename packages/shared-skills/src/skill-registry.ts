@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { buildSkillDisclosureIndex, findSkillsForTrigger } from '@shared-agent-brain';
 import { validateCompliance } from '@shared-governance';
 import {
   getRegisteredSkill,
@@ -91,8 +92,22 @@ export const loadSkillPack = (rootDir: string, name: string): SkillPack | null =
 export const loadSkillPacks = (rootDir: string, names: string[]): SkillPack[] =>
   names.map((name) => loadSkillPack(rootDir, name)).filter((skill): skill is SkillPack => skill !== null);
 
+export const discoverSkillsForTrigger = (triggerText: string, rootDir = resolveSkillsRoot()): string[] =>
+  findSkillsForTrigger(rootDir, triggerText).map((entry) => entry.name);
+
 export const syncDiscoveredSkills = (rootDir = resolveSkillsRoot()) => {
   const manifests = discoverSkillManifests(rootDir);
+  buildSkillDisclosureIndex({
+    skillsRoot: rootDir,
+    manifests: manifests.map((manifest) => ({
+      name: manifest.name,
+      description: manifest.description,
+      capabilities: manifest.capabilities,
+      requiredBackends: manifest.requiredBackends,
+      modelPreferences: manifest.modelPreferences,
+      selfRewriteHooks: manifest.selfRewriteHooks,
+    })),
+  });
   return manifests.map((manifest) => {
     const status = manifest.affectsCoreBehavior ? 'pending-approval' : 'active';
     const record = upsertRegisteredSkill({

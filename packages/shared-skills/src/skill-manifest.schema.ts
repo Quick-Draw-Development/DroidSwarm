@@ -14,6 +14,12 @@ export const modelPreferencesSchema = z.object({
   tags: z.array(z.string()).default([]),
 });
 
+export const selfRewriteHookSchema = z.object({
+  pattern: z.string().min(1),
+  threshold: z.number().int().positive().default(3),
+  windowDays: z.number().int().positive().default(14),
+});
+
 export const skillManifestSchema = z.object({
   name: z.string().min(1),
   version: z.string().min(1).default('0.1.0'),
@@ -26,6 +32,7 @@ export const skillManifestSchema = z.object({
   entry: z.string().optional(),
   instructionsFile: z.string().optional(),
   modelPreferences: modelPreferencesSchema.optional(),
+  selfRewriteHooks: z.array(selfRewriteHookSchema).default([]),
 });
 
 export const agentManifestSchema = z.object({
@@ -58,5 +65,6 @@ export const agentManifestSchema = z.object({
 
 export type SkillVerbManifest = z.infer<typeof skillVerbSchema>;
 export type ModelPreferencesManifest = z.infer<typeof modelPreferencesSchema>;
+export type SelfRewriteHookManifest = z.infer<typeof selfRewriteHookSchema>;
 export type SkillManifest = z.infer<typeof skillManifestSchema>;
 export type AgentManifest = z.infer<typeof agentManifestSchema>;
